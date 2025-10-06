@@ -1,14 +1,13 @@
-
 import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from "react";
-
 import { useForm } from "react-hook-form";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { 
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Lock, Database 
+  Cloud, Lock, Database, LogIn
 } from "lucide-react";
+import * as db from './databaseService'
 
 // Types
 interface Feature {
@@ -103,89 +102,6 @@ const initialAzureDevOpsConfig: AzureDevOpsConfig = {
   workItemType: "Feature",
 };
 
-const initialFeatures: Feature[] = [
-  {
-    id: "1",
-    title: "Vendor Performance Scorecards",
-    description: "Visual scorecards to track and compare vendor performance metrics.",
-    votes: 14,
-    voters: [],
-    epic: "Vendor Management"
-  },
-  {
-    id: "2",
-    title: "AI-Powered Spend Analysis",
-    description: "Machine learning algorithms to identify spending patterns and cost-saving opportunities.",
-    votes: 9,
-    voters: [],
-    epic: "Analytics & Reporting"
-  },
-  {
-    id: "3",
-    title: "Interactive Dashboard Overview",
-    description: "A customizable dashboard with drag-and-drop widgets for key purchasing metrics.",
-    votes: 4,
-    voters: [],
-    epic: "User Experience"
-  },
-  {
-    id: "4",
-    title: "Real-time Purchase Order Tracking",
-    description: "Live tracking of purchase orders from creation to delivery.",
-    votes: 3,
-    voters: [],
-    epic: "Operational Efficiency"
-  },
-  {
-    id: "5",
-    title: "Integrated Approval Workflows",
-    description: "Streamlined approval processes with mobile notifications and one-click approvals.",
-    votes: 2,
-    voters: [],
-    epic: "Operational Efficiency"
-  },
-  {
-    id: "6",
-    title: "Contract Management Integration",
-    description: "Direct access to contract details and expiration alerts within the purchasing workflow.",
-    votes: 0,
-    voters: [],
-    epic: "Integration"
-  },
-  {
-    id: "7",
-    title: "Sustainability Impact Metrics",
-    description: "Track environmental impact of purchasing decisions with sustainability scores.",
-    votes: 0,
-    voters: [],
-    epic: "Sustainability"
-  },
-  {
-    id: "8",
-    title: "Budget Forecasting Tools",
-    description: "Predictive analytics for budget planning based on historical spending patterns.",
-    votes: 2,
-    voters: [],
-    epic: "Budget Management"
-  },
-  {
-    id: "9",
-    title: "Supplier Diversity Tracking",
-    description: "Monitor and report on supplier diversity metrics and goals.",
-    votes: 0,
-    voters: [],
-    epic: "Compliance & Risk"
-  },
-  {
-    id: "10",
-    title: "Mobile Procurement App",
-    description: "Complete purchasing capabilities optimized for mobile devices.",
-    votes: 3,
-    voters: [],
-    epic: "Mobile Access"
-  }
-];
-
 const initialUsers: User[] = [
   { 
     id: "u1", 
@@ -213,37 +129,6 @@ const initialUsers: User[] = [
   }
 ];
 
-const initialVoters: Record<string, VoterInfo[]> = {
-  "1": [
-    { userId: "u1", name: "John Doe", email: "john@example.com", voteCount: 5 },
-    { userId: "u2", name: "Jane Smith", email: "jane@example.com", voteCount: 4 },
-    { userId: "u3", name: "Robert Johnson", email: "robert@example.com", voteCount: 5 }
-  ],
-  "2": [
-    { userId: "u1", name: "John Doe", email: "john@example.com", voteCount: 3 },
-    { userId: "u2", name: "Jane Smith", email: "jane@example.com", voteCount: 3 },
-    { userId: "u3", name: "Robert Johnson", email: "robert@example.com", voteCount: 3 }
-  ],
-  "3": [
-    { userId: "u2", name: "Jane Smith", email: "jane@example.com", voteCount: 2 },
-    { userId: "u3", name: "Robert Johnson", email: "robert@example.com", voteCount: 2 }
-  ],
-  "4": [
-    { userId: "u1", name: "John Doe", email: "john@example.com", voteCount: 2 },
-    { userId: "u3", name: "Robert Johnson", email: "robert@example.com", voteCount: 1 }
-  ],
-  "5": [
-    { userId: "u2", name: "Jane Smith", email: "jane@example.com", voteCount: 1 },
-    { userId: "u3", name: "Robert Johnson", email: "robert@example.com", voteCount: 1 }
-  ],
-  "8": [
-    { userId: "u1", name: "John Doe", email: "john@example.com", voteCount: 2 }
-  ],
-  "10": [
-    { userId: "u3", name: "Robert Johnson", email: "robert@example.com", voteCount: 3 }
-  ]
-};
-
 // Utility functions
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -257,8 +142,10 @@ const formatDate = (dateString: string): string => {
 const getDaysRemaining = (dateString: string): number => {
   const targetDate = new Date(dateString);
   const currentDate = new Date();
+  
   targetDate.setHours(0, 0, 0, 0);
   currentDate.setHours(0, 0, 0, 0);
+  
   const diffTime = targetDate.getTime() - currentDate.getTime();
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
@@ -300,19 +187,6 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 const truncateText = (text: string, maxLength: number): string => {
   if (!text) return '';
   return text.length > maxLength ? `${text.substring(0, maxLength - 3)}...` : text;
-};
-
-// Populate features with voters - run once during initialization
-const populateInitialFeatures = (): Feature[] => {
-  return initialFeatures.map(feature => {
-    const voters = initialVoters[feature.id] || [];
-    const votes = voters.reduce((sum, voter) => sum + voter.voteCount, 0);
-    return {
-      ...feature,
-      voters,
-      votes: votes || feature.votes
-    };
-  });
 };
 
 // Randomize text for shuffle button
@@ -496,7 +370,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode;
 }
 
-function Button({
+const Button = React.memo(function Button({
   children,
   onClick,
   variant = "primary",
@@ -527,7 +401,7 @@ function Button({
       {children}
     </button>
   );
-}
+});
 
 interface ModalProps {
   isOpen: boolean;
@@ -586,7 +460,7 @@ interface EpicTagProps {
   name: string;
 }
 
-function EpicTag({ name }: EpicTagProps) {
+const EpicTag = React.memo(function EpicTag({ name }: EpicTagProps) {
   if (!name) return null;
   
   return (
@@ -595,18 +469,18 @@ function EpicTag({ name }: EpicTagProps) {
       <span className="font-medium">{truncateText(name, 30)}</span>
     </div>
   );
-}
+});
 
 interface AzureDevOpsBadgeProps {
   id: string;
   url: string;
 }
 
-function AzureDevOpsBadge({ id, url }: AzureDevOpsBadgeProps) {
+const AzureDevOpsBadge = React.memo(function AzureDevOpsBadge({ id, url }: AzureDevOpsBadgeProps) {
   if (!id) return null;
   
   return (
-    <a
+    
       href={url}
       target="_blank"
       rel="noreferrer"
@@ -617,13 +491,13 @@ function AzureDevOpsBadge({ id, url }: AzureDevOpsBadgeProps) {
       #{id}
     </a>
   );
-}
+});
 
 interface DeadlineDisplayProps {
   endDate: string;
 }
 
-function DeadlineDisplay({ endDate }: DeadlineDisplayProps) {
+const DeadlineDisplay = React.memo(function DeadlineDisplay({ endDate }: DeadlineDisplayProps) {
   const daysRemaining = getDaysRemaining(endDate);
   const deadlineColor = getDeadlineColor(daysRemaining);
   const deadlineBgColor = getDeadlineBgColor(daysRemaining);
@@ -653,17 +527,14 @@ function DeadlineDisplay({ endDate }: DeadlineDisplayProps) {
       </div>
     </div>
   );
-}
+});
 
 interface ShuffleButtonProps {
   isShuffling: boolean;
   onShuffle: () => void;
 }
 
-function ShuffleButton({ 
-  isShuffling, 
-  onShuffle 
-}: ShuffleButtonProps) {
+function ShuffleButton({ isShuffling, onShuffle }: ShuffleButtonProps) {
   const [displayText, setDisplayText] = useState('Shuffle Features');
   const intervalRef = useRef<number | null>(null);
 
@@ -712,7 +583,7 @@ interface ConfirmDialogProps {
   type?: 'delete' | 'reset';
 }
 
-function ConfirmDialog({
+const ConfirmDialog = React.memo(function ConfirmDialog({
   show,
   title,
   message,
@@ -769,7 +640,7 @@ function ConfirmDialog({
       </div>
     </div>
   );
-}
+});
 
 interface FeatureCardProps {
   feature: Feature;
@@ -780,7 +651,7 @@ interface FeatureCardProps {
   isShuffling?: boolean;
 }
 
-function FeatureCard({
+const FeatureCard = React.memo(function FeatureCard({
   feature,
   userVoteCount = 0,
   remainingVotes = 0,
@@ -856,17 +727,14 @@ function FeatureCard({
       </div>
     </div>
   );
-}
+});
 
 interface VotersListModalProps {
   feature: Feature;
   onClose: () => void;
 }
 
-function VotersListModal({ 
-  feature, 
-  onClose 
-}: VotersListModalProps) {
+function VotersListModal({ feature, onClose }: VotersListModalProps) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
@@ -908,11 +776,7 @@ interface VotingSessionFormProps {
   onCancel: () => void;
 }
 
-function VotingSessionForm({ 
-  votingSession, 
-  onSubmit, 
-  onCancel 
-}: VotingSessionFormProps) {
+function VotingSessionForm({ votingSession, onSubmit, onCancel }: VotingSessionFormProps) {
   const { register, handleSubmit, formState: { errors }, watch } = useForm({
     defaultValues: {
       title: votingSession.title,
@@ -1185,11 +1049,7 @@ interface FeatureFormProps {
   onCancel: () => void;
 }
 
-function FeatureForm({ 
-  feature, 
-  onSubmit, 
-  onCancel 
-}: FeatureFormProps) {
+function FeatureForm({ feature, onSubmit, onCancel }: FeatureFormProps) {
   const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: feature ? {
       title: feature.title,
@@ -1238,88 +1098,18 @@ function FeatureForm({
         <Button 
           variant="secondary"
           type="button" 
-          onClick={onCancel}>
+          onClick={onCancel}
+        >
           Cancel
         </Button>
         <Button 
           variant="primary"
-          type="submit">
+          type="submit"
+        >
           {feature ? 'Update' : 'Add'} Feature
         </Button>
       </div>
     </form>
-  );
-}
-
-interface LoginScreenProps {
-  onLogin: (isAdmin: boolean) => void;
-  votingSession: VotingSession;
-}
-
-function LoginScreen({ 
-  onLogin, 
-  votingSession 
-}: LoginScreenProps) {
-  const isVotingActive = votingSession.isActive;
-
-
-  
-  const votingStatus = isVotingActive 
-    ? `Voting is open until ${formatDate(votingSession.endDate)}`
-    : isPastDate(votingSession.endDate)
-      ? `Voting ended on ${formatDate(votingSession.endDate)}`
-      : `Voting begins on ${formatDate(votingSession.startDate)}`;
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-full p-6">
-      <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
-        <div className="w-full flex justify-center mb-4">
-          <ImageWithFallback
-            src="https://www.newmill.com/images/new-mill-logo.svg"
-            alt="New Mill Logo"
-            style={{ width: '70%' }}
-          />
-        </div>
-        <h1 className="text-3xl font-bold text-center mb-4 text-[#2d4660]">Feature Voting System</h1>
-        
-        <div className="mb-6 bg-blue-50 p-4 rounded-lg">
-          <h2 className="font-semibold text-xl text-[#2d4660] mb-2">{votingSession.title}</h2>
-          <p className="text-[#2d4660] mb-3">{votingSession.goal}</p>
-          
-          <div className="mt-3">
-            {isVotingActive && <DeadlineDisplay endDate={votingSession.endDate} />}
-            
-            {!isVotingActive && (
-              <div className="flex items-center text-sm text-[#2d4660] mt-2">
-                <Calendar className="h-4 w-4 mr-1" />
-                <span>{votingStatus}</span>
-              </div>
-            )}
-          </div>
-        </div>
-        
-        <div className="space-y-4">
-          <Button 
-            variant="blue"
-            onClick={() => onLogin(true)}
-            className="w-full flex justify-center"
-          >
-            <Settings className="mr-2 h-5 w-5" />
-            Login as Admin
-          </Button>
-          <Button 
-            variant="primary"
-            onClick={() => onLogin(false)}
-            disabled={!isVotingActive}
-            className="w-full flex justify-center"
-          >
-            <Vote className="mr-2 h-5 w-5" />
-            Login as User
-            {!isVotingActive && <span className="ml-2 text-xs">(Voting Closed)</span>}
-          </Button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1328,10 +1118,7 @@ interface ThankYouScreenProps {
   votingSession: VotingSession;
 }
 
-function ThankYouScreen({ 
-  onReturn, 
-  votingSession 
-}: ThankYouScreenProps) {
+function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
   return (
     <div className="flex flex-col items-center justify-center min-h-full p-6">
       <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8 text-center">
@@ -1350,7 +1137,7 @@ function ThankYouScreen({
         </p>
         
         <Button variant="primary" onClick={onReturn} className="mx-auto">
-          Return to Login
+          Return to Voting
         </Button>
       </div>
     </div>
@@ -1414,7 +1201,7 @@ function AdminScreen({
       : <span className="text-yellow-600 font-medium">Upcoming</span>;
 
   return (
-    <div className="container mx-auto p-4 max-w-6xl">
+    <div className="container mx-auto p-4 max-w-6xl h-full overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           <ImageWithFallback
@@ -1463,7 +1250,11 @@ function AdminScreen({
           
           <div>
             <h3 className="font-medium text-gray-700 mb-1">Voting Period</h3>
-            <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 border ${daysRemaining <= 2 ? 'border-red-200' : daysRemaining <= 4 ? 'border-yellow-200' : 'border-[#1E6154]/20'}`}>
+            <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 border ${
+              daysRemaining <= 2 ? 'border-red-200' : 
+              daysRemaining <= 4 ? 'border-yellow-200' : 
+              'border-[#1E6154]/20'
+            }`}>
               <div className="flex items-center mb-1">
                 <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
                 <span className="text-gray-800">
@@ -1584,7 +1375,7 @@ function AdminScreen({
           </Button>
         </div>
 
-        <div className="w-full">
+        <div className="w-full overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 table-fixed">
             <thead className="bg-gray-50">
               <tr>
@@ -1693,18 +1484,20 @@ interface VotingScreenProps {
   pendingUsedVotes: number;
   onVote: (featureId: string, increment: boolean) => void;
   onSubmitVotes: () => void;
-  onLogout: () => void;
+  onToggleAdmin: () => void;
+  isAdmin: boolean;
   votingSession: VotingSession;
 }
 
-function VotingScreen({ 
+const VotingScreen = React.memo(function VotingScreen({ 
   features, 
   currentUser, 
   pendingVotes,
   pendingUsedVotes,
   onVote,
   onSubmitVotes,
-  onLogout,
+  onToggleAdmin,
+  isAdmin,
   votingSession
 }: VotingScreenProps) {
   if (!currentUser) return null;
@@ -1753,12 +1546,21 @@ function VotingScreen({
             </span>
           </div>
           <Button 
-            variant="gray"
-            onClick={onLogout}
+            variant={isAdmin ? "gray" : "blue"}
+            onClick={onToggleAdmin}
             className="flex items-center"
           >
-            <LogOut className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Logout</span>
+            {isAdmin ? (
+              <>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span className="hidden md:inline">Logout</span>
+              </>
+            ) : (
+              <>
+                <Settings className="mr-2 h-4 w-4" />
+                <span className="hidden md:inline">Admin Login</span>
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -1858,7 +1660,7 @@ function VotingScreen({
       )}
     </div>
   );
-}
+});
 
 interface ResultsScreenProps {
   features: Feature[];
@@ -1898,7 +1700,7 @@ function ResultsScreen({
   const deadlineColor = getDeadlineColor(daysRemaining);
 
   return (
-    <div className="container mx-auto p-4 max-w-6xl">
+    <div className="container mx-auto p-4 max-w-6xl h-full overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           <button 
@@ -2054,23 +1856,15 @@ interface FeatureVotingSystemProps {
 // Main component
 function FeatureVotingSystem({ 
   defaultVotesPerUser = 10, 
-  adminMode = true 
+  adminMode = false 
 }: FeatureVotingSystemProps) {
-  // Pre-populate features with voters
-  const populatedFeatures = useMemo(() => populateInitialFeatures(), []);
-  
   // State
-  const [features, setFeatures] = useState(populatedFeatures);
+  const [features, setFeatures] = useState<Feature[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [users, setUsers] = useState(initialUsers);
-  const [currentUser, setCurrentUser] = useState({
-    id: 'admin',
-    name: 'Administrator',
-    email: 'admin@example.com',
-    totalVotes: 0,
-    usedVotes: 0,
-    votesPerFeature: {}
-  });
-  const [view, setView] = useState(adminMode ? 'admin' : 'login');
+  const [currentUser, setCurrentUser] = useState(initialUsers[0]);
+  const [view, setView] = useState<'voting' | 'admin' | 'thankyou' | 'results'>(adminMode ? 'admin' : 'voting');
+  const [isAdmin, setIsAdmin] = useState(adminMode);
   const [editingFeature, setEditingFeature] = useState<Feature | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showVotersList, setShowVotersList] = useState<string | null>(null);
@@ -2091,17 +1885,76 @@ function FeatureVotingSystem({
   const [pendingUsedVotes, setPendingUsedVotes] = useState(0);
 
   // Confirmation dialog states
-const [confirmState, setConfirmState] = useState<{
-  showDelete: boolean;
-  showReset: boolean;
-  showResetAll: boolean;
-  targetId: string | null;
-}>({
-  showDelete: false,
-  showReset: false,
-  showResetAll: false,
-  targetId: null
-});
+  const [confirmState, setConfirmState] = useState<{
+    showDelete: boolean;
+    showReset: boolean;
+    showResetAll: boolean;
+    targetId: string | null;
+  }>({
+    showDelete: false,
+    showReset: false,
+    showResetAll: false,
+    targetId: null
+  });
+
+  // Load data from Supabase on mount
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setIsLoading(true);
+        
+        // Load features
+        const featuresData = await db.getFeatures();
+        
+        // Load votes
+        const votesData = await db.getVotes();
+        
+        // Combine features with their votes
+        const featuresWithVotes = featuresData.map(feature => {
+          const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+          const voters = featureVotes.map(v => ({
+            userId: v.user_id,
+            name: v.user_name,
+            email: v.user_email,
+            voteCount: v.vote_count
+          }));
+          const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+          
+          return {
+            id: feature.id,
+            title: feature.title,
+            description: feature.description,
+            epic: feature.epic,
+            azureDevOpsId: feature.azure_devops_id,
+            azureDevOpsUrl: feature.azure_devops_url,
+            votes: totalVotes,
+            voters
+          };
+        });
+        
+        setFeatures(featuresWithVotes);
+        
+        // Load voting session
+        const session = await db.getActiveVotingSession();
+        if (session) {
+          setVotingSession({
+            title: session.title,
+            goal: session.goal,
+            votesPerUser: session.votes_per_user,
+            startDate: session.start_date,
+            endDate: session.end_date,
+            isActive: session.is_active
+          });
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    loadData();
+  }, []);
 
   // Update voting session status periodically
   useEffect(() => {
@@ -2179,49 +2032,57 @@ const [confirmState, setConfirmState] = useState<{
     }
   }, [azureDevOpsConfig]);
 
-  // Login/Logout handlers
-  const handleLogin = useCallback((isAdmin: boolean) => {
+  // Toggle between admin and regular user views
+  const handleToggleAdmin = useCallback(() => {
     if (isAdmin) {
-      setView('admin');
-    } else {
-      setCurrentUser(users[0]);
-      setPendingVotes({});
-      setPendingUsedVotes(0);
+      // Logout from admin
+      setIsAdmin(false);
       setView('voting');
+    } else {
+      // Login as admin
+      setIsAdmin(true);
+      setView('admin');
     }
-  }, [users]);
-
-  const handleLogout = useCallback(() => {
-    setCurrentUser({
-      id: 'admin',
-      name: 'Administrator',
-      email: 'admin@example.com',
-      totalVotes: 0,
-      usedVotes: 0,
-      votesPerFeature: {}
-    });
-    setPendingVotes({});
-    setPendingUsedVotes(0);
-    setView('login');
-  }, []);
+  }, [isAdmin]);
 
   // Feature management handlers
-  const handleAddFeature = useCallback((feature: any) => {
-    const newFeature = {
-      id: Date.now().toString(),
-      title: feature.title,
-      description: feature.description,
-      epic: feature.epic,
-      votes: 0,
-      voters: []
-    };
-    setFeatures(prev => [...prev, newFeature]);
-    setShowAddForm(false);
+  const handleAddFeature = useCallback(async (feature: any) => {
+    try {
+      const newFeature = await db.createFeature({
+        title: feature.title,
+        description: feature.description,
+        epic: feature.epic
+      });
+      
+      setFeatures(prev => [...prev, {
+        id: newFeature.id,
+        title: newFeature.title,
+        description: newFeature.description,
+        epic: newFeature.epic,
+        votes: 0,
+        voters: []
+      }]);
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Error adding feature:', error);
+      alert('Failed to add feature');
+    }
   }, []);
 
-  const handleUpdateFeature = useCallback((updatedFeature: Feature) => {
-    setFeatures(prev => prev.map(f => f.id === updatedFeature.id ? updatedFeature : f));
-    setEditingFeature(null);
+  const handleUpdateFeature = useCallback(async (updatedFeature: Feature) => {
+    try {
+      await db.updateFeature(updatedFeature.id, {
+        title: updatedFeature.title,
+        description: updatedFeature.description,
+        epic: updatedFeature.epic
+      });
+      
+      setFeatures(prev => prev.map(f => f.id === updatedFeature.id ? updatedFeature : f));
+      setEditingFeature(null);
+    } catch (error) {
+      console.error('Error updating feature:', error);
+      alert('Failed to update feature');
+    }
   }, []);
 
   const initiateDeleteFeature = useCallback((id: string) => {
@@ -2233,10 +2094,16 @@ const [confirmState, setConfirmState] = useState<{
     });
   }, []);
 
-  const handleDeleteFeature = useCallback(() => {
+  const handleDeleteFeature = useCallback(async () => {
     const id = confirmState.targetId;
     if (id) {
-      setFeatures(prev => prev.filter(f => f.id !== id));
+      try {
+        await db.deleteFeature(id);
+        setFeatures(prev => prev.filter(f => f.id !== id));
+      } catch (error) {
+        console.error('Error deleting feature:', error);
+        alert('Failed to delete feature');
+      }
     }
   }, [confirmState.targetId]);
 
@@ -2250,28 +2117,44 @@ const [confirmState, setConfirmState] = useState<{
     });
   }, []);
 
-  const handleResetVotes = useCallback(() => {
+  const handleResetVotes = useCallback(async () => {
     const id = confirmState.targetId;
     if (!id) return;
     
-    // Update feature
-    setFeatures(prev => prev.map(feature => 
-      feature.id === id ? { ...feature, votes: 0, voters: [] } : feature
-    ));
-    
-    // Update users
-    setUsers(prev => prev.map(user => {
-      if (user.votesPerFeature[id]) {
-        const newVotesPerFeature = { ...user.votesPerFeature };
-        delete newVotesPerFeature[id];
+    try {
+      await db.deleteVotesForFeature(id);
+      
+      // Reload data
+      const featuresData = await db.getFeatures();
+      const votesData = await db.getVotes();
+      
+      const featuresWithVotes = featuresData.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+        
         return {
-          ...user,
-          usedVotes: user.usedVotes - (user.votesPerFeature[id] || 0),
-          votesPerFeature: newVotesPerFeature
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
         };
-      }
-      return user;
-    }));
+      });
+      
+      setFeatures(featuresWithVotes);
+    } catch (error) {
+      console.error('Error resetting votes:', error);
+      alert('Failed to reset votes');
+    }
   }, [confirmState.targetId]);
 
   const initiateResetAllVotes = useCallback(() => {
@@ -2283,13 +2166,18 @@ const [confirmState, setConfirmState] = useState<{
     });
   }, []);
 
-  const handleResetAllVotes = useCallback(() => {
-    setFeatures(prev => prev.map(feature => ({ ...feature, votes: 0, voters: [] })));
-    setUsers(prev => prev.map(user => ({ ...user, usedVotes: 0, votesPerFeature: {} })));
+  const handleResetAllVotes = useCallback(async () => {
+    try {
+      await db.deleteAllVotes();
+      setFeatures(prev => prev.map(feature => ({ ...feature, votes: 0, voters: [] })));
+    } catch (error) {
+      console.error('Error resetting all votes:', error);
+      alert('Failed to reset all votes');
+    }
   }, []);
 
   const handlePendingVote = useCallback((featureId: string, increment: boolean) => {
-    if (!currentUser || currentUser.id === 'admin' || !votingSession.isActive) return;
+    if (!currentUser || !votingSession.isActive) return;
     
     const currentVoteCount = pendingVotes[featureId] || 0;
     let newVoteCount = currentVoteCount;
@@ -2321,57 +2209,56 @@ const [confirmState, setConfirmState] = useState<{
     setPendingUsedVotes(prev => increment ? prev + 1 : prev - 1);
   }, [currentUser, pendingVotes, pendingUsedVotes, votingSession.isActive, votingSession.votesPerUser]);
 
-  const handleSubmitVotes = useCallback(() => {
-    if (!currentUser || currentUser.id === 'admin' || !votingSession.isActive) return;
+  const handleSubmitVotes = useCallback(async () => {
+    if (!currentUser || !votingSession.isActive) return;
     if (pendingUsedVotes < votingSession.votesPerUser) return;
     
-    // Update features with new votes
-    setFeatures(prevFeatures => {
-      return prevFeatures.map(feature => {
-        const pendingVoteCount = pendingVotes[feature.id] || 0;
-        
-        if (pendingVoteCount > 0) {
-          const updatedVoters = [...feature.voters];
-          const existingVoterIndex = updatedVoters.findIndex(v => v.userId === currentUser.id);
-          
-          if (existingVoterIndex >= 0) {
-            updatedVoters[existingVoterIndex] = {
-              ...updatedVoters[existingVoterIndex],
-              voteCount: pendingVoteCount
-            };
-          } else {
-            updatedVoters.push({
-              userId: currentUser.id,
-              name: currentUser.name,
-              email: currentUser.email,
-              voteCount: pendingVoteCount
-            });
-          }
-          
-          const totalVotes = updatedVoters.reduce((sum, voter) => sum + voter.voteCount, 0);
-          
-          return {
-            ...feature,
-            votes: totalVotes,
-            voters: updatedVoters
-          };
+    try {
+      // Save all votes to database
+      for (const [featureId, voteCount] of Object.entries(pendingVotes)) {
+        if (voteCount > 0) {
+          await db.saveVote({
+            feature_id: featureId,
+            user_id: currentUser.id,
+            user_name: currentUser.name,
+            user_email: currentUser.email,
+            vote_count: voteCount
+          });
         }
+      }
+      
+      // Reload features to get updated vote counts
+      const featuresData = await db.getFeatures();
+      const votesData = await db.getVotes();
+      
+      const featuresWithVotes = featuresData.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
         
-        return feature;
+        return {
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
+        };
       });
-    });
-    
-    // Update users list
-    setUsers(prev => {
-      return prev.map(u => 
-        u.id === currentUser.id 
-          ? {...u, usedVotes: pendingUsedVotes, votesPerFeature: {...pendingVotes}} 
-          : u
-      );
-    });
-    
-    // Show thank you screen
-    setView('thankyou');
+      
+      setFeatures(featuresWithVotes);
+      setView('thankyou');
+    } catch (error) {
+      console.error('Error submitting votes:', error);
+      alert('Failed to submit votes. Please try again.');
+    }
   }, [currentUser, pendingUsedVotes, pendingVotes, votingSession.isActive, votingSession.votesPerUser]);
 
   // Session settings handlers
@@ -2384,11 +2271,28 @@ const [confirmState, setConfirmState] = useState<{
     setAzureDevOpsConfig(config);
   }, []);
 
+  // Return to voting screen after thank you
+  const handleReturnToVoting = useCallback(() => {
+    setPendingVotes({});
+    setPendingUsedVotes(0);
+    setView('voting');
+  }, []);
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-full w-full bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Render content based on current view
-  const renderContent = () => {
+  const renderContent = useMemo(() => {
     switch (view) {
-      case 'login':
-        return <LoginScreen onLogin={handleLogin} votingSession={votingSession} />;
       case 'voting':
         return (
           <VotingScreen 
@@ -2398,7 +2302,8 @@ const [confirmState, setConfirmState] = useState<{
             pendingUsedVotes={pendingUsedVotes}
             onVote={handlePendingVote}
             onSubmitVotes={handleSubmitVotes}
-            onLogout={handleLogout}
+            onToggleAdmin={handleToggleAdmin}
+            isAdmin={isAdmin}
             votingSession={votingSession}
           />
         );
@@ -2417,11 +2322,7 @@ const [confirmState, setConfirmState] = useState<{
       case 'thankyou':
         return (
           <ThankYouScreen
-            onReturn={() => {
-              setPendingVotes({});
-              setPendingUsedVotes(0);
-              setView('login');
-            }}
+            onReturn={handleReturnToVoting}
             votingSession={votingSession}
           />
         );
@@ -2438,7 +2339,7 @@ const [confirmState, setConfirmState] = useState<{
             setShowAddForm={setShowAddForm}
             editingFeature={editingFeature}
             setEditingFeature={setEditingFeature}
-            onLogout={handleLogout}
+            onLogout={handleToggleAdmin}
             votingSession={votingSession}
             onUpdateVotingSession={handleUpdateVotingSession}
             showSessionForm={showSessionForm}
@@ -2453,11 +2354,21 @@ const [confirmState, setConfirmState] = useState<{
           />
         );
     }
-  };
+  }, [
+    view, features, currentUser, pendingVotes, pendingUsedVotes, 
+    handlePendingVote, handleSubmitVotes, handleToggleAdmin, isAdmin, 
+    votingSession, initiateResetVotes, initiateResetAllVotes, showVotersList,
+    setShowVotersList, handleReturnToVoting, handleAddFeature, handleUpdateFeature,
+    initiateDeleteFeature, showAddForm, setShowAddForm, editingFeature,
+    setEditingFeature, handleUpdateVotingSession, showSessionForm, setShowSessionForm,
+    azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
+    setShowAzureDevOpsForm, handleFetchAzureDevOpsFeatures, isFetchingAzureDevOps,
+    azureFetchError
+  ]);
 
   return (
     <div className="min-h-full w-full bg-gray-50 text-gray-900 font-sans">
-      {renderContent()}
+      {renderContent}
       
       {/* Confirmation Dialogs */}
       <ConfirmDialog 
@@ -2494,4 +2405,3 @@ const [confirmState, setConfirmState] = useState<{
 }
 
 export default FeatureVotingSystem;
-

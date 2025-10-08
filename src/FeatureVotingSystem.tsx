@@ -481,7 +481,7 @@ const AzureDevOpsBadge = React.memo(function AzureDevOpsBadge({ id, url }: Azure
   
   return (
     
-      href={url}
+      <a href={url}
       target="_blank"
       rel="noreferrer"
       className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer"

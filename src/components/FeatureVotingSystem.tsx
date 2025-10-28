@@ -11,7 +11,7 @@ import {
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database
+  Cloud, Database, Search
 } from "lucide-react";
 
 // Import services
@@ -165,6 +165,22 @@ const truncateText = (text: string, maxLength: number): string => {
   return text.length > maxLength ? `${text.substring(0, maxLength - 3)}...` : text;
 };
 
+const stripHtmlTags = (html: string): string => {
+  if (!html) return '';
+  
+  // Create a temporary div element to parse HTML
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  
+  // Get text content and clean up whitespace
+  let text = tmp.textContent || tmp.innerText || '';
+  
+  // Replace multiple spaces/newlines with single space
+  text = text.replace(/\s+/g, ' ').trim();
+  
+  return text;
+};
+
 const randomizeText = (text: string): string => {
   const arr = text.split('');
   for (let i = 0; i < 3; i++) {
@@ -232,7 +248,7 @@ const Button = React.memo(function Button({
   const baseClasses = "py-2 px-4 rounded-lg flex items-center transition-colors cursor-pointer";
   
   const variantClasses = {
-    primary: "bg-[#4f6d8e] text-white hover:bg-[#bea263]",
+    primary: "bg-[#4f6d8e] text-white hover:bg-[#3d5670]",
     secondary: "border border-gray-300 text-gray-700 hover:bg-gray-50",
     danger: "bg-red-600 text-white hover:bg-red-700",
     gold: "bg-[#c59f2d] text-white hover:bg-[#a88a26]",
@@ -612,6 +628,248 @@ function VotersListModal({ feature, onClose }: VotersListModalProps) {
   );
 }
 
+interface ResultsScreenProps {
+  features: Feature[];
+  onResetVotes: (id: string) => void;
+  onResetAllVotes: () => void;
+  onBack: () => void;
+  showVotersList: string | null;
+  setShowVotersList: (id: string | null) => void;
+  votingSession: VotingSession;
+}
+
+function ResultsScreen({ 
+  features, 
+  onResetVotes,
+  onResetAllVotes,
+  onBack,
+  showVotersList,
+  setShowVotersList,
+  votingSession
+}: ResultsScreenProps) {
+  const sortedFeatures = useMemo(() => {
+    return [...features].sort((a, b) => b.votes - a.votes);
+  }, [features]);
+  
+  const chartData = useMemo(() => {
+    return sortedFeatures.slice(0, 10).map(feature => ({
+      name: feature.title,
+      votes: feature.votes,
+      id: feature.id
+    }));
+  }, [sortedFeatures]);
+
+  const daysRemaining = getDaysRemaining(votingSession.endDate);
+  const deadlineColor = getDeadlineColor(daysRemaining);
+
+  return (
+    <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
+      {/* Desktop: Centered logo at top */}
+      <div className="hidden md:flex md:justify-center mb-2">
+        <img
+          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          alt="New Millennium Building Systems Logo"
+          className="-mt-8"
+          style={{ height: '96px', width: 'auto' }}
+        />
+      </div>
+      
+      {/* Title with back button and reset button in same row */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center">
+          {/* Mobile: small logo next to back button and title */}
+          <ImageWithFallback
+            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            alt="New Millennium Building Systems Logo"
+            className="mr-4 md:hidden"
+            style={{ width: '40px', height: '40px' }}
+          />
+          <button 
+            onClick={onBack}
+            className="mr-2 p-1 rounded-full hover:bg-gray-200 cursor-pointer"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Voting Results</h1>
+        </div>
+        <div className="flex space-x-2">
+          <Button 
+            variant="primary"
+            onClick={onBack}
+            className="flex items-center"
+          >
+            <Settings className="mr-2 h-4 w-4" />
+            Admin Dashboard
+          </Button>
+          <Button 
+            variant="danger"
+            onClick={onResetAllVotes}
+          >
+            Reset All Votes
+          </Button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-[#2d4660]">{votingSession.title}</h2>
+          <div className="text-sm text-gray-600">
+            <span className="mr-2">Votes per user: {votingSession.votesPerUser}</span>
+            {votingSession.isActive ? (
+              <span className="text-[#1E6154] font-medium">Voting Active</span>
+            ) : isPastDate(votingSession.endDate) ? (
+              <span className="text-red-600 font-medium">Voting Closed</span>
+            ) : (
+              <span className="text-yellow-600 font-medium">Voting Upcoming</span>
+            )}
+          </div>
+        </div>
+        
+        <p className="text-gray-600 mb-4">{votingSession.goal}</p>
+        
+        {votingSession.isActive && (
+          <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 mb-4 inline-block border ${daysRemaining <= 2 ? 'border-red-200' : daysRemaining <= 4 ? 'border-yellow-200' : 'border-[#1E6154]/20'}`}>
+            <div className="flex items-center">
+              <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
+              <span className={`${deadlineColor} font-medium`}>
+                {daysRemaining <= 0 
+                  ? "Voting ends today!" 
+                  : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining until ${formatDate(votingSession.endDate)}`
+                }
+              </span>
+            </div>
+          </div>
+        )}
+        
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={chartData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            >
+              <XAxis 
+                dataKey="name" 
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                tick={{ fontSize: 12 }}
+              />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="votes" fill="#3B82F6">
+                {chartData.map((_entry, index) => (
+                  <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#2d4660' : '#4f6d8e'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-md p-4">
+        <h2 className="text-xl font-semibold mb-4 text-[#2d4660]">Feature Details</h2>
+        <div className="w-full overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 table-fixed">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="w-12 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
+                <th scope="col" className="w-1/2 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                <th scope="col" className="hidden sm:table-cell w-1/4 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
+                <th scope="col" className="w-14 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
+                <th scope="col" className="hidden md:table-cell w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Voters</th>
+                <th scope="col" className="w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {sortedFeatures.map((feature, index) => (
+                <tr key={feature.id} className="align-top group">
+                  <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">{index + 1}</td>
+                  <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium">
+                    {feature.title}
+                    {feature.azureDevOpsId && (
+                      <div className="mt-1">
+                        <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
+                      </div>
+                    )}
+                  </td>
+                  <td className="hidden sm:table-cell px-4 py-4 whitespace-nowrap text-sm">
+                    {feature.epic && <EpicTag name={feature.epic} />}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm">{feature.votes}</td>
+                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
+                    <button
+                      onClick={() => setShowVotersList(feature.id)}
+                      className="text-[#2d4660] hover:text-[#bea263] flex items-center cursor-pointer"
+                      disabled={feature.voters.length === 0}
+                    >
+                      <Users className="h-4 w-4 mr-1" />
+                      {feature.voters.length} {feature.voters.length === 1 ? 'user' : 'users'}
+                    </button>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => onResetVotes(feature.id)}
+                      className="text-red-600 hover:text-red-900 cursor-pointer"
+                      disabled={feature.votes === 0}
+                    >
+                      Reset Votes
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showVotersList && (
+        <VotersListModal
+          feature={features.find(f => f.id === showVotersList) as Feature}
+          onClose={() => setShowVotersList(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface ThankYouScreenProps {
+  onReturn: () => void;
+  votingSession: VotingSession;
+}
+
+function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen p-6">
+      <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8 text-center">
+        <img
+          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          alt="New Millennium Building Systems Logo"
+          className="mx-auto mb-6"
+          style={{ maxWidth: '200px', height: 'auto' }}
+        />
+        
+        <div className="w-20 h-20 bg-[#1E6154]/10 rounded-full flex items-center justify-center mx-auto mb-6">
+          <CheckCircle className="h-12 w-12 text-[#1E6154]" />
+        </div>
+        
+        <h1 className="text-3xl font-bold text-[#1E6154] mb-4">Thank You!</h1>
+        
+        <p className="text-gray-700 text-lg mb-6">
+          Your votes for <span className="font-semibold">{votingSession.title}</span> have been submitted successfully.
+        </p>
+        
+        <p className="text-gray-600 mb-8">
+          We appreciate your input in helping prioritize features for our Purchasing Dashboard redesign.
+        </p>
+        
+        <Button variant="primary" onClick={onReturn} className="mx-auto">
+          Return to Voting
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ============================================
 // FORM COMPONENTS
 // ============================================
@@ -744,6 +1002,9 @@ interface AzureDevOpsFormProps {
   isFetching: boolean;
   error: string | null;
   onInitiateOAuth: () => void;
+  availableStates: string[];
+  availableAreaPaths: string[];
+  availableTags: string[];
 }
 
 function AzureDevOpsForm({
@@ -753,26 +1014,74 @@ function AzureDevOpsForm({
   onCancel,
   isFetching,
   error,
-  onInitiateOAuth
+  onInitiateOAuth,
+  availableStates,
+  availableAreaPaths,
+  availableTags
 }: AzureDevOpsFormProps) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: {
       organization: config.organization || 'newmill',
       project: config.project || 'Product',
       workItemType: config.workItemType || 'Feature',
-      query: config.query || ''
+      quickFilter: config.query ? 'custom' : 'all',
+      query: config.query || '',
+      states: config.states || [],
+      areaPath: config.areaPath || '',
+      tags: config.tags || []
     }
   });
   
   const isAuthenticated = config.accessToken && config.enabled;
   
   const onFormSubmit = async (data: any) => {
+    // Build query based on filters
+    let finalQuery = undefined;
+    const queryParts: string[] = [];
+    
+    // Add state filter if selected
+    if (data.states && data.states.length > 0) {
+      if (data.states.length === 1) {
+        queryParts.push(`[System.State] = '${data.states[0]}'`);
+      } else {
+        const statesList = data.states.map((s: string) => `'${s}'`).join(', ');
+        queryParts.push(`[System.State] IN (${statesList})`);
+      }
+    }
+    
+    // Add Area Path filter if selected
+    if (data.areaPath) {
+      queryParts.push(`[System.AreaPath] UNDER '${data.areaPath}'`);
+    }
+    
+    // Add Tags filter if selected
+    if (data.tags && data.tags.length > 0) {
+      const tagFilters = data.tags.map((tag: string) => 
+        `[System.Tags] CONTAINS '${tag}'`
+      );
+      queryParts.push(`(${tagFilters.join(' OR ')})`);
+    }
+    
+    // Add custom advanced query if in advanced mode
+    if (showAdvanced && data.query) {
+      queryParts.push(`(${data.query})`);
+    }
+    
+    // Combine all query parts
+    if (queryParts.length > 0) {
+      finalQuery = queryParts.join(' AND ');
+    }
+    
     const updatedConfig = {
       ...config,
       organization: data.organization,
       project: data.project,
       workItemType: data.workItemType,
-      query: data.query || undefined,
+      query: finalQuery,
+      states: data.states && data.states.length > 0 ? data.states : undefined,
+      areaPath: data.areaPath || undefined,
+      tags: data.tags && data.tags.length > 0 ? data.tags : undefined
     };
     
     // Always save the config first so org/project are persisted
@@ -844,16 +1153,121 @@ function AzureDevOpsForm({
           {errors.workItemType && <p className="mt-1 text-sm text-red-600">{errors.workItemType.message}</p>}
         </div>
         
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Custom Query (Optional)
-          </label>
-          <input
-            {...register('query')}
-            placeholder="e.g., [System.State] = 'Active'"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          <p className="mt-1 text-xs text-gray-500">WIQL syntax for filtering work items</p>
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Filters
+            </label>
+            <button 
+              type="button" 
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              {showAdvanced ? '← Hide Advanced' : 'Show Advanced WIQL →'}
+            </button>
+          </div>
+          
+          {/* State, Area Path, and Tags filters - only show when authenticated */}
+          {isAuthenticated && (availableStates.length > 0 || availableAreaPaths.length > 0 || availableTags.length > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+              {/* State Filter */}
+              {availableStates.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    State (Optional)
+                  </label>
+                  <select
+                    {...register('states')}
+                    multiple
+                    size={4}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white"
+                  >
+                    {availableStates.map(state => (
+                      <option key={state} value={state}>{state}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Hold Ctrl/Cmd for multiple
+                  </p>
+                </div>
+              )}
+              
+              {/* Area Path Filter */}
+              {availableAreaPaths.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Area Path (Optional)
+                  </label>
+                  <select
+                    {...register('areaPath')}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white"
+                  >
+                    <option value="">All areas</option>
+                    {availableAreaPaths.map(path => (
+                      <option key={path} value={path}>{path}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Includes sub-areas
+                  </p>
+                </div>
+              )}
+              
+              {/* Tags Filter */}
+              {availableTags.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Tags (Optional)
+                  </label>
+                  <select
+                    {...register('tags')}
+                    multiple
+                    size={4}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white"
+                  >
+                    {availableTags.map(tag => (
+                      <option key={tag} value={tag}>{tag}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Hold Ctrl/Cmd for multiple
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Advanced WIQL input */}
+          {showAdvanced && (
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Advanced WIQL Query (Optional)
+              </label>
+              <input
+                {...register('query')}
+                placeholder="e.g., [System.Priority] = 1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Will be combined with above filters using AND.{' '}
+                <a 
+                  href="https://learn.microsoft.com/en-us/azure/devops/boards/queries/wiql-syntax" 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  WIQL syntax reference ↗
+                </a>
+              </p>
+            </div>
+          )}
+          
+          {/* Message when not authenticated */}
+          {!isAuthenticated && (
+            <div className="bg-gray-50 rounded-md p-3 text-sm text-gray-600 border border-gray-200">
+              Filter options will appear after connecting to Azure DevOps
+            </div>
+          )}
         </div>
       </div>
       
@@ -958,46 +1372,988 @@ function FeatureForm({ feature, onSubmit, onCancel }: FeatureFormProps) {
   );
 }
 
-interface ThankYouScreenProps {
-  onReturn: () => void;
-  votingSession: VotingSession;
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
+interface FeatureVotingSystemProps {
+  defaultVotesPerUser?: number;
+  adminMode?: boolean;
 }
 
-function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6">
-      <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8 text-center">
-        <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
-          alt="New Millennium Building Systems Logo"
-          className="mx-auto mb-6"
-          style={{ maxWidth: '200px', height: 'auto' }}
-        />
+function FeatureVotingSystem({ 
+  defaultVotesPerUser = 10, 
+  adminMode = false 
+}: FeatureVotingSystemProps) {
+  
+  const isOAuthCallback = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.has('code') || urlParams.has('error');
+  }, []);
+  
+  const [features, setFeatures] = useState<Feature[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [users, setUsers] = useState(initialUsers);
+  const [currentUser, setCurrentUser] = useState(initialUsers[0]);
+  const [view, setView] = useState<'voting' | 'admin' | 'thankyou' | 'results'>(
+    adminMode || isOAuthCallback ? 'admin' : 'voting'
+  );
+  const [isAdmin, setIsAdmin] = useState(adminMode || isOAuthCallback);
+  const [editingFeature, setEditingFeature] = useState<Feature | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showVotersList, setShowVotersList] = useState<string | null>(null);
+  const [showSessionForm, setShowSessionForm] = useState(false);
+  const [showAzureDevOpsForm, setShowAzureDevOpsForm] = useState(false);
+  const [votingSession, setVotingSession] = useState({
+    ...initialVotingSession,
+    votesPerUser: defaultVotesPerUser
+  });
+  
+  const [azureDevOpsConfig, setAzureDevOpsConfig] = useState(initialAzureDevOpsConfig);
+  const [availableStates, setAvailableStates] = useState<string[]>([]);
+  const [availableAreaPaths, setAvailableAreaPaths] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [isFetchingAzureDevOps, setIsFetchingAzureDevOps] = useState(false);
+  const [azureFetchError, setAzureFetchError] = useState<string | null>(null);
+  const [previewFeatures, setPreviewFeatures] = useState<Feature[] | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [hasImportedFeatures, setHasImportedFeatures] = useState(false);
+  
+  const [pendingVotes, setPendingVotes] = useState<Record<string, number>>({});
+  const [pendingUsedVotes, setPendingUsedVotes] = useState(0);
+
+  const [confirmState, setConfirmState] = useState<{
+    showReset: boolean;
+    showResetAll: boolean;
+    targetId: string | null;
+  }>({
+    showReset: false,
+    showResetAll: false,
+    targetId: null
+  });
+
+  const hasProcessedCallback = useRef(false);
+
+  useEffect(() => {
+    const handleCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hasOAuthParams = urlParams.has('code') || urlParams.has('error');
+      
+      // Check if we were in the middle of auth
+      const authInProgress = localStorage.getItem('azureDevOpsAuthInProgress');
+      if (authInProgress) {
+        localStorage.removeItem('azureDevOpsAuthInProgress');
+      }
+      
+      if (!hasOAuthParams || hasProcessedCallback.current) {
+        return;
+      }
+      
+      hasProcessedCallback.current = true;
+      
+      try {
+        const tokens = await azureService.handleOAuthCallback();
         
-        <div className="w-20 h-20 bg-[#1E6154]/10 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle className="h-12 w-12 text-[#1E6154]" />
+        if (tokens) {
+          const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+          
+          const updatedConfig = {
+            ...azureDevOpsConfig,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            tokenExpiresAt: expiresAt,
+            enabled: true,
+            clientId: azureService.AZURE_AD_CONFIG.clientId,
+            tenantId: azureService.AZURE_AD_CONFIG.tenantId
+          };
+          
+          await db.saveAzureDevOpsConfig(updatedConfig);
+          setAzureDevOpsConfig(updatedConfig);
+          
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
+          
+        }
+      } catch (error) {
+        console.error('OAuth callback error:', error);
+        setAzureFetchError('Failed to authenticate with Azure DevOps');
+        
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname
+        );
+      }
+    };
+    
+    handleCallback();
+  }, []);
+
+  const handleInitiateOAuth = useCallback(() => {
+    // Store a flag that we're authenticating
+    localStorage.setItem('azureDevOpsAuthInProgress', 'true');
+    azureService.initiateOAuthFlow();
+  }, []);
+
+  const ensureValidToken = useCallback(async (config: AzureDevOpsConfig): Promise<string> => {
+    if (!config.accessToken || !config.refreshToken || !config.tokenExpiresAt) {
+      throw new Error('Not authenticated');
+    }
+    
+    if (azureService.isTokenExpired(config.tokenExpiresAt)) {
+      const tokens = await azureService.refreshAccessToken(config.refreshToken);
+      const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+      
+      const updatedConfig = {
+        ...config,
+        accessToken: tokens.accessToken,
+        tokenExpiresAt: expiresAt
+      };
+      
+      await db.saveAzureDevOpsConfig(updatedConfig);
+      setAzureDevOpsConfig(updatedConfig);
+      
+      return tokens.accessToken;
+    }
+    
+    return config.accessToken;
+  }, []);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        console.log('Loading data from Supabase...');
+        setIsLoading(true);
+        
+        const featuresData = await db.getFeatures();
+        console.log(`Loaded ${featuresData.length} features from database`);
+        const votesData = await db.getVotes();
+        
+        const featuresWithVotes = featuresData.map(feature => {
+          const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+          const voters = featureVotes.map(v => ({
+            userId: v.user_id,
+            name: v.user_name,
+            email: v.user_email,
+            voteCount: v.vote_count
+          }));
+          const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+          
+          return {
+            id: feature.id,
+            title: feature.title,
+            description: feature.description,
+            epic: feature.epic,
+            state: feature.state,
+            areaPath: feature.area_path,
+            tags: feature.tags || [],
+            azureDevOpsId: feature.azure_devops_id,
+            azureDevOpsUrl: feature.azure_devops_url,
+            votes: totalVotes,
+            voters
+          };
+        });
+        
+        setFeatures(featuresWithVotes);
+        console.log(`Features with votes loaded:`, featuresWithVotes.map(f => f.title));
+        
+        const session = await db.getActiveVotingSession();
+        if (session) {
+          setVotingSession({
+            title: session.title,
+            goal: session.goal,
+            votesPerUser: session.votes_per_user,
+            startDate: session.start_date,
+            endDate: session.end_date,
+            isActive: session.is_active
+          });
+        } else {
+          // Create initial voting session if none exists
+          const newSession = {
+            ...initialVotingSession,
+            votesPerUser: defaultVotesPerUser
+          };
+          
+          try {
+            await db.createVotingSession({
+              title: newSession.title,
+              goal: newSession.goal,
+              votes_per_user: newSession.votesPerUser,
+              start_date: newSession.startDate,
+              end_date: newSession.endDate,
+              is_active: newSession.isActive
+            });
+            
+            setVotingSession(newSession);
+          } catch (error) {
+            console.error('Error creating initial voting session:', error);
+            // Fall back to in-memory session if database create fails
+            setVotingSession(newSession);
+          }
+        }
+        
+        const azureConfig = await db.getAzureDevOpsConfig();
+        if (azureConfig) {
+          setAzureDevOpsConfig({
+            organization: azureConfig.organization || 'newmill',
+            project: azureConfig.project || 'Product',
+            accessToken: azureConfig.access_token,
+            refreshToken: azureConfig.refresh_token,
+            tokenExpiresAt: azureConfig.token_expires_at,
+            tenantId: azureConfig.tenant_id,
+            clientId: azureConfig.client_id,
+            enabled: azureConfig.enabled,
+            workItemType: azureConfig.work_item_type || 'Feature',
+            query: azureConfig.query,
+            lastSyncTime: azureConfig.last_sync_time
+          });
+        } else {
+          setAzureDevOpsConfig({
+            organization: 'newmill',
+            project: 'Product',
+            enabled: false,
+            workItemType: 'Feature'
+          });
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+        setFeatures([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    async function loadFilterOptions() {
+      if (azureDevOpsConfig.enabled && azureDevOpsConfig.accessToken) {
+        try {
+          const validToken = await ensureValidToken(azureDevOpsConfig);
+          const configWithValidToken = {
+            ...azureDevOpsConfig,
+            accessToken: validToken
+          };
+
+          // Fetch states, area paths, and tags in parallel
+          const [states, areaPaths, tags] = await Promise.all([
+            azureService.fetchStates(configWithValidToken),
+            azureService.fetchAreaPaths(configWithValidToken),
+            azureService.fetchTags(configWithValidToken)
+          ]);
+
+          setAvailableStates(states);
+          setAvailableAreaPaths(areaPaths);
+          setAvailableTags(tags);
+        } catch (error) {
+          console.error('Error loading filter options:', error);
+          // Silently fail - filters will just be empty
+        }
+      } else {
+        // Clear filters when disconnected
+        setAvailableStates([]);
+        setAvailableAreaPaths([]);
+        setAvailableTags([]);
+      }
+    }
+
+    loadFilterOptions();
+  }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, azureDevOpsConfig.workItemType]);
+
+  useEffect(() => {
+    const checkVotingStatus = async () => {
+      const isInVotingPeriod = isDateInRange(votingSession.startDate, votingSession.endDate);
+      if (votingSession.isActive !== isInVotingPeriod) {
+        const updatedSession = {
+          ...votingSession,
+          isActive: isInVotingPeriod
+        };
+        
+        setVotingSession(updatedSession);
+        
+        // Update database with new active status
+        try {
+          await db.updateVotingSession({
+            title: updatedSession.title,
+            goal: updatedSession.goal,
+            votes_per_user: updatedSession.votesPerUser,
+            start_date: updatedSession.startDate,
+            end_date: updatedSession.endDate,
+            is_active: updatedSession.isActive
+          });
+        } catch (error) {
+          console.error('Error updating voting session status:', error);
+        }
+      }
+    };
+    
+    checkVotingStatus();
+    const intervalId = setInterval(checkVotingStatus, 600000);
+    return () => clearInterval(intervalId);
+  }, [votingSession]);
+
+  useEffect(() => {
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.width = '';
+  }, [view]);
+
+  useEffect(() => {
+    document.body.style.overflow = '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
+  const handleFetchAzureDevOpsFeatures = useCallback(async (config = azureDevOpsConfig) => {
+    if (!config.organization || !config.project) {
+      setAzureFetchError("Organization and project name are required");
+      return;
+    }
+    
+    try {
+      setIsFetchingAzureDevOps(true);
+      setAzureFetchError(null);
+      
+      const validToken = await ensureValidToken(config);
+      
+      const configWithValidToken = {
+        ...config,
+        accessToken: validToken
+      };
+      
+      const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
+      const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
+      
+      for (const feature of newFeatures) {
+        const existingFeatures = await db.getFeatures();
+        const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
+        
+        // Strip HTML tags and limit description to 300 characters for Azure DevOps imports
+        const plainTextDescription = stripHtmlTags(feature.description);
+        const truncatedDescription = truncateText(plainTextDescription, 300);
+        
+        if (existing) {
+          await db.updateFeature(existing.id, {
+            title: feature.title,
+            description: truncatedDescription,
+            epic: feature.epic,
+            azure_devops_id: feature.azureDevOpsId,
+            azure_devops_url: feature.azureDevOpsUrl
+          });
+        } else {
+          await db.createFeature({
+            title: feature.title,
+            description: truncatedDescription,
+            epic: feature.epic,
+            azure_devops_id: feature.azureDevOpsId,
+            azure_devops_url: feature.azureDevOpsUrl
+          });
+        }
+      }
+      
+      const allFeatures = await db.getFeatures();
+      const votesData = await db.getVotes();
+      
+      const featuresWithVotes = allFeatures.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+        
+        return {
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          state: feature.state,
+          areaPath: feature.area_path,
+          tags: feature.tags || [],
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
+        };
+      });
+      
+      setFeatures(featuresWithVotes);
+      
+      const updatedConfig = {
+        ...configWithValidToken,
+        lastSyncTime: new Date().toISOString()
+      };
+      
+      await db.saveAzureDevOpsConfig(updatedConfig);
+      setAzureDevOpsConfig(updatedConfig);
+      setShowAzureDevOpsForm(false);
+      
+    } catch (error) {
+      console.error('Azure DevOps sync error:', error);
+      
+      if (error instanceof Error && error.message === 'Not authenticated') {
+        setAzureFetchError('Please authenticate with Azure DevOps');
+        handleInitiateOAuth();
+      } else {
+        setAzureFetchError("Failed to fetch features from Azure DevOps. Please try reconnecting.");
+      }
+    } finally {
+      setIsFetchingAzureDevOps(false);
+    }
+  }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
+
+  const handlePreviewAzureDevOpsFeatures = useCallback(async () => {
+    if (!azureDevOpsConfig.organization || !azureDevOpsConfig.project) {
+      setAzureFetchError("Organization and project name are required");
+      return;
+    }
+    
+    try {
+      setIsFetchingAzureDevOps(true);
+      setAzureFetchError(null);
+      
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken
+      };
+      
+      const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
+      const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
+      
+      // Strip HTML tags and limit description to 300 characters for preview
+      const featuresWithTruncatedDescriptions = newFeatures.map(feature => ({
+        ...feature,
+        description: truncateText(stripHtmlTags(feature.description), 300)
+      }));
+      
+      setPreviewFeatures(featuresWithTruncatedDescriptions);
+      setShowPreviewModal(true);
+      
+    } catch (error) {
+      console.error('Azure DevOps preview error:', error);
+      
+      if (error instanceof Error && error.message === 'Not authenticated') {
+        setAzureFetchError('Please authenticate with Azure DevOps');
+        handleInitiateOAuth();
+      } else {
+        setAzureFetchError("Failed to fetch features from Azure DevOps. Please try reconnecting.");
+      }
+    } finally {
+      setIsFetchingAzureDevOps(false);
+    }
+  }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
+
+  const handleConfirmSync = useCallback(async (replaceAll: boolean = false) => {
+    if (!previewFeatures) return;
+    
+    try {
+      setIsFetchingAzureDevOps(true);
+      
+      if (replaceAll) {
+        const existingFeatures = await db.getFeatures();
+        for (const feature of existingFeatures) {
+          await db.deleteFeature(feature.id);
+        }
+      }
+      
+      for (const feature of previewFeatures) {
+        const existingFeatures = await db.getFeatures();
+        const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
+        
+        // Strip HTML tags (if any remain) and limit description to 300 characters
+        const plainTextDescription = stripHtmlTags(feature.description);
+        const truncatedDescription = truncateText(plainTextDescription, 300);
+        
+        if (existing) {
+          await db.updateFeature(existing.id, {
+            title: feature.title,
+            description: truncatedDescription,
+            epic: feature.epic,
+            azure_devops_id: feature.azureDevOpsId,
+            azure_devops_url: feature.azureDevOpsUrl
+          });
+        } else {
+          await db.createFeature({
+            title: feature.title,
+            description: truncatedDescription,
+            epic: feature.epic,
+            azure_devops_id: feature.azureDevOpsId,
+            azure_devops_url: feature.azureDevOpsUrl
+          });
+        }
+      }
+      
+      const allFeatures = await db.getFeatures();
+      const votesData = await db.getVotes();
+      
+      const featuresWithVotes = allFeatures.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+        
+        return {
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          state: feature.state,
+          areaPath: feature.area_path,
+          tags: feature.tags || [],
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
+        };
+      });
+      
+      setFeatures(featuresWithVotes);
+      
+      const updatedConfig = {
+        ...azureDevOpsConfig,
+        lastSyncTime: new Date().toISOString()
+      };
+      
+      await db.saveAzureDevOpsConfig(updatedConfig);
+      setAzureDevOpsConfig(updatedConfig);
+      setHasImportedFeatures(true); // Mark that features have been imported
+      
+    } catch (error) {
+      console.error('Azure DevOps sync error:', error);
+      setAzureFetchError("Failed to sync features from Azure DevOps.");
+    } finally {
+      setIsFetchingAzureDevOps(false);
+      setPreviewFeatures(null);
+    }
+  }, [previewFeatures, azureDevOpsConfig]);
+
+  const handleDisconnectAzureDevOps = useCallback(async () => {
+    try {
+      const updatedConfig = {
+        organization: azureDevOpsConfig.organization || 'newmill',
+        project: azureDevOpsConfig.project || 'Product',
+        workItemType: azureDevOpsConfig.workItemType || 'Feature',
+        query: azureDevOpsConfig.query,
+        accessToken: undefined,
+        refreshToken: undefined,
+        tokenExpiresAt: undefined,
+        enabled: false
+      };
+      
+      await db.saveAzureDevOpsConfig(updatedConfig);
+      setAzureDevOpsConfig(updatedConfig);
+      setAzureFetchError(null);
+      setHasImportedFeatures(false); // Reset when disconnecting
+      
+    } catch (error) {
+      console.error('Error disconnecting Azure DevOps:', error);
+      setAzureFetchError("Failed to disconnect from Azure DevOps");
+    }
+  }, [azureDevOpsConfig]);
+
+  const handleToggleAdmin = useCallback(() => {
+    if (isAdmin) {
+      setIsAdmin(false);
+      setView('voting');
+    } else {
+      setIsAdmin(true);
+      setView('admin');
+    }
+  }, [isAdmin]);
+
+  const handleAddFeature = useCallback(async (feature: any) => {
+    try {
+      const newFeature = await db.createFeature({
+        title: feature.title,
+        description: feature.description,
+        epic: feature.epic
+      });
+      
+      setFeatures(prev => [...prev, {
+        id: newFeature.id,
+        title: newFeature.title,
+        description: newFeature.description,
+        epic: newFeature.epic,
+        votes: 0,
+        voters: []
+      }]);
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Error adding feature:', error);
+      alert('Failed to add feature');
+    }
+  }, []);
+
+  const handleUpdateFeature = useCallback(async (updatedFeature: Feature) => {
+    try {
+      await db.updateFeature(updatedFeature.id, {
+        title: updatedFeature.title,
+        description: updatedFeature.description,
+        epic: updatedFeature.epic
+      });
+      
+      setFeatures(prev => prev.map(f => f.id === updatedFeature.id ? updatedFeature : f));
+      setEditingFeature(null);
+    } catch (error) {
+      console.error('Error updating feature:', error);
+      alert('Failed to update feature');
+    }
+  }, []);
+
+  const handleDeleteFeature = useCallback(async (id: string) => {
+    try {
+      await db.deleteFeature(id);
+      setFeatures(prev => prev.filter(f => f.id !== id));
+    } catch (error) {
+      console.error('Error deleting feature:', error);
+      alert('Failed to delete feature');
+    }
+  }, []);
+
+  const initiateResetVotes = useCallback((id: string) => {
+    setConfirmState({
+      showReset: true,
+      showResetAll: false,
+      targetId: id
+    });
+  }, []);
+
+  const handleResetVotes = useCallback(async () => {
+    const id = confirmState.targetId;
+    if (!id) return;
+    
+    try {
+      await db.deleteVotesForFeature(id);
+      
+      const featuresData = await db.getFeatures();
+      const votesData = await db.getVotes();
+      
+      const featuresWithVotes = featuresData.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+        
+        return {
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          state: feature.state,
+          areaPath: feature.area_path,
+          tags: feature.tags || [],
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
+        };
+      });
+      
+      setFeatures(featuresWithVotes);
+    } catch (error) {
+      console.error('Error resetting votes:', error);
+      alert('Failed to reset votes');
+    }
+  }, [confirmState.targetId]);
+
+  const initiateResetAllVotes = useCallback(() => {
+    setConfirmState({
+      showReset: false,
+      showResetAll: true,
+      targetId: null
+    });
+  }, []);
+
+  const handleResetAllVotes = useCallback(async () => {
+    try {
+      await db.deleteAllVotes();
+      setFeatures(prev => prev.map(feature => ({ ...feature, votes: 0, voters: [] })));
+    } catch (error) {
+      console.error('Error resetting all votes:', error);
+      alert('Failed to reset all votes');
+    }
+  }, []);
+
+  const handlePendingVote = useCallback((featureId: string, increment: boolean) => {
+    if (!currentUser || !votingSession.isActive) return;
+    
+    const currentVoteCount = pendingVotes[featureId] || 0;
+    let newVoteCount = currentVoteCount;
+    
+    if (increment) {
+      if (pendingUsedVotes < votingSession.votesPerUser) {
+        newVoteCount = currentVoteCount + 1;
+      } else {
+        return;
+      }
+    } else {
+      if (currentVoteCount > 0) {
+        newVoteCount = currentVoteCount - 1;
+      } else {
+        return;
+      }
+    }
+    
+    setPendingVotes(prev => {
+      const updated = { ...prev };
+      if (newVoteCount === 0) {
+        delete updated[featureId];
+      } else {
+        updated[featureId] = newVoteCount;
+      }
+      return updated;
+    });
+    
+    setPendingUsedVotes(prev => increment ? prev + 1 : prev - 1);
+  }, [currentUser, pendingVotes, pendingUsedVotes, votingSession.isActive, votingSession.votesPerUser]);
+
+  const handleSubmitVotes = useCallback(async () => {
+    if (!currentUser || !votingSession.isActive) return;
+    if (pendingUsedVotes < votingSession.votesPerUser) return;
+    
+    try {
+      for (const [featureId, voteCount] of Object.entries(pendingVotes)) {
+        if (voteCount > 0) {
+          await db.saveVote({
+            feature_id: featureId,
+            user_id: currentUser.id,
+            user_name: currentUser.name,
+            user_email: currentUser.email,
+            vote_count: voteCount
+          });
+        }
+      }
+      
+      const featuresData = await db.getFeatures();
+      const votesData = await db.getVotes();
+      
+      const featuresWithVotes = featuresData.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+        
+        return {
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          state: feature.state,
+          areaPath: feature.area_path,
+          tags: feature.tags || [],
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
+        };
+      });
+      
+      setFeatures(featuresWithVotes);
+      setView('thankyou');
+    } catch (error) {
+      console.error('Error submitting votes:', error);
+      alert('Failed to submit votes. Please try again.');
+    }
+  }, [currentUser, pendingUsedVotes, pendingVotes, votingSession.isActive, votingSession.votesPerUser]);
+
+  const handleUpdateVotingSession = useCallback(async (updatedSession: VotingSession) => {
+    try {
+      // Save to database
+      await db.updateVotingSession({
+        title: updatedSession.title,
+        goal: updatedSession.goal,
+        votes_per_user: updatedSession.votesPerUser,
+        start_date: updatedSession.startDate,
+        end_date: updatedSession.endDate,
+        is_active: updatedSession.isActive
+      });
+      
+      setVotingSession(updatedSession);
+      setShowSessionForm(false);
+    } catch (error) {
+      console.error('Error updating voting session:', error);
+      alert('Failed to update voting session settings');
+    }
+  }, []);
+
+  const handleUpdateAzureDevOpsConfig = useCallback(async (config: AzureDevOpsConfig) => {
+    setAzureDevOpsConfig(config);
+    
+    try {
+      await db.saveAzureDevOpsConfig({
+        organization: config.organization,
+        project: config.project,
+        accessToken: config.accessToken,
+        refreshToken: config.refreshToken,
+        tokenExpiresAt: config.tokenExpiresAt,
+        tenantId: config.tenantId,
+        clientId: config.clientId,
+        enabled: config.enabled,
+        workItemType: config.workItemType,
+        query: config.query,
+        lastSyncTime: config.lastSyncTime
+      });
+    } catch (error) {
+      console.error('Error saving config:', error);
+    }
+  }, []);
+
+  const handleReturnToVoting = useCallback(() => {
+    setPendingVotes({});
+    setPendingUsedVotes(0);
+    setView('voting');
+  }, []);
+
+  const renderContent = useMemo(() => {
+    switch (view) {
+      case 'voting':
+        return (
+          <VotingScreen 
+            features={features} 
+            currentUser={currentUser} 
+            pendingVotes={pendingVotes}
+            pendingUsedVotes={pendingUsedVotes}
+            onVote={handlePendingVote}
+            onSubmitVotes={handleSubmitVotes}
+            onToggleAdmin={handleToggleAdmin}
+            isAdmin={isAdmin}
+            votingSession={votingSession}
+          />
+        );
+      case 'results':
+        return (
+          <ResultsScreen 
+            features={features} 
+            onResetVotes={initiateResetVotes}
+            onResetAllVotes={initiateResetAllVotes}
+            onBack={() => setView('admin')}
+            showVotersList={showVotersList}
+            setShowVotersList={setShowVotersList}
+            votingSession={votingSession}
+          />
+        );
+      case 'thankyou':
+        return (
+          <ThankYouScreen
+            onReturn={handleReturnToVoting}
+            votingSession={votingSession}
+          />
+        );
+      case 'admin':
+      default:
+        return (
+          <AdminScreen 
+            features={features} 
+            onAddFeature={handleAddFeature} 
+            onUpdateFeature={handleUpdateFeature} 
+            onDeleteFeature={handleDeleteFeature}
+            onShowResults={() => setView('results')}
+            showAddForm={showAddForm}
+            setShowAddForm={setShowAddForm}
+            editingFeature={editingFeature}
+            setEditingFeature={setEditingFeature}
+            onLogout={handleToggleAdmin}
+            votingSession={votingSession}
+            onUpdateVotingSession={handleUpdateVotingSession}
+            showSessionForm={showSessionForm}
+            setShowSessionForm={setShowSessionForm}
+            azureDevOpsConfig={azureDevOpsConfig}
+            onUpdateAzureDevOpsConfig={handleUpdateAzureDevOpsConfig}
+            showAzureDevOpsForm={showAzureDevOpsForm}
+            setShowAzureDevOpsForm={setShowAzureDevOpsForm}
+            onFetchAzureDevOpsFeatures={handleFetchAzureDevOpsFeatures}
+            onPreviewAzureDevOpsFeatures={handlePreviewAzureDevOpsFeatures}
+            onDisconnectAzureDevOps={handleDisconnectAzureDevOps}
+            isFetchingAzureDevOps={isFetchingAzureDevOps}
+            azureFetchError={azureFetchError}
+            onInitiateOAuth={handleInitiateOAuth}
+            availableStates={availableStates}
+            availableAreaPaths={availableAreaPaths}
+            availableTags={availableTags}
+            previewFeatures={previewFeatures}
+            showPreviewModal={showPreviewModal}
+            setShowPreviewModal={setShowPreviewModal}
+            onConfirmSync={handleConfirmSync}
+            hasImportedFeatures={hasImportedFeatures}
+            setHasImportedFeatures={setHasImportedFeatures}
+          />
+        );
+    }
+  }, [
+    view, features, currentUser, pendingVotes, pendingUsedVotes, 
+    handlePendingVote, handleSubmitVotes, handleToggleAdmin, isAdmin, 
+    votingSession, initiateResetVotes, initiateResetAllVotes, showVotersList,
+    setShowVotersList, handleReturnToVoting, handleAddFeature, handleUpdateFeature,
+    handleDeleteFeature, showAddForm, setShowAddForm, editingFeature,
+    setEditingFeature, handleUpdateVotingSession, showSessionForm, setShowSessionForm,
+    azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
+    setShowAzureDevOpsForm, handleFetchAzureDevOpsFeatures, handlePreviewAzureDevOpsFeatures,
+    handleDisconnectAzureDevOps, isFetchingAzureDevOps, azureFetchError, handleInitiateOAuth,
+    previewFeatures, showPreviewModal, setShowPreviewModal, handleConfirmSync,
+    hasImportedFeatures, setHasImportedFeatures
+  ]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
         </div>
-        
-        <h1 className="text-3xl font-bold text-[#1E6154] mb-4">Thank You!</h1>
-        
-        <p className="text-gray-700 text-lg mb-6">
-          Your votes for <span className="font-semibold">{votingSession.title}</span> have been submitted successfully.
-        </p>
-        
-        <p className="text-gray-600 mb-8">
-          We appreciate your input in helping prioritize features for our Purchasing Dashboard redesign.
-        </p>
-        
-        <Button variant="primary" onClick={onReturn} className="mx-auto">
-          Return to Voting
-        </Button>
       </div>
+    );
+  }
+
+  return (
+    <div className="w-full bg-gray-50 text-gray-900 font-sans">
+      {renderContent}
+      
+      <ConfirmDialog
+        show={confirmState.showReset}
+        title="Reset Votes"
+        message="Are you sure you want to reset all votes for this feature? This will remove all voting data for this feature."
+        onConfirm={handleResetVotes}
+        onCancel={() => setConfirmState(prev => ({ ...prev, showReset: false }))}
+        confirmText="Reset"
+        type="reset"
+      />
+      
+      <ConfirmDialog
+        show={confirmState.showResetAll}
+        title="Reset All Votes"
+        message="Are you sure you want to reset all votes for all features? This will remove all voting data and cannot be undone."
+        onConfirm={handleResetAllVotes}
+        onCancel={() => setConfirmState(prev => ({ ...prev, showResetAll: false }))}
+        confirmText="Reset All"
+        type="reset"
+      />
     </div>
   );
 }
 
 // ============================================
-// SCREEN COMPONENTS
+// ADMIN SCREEN COMPONENT
 // ============================================
 
 interface AdminScreenProps {
@@ -1025,10 +2381,15 @@ interface AdminScreenProps {
   isFetchingAzureDevOps: boolean;
   azureFetchError: string | null;
   onInitiateOAuth: () => void;
+  availableStates: string[];     
+  availableAreaPaths: string[];
+  availableTags: string[];
   previewFeatures: Feature[] | null;
   showPreviewModal: boolean;
   setShowPreviewModal: (show: boolean) => void;
   onConfirmSync: (replaceAll: boolean) => Promise<void>;
+  hasImportedFeatures: boolean;
+  setHasImportedFeatures: (value: boolean) => void;
 }
 
 function AdminScreen({ 
@@ -1056,10 +2417,15 @@ function AdminScreen({
   isFetchingAzureDevOps,
   azureFetchError,
   onInitiateOAuth,
+  availableStates,
+  availableAreaPaths,
+  availableTags,
   previewFeatures,
   showPreviewModal,
   setShowPreviewModal,
-  onConfirmSync
+  onConfirmSync,
+  hasImportedFeatures,
+  setHasImportedFeatures
 }: AdminScreenProps) {
   const daysRemaining = getDaysRemaining(votingSession.endDate);
   const deadlineColor = getDeadlineColor(daysRemaining);
@@ -1113,50 +2479,62 @@ function AdminScreen({
           <Button 
             variant="primary"
             onClick={() => setShowSessionForm(true)}
+            className="flex items-center w-44"
           >
+            <Settings className="h-4 w-4 mr-2" />
             Edit Settings
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <h3 className="font-medium text-gray-700 mb-1">Session Title</h3>
-            <p className="text-lg font-semibold text-[#2d4660] mb-2">{votingSession.title}</p>
-            
-            <h3 className="font-medium text-gray-700 mb-1">Goal</h3>
-            <p className="text-gray-800 mb-2">{votingSession.goal}</p>
-            
-            <h3 className="font-medium text-gray-700 mb-1">Votes Per User</h3>
-            <p className="text-[#2d4660] font-bold text-lg">{votingSession.votesPerUser}</p>
-          </div>
-          
-          <div>
-            <h3 className="font-medium text-gray-700 mb-1">Voting Period</h3>
-            <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 border ${
-              daysRemaining <= 2 ? 'border-red-200' : 
-              daysRemaining <= 4 ? 'border-yellow-200' : 
-              'border-[#1E6154]/20'
-            }`}>
-              <div className="flex items-center mb-1">
-                <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
-                <span className="text-gray-800">
-                  {formatDate(votingSession.startDate)} - <span className={`font-semibold ${deadlineColor}`}>{formatDate(votingSession.endDate)}</span>
-                </span>
-              </div>
-              
-              {votingSession.isActive && daysRemaining >= 0 && (
-                <div className="text-sm ml-6">
-                  <span className={`${deadlineColor} font-medium`}>
-                    {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining
-                  </span>
-                </div>
-              )}
+        <div className="flex gap-6">
+          {/* Left side: Session Title and Goal grouped together */}
+          <div className="flex-1">
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-gray-700 mb-1">Session Title</h3>
+              <p className="text-[#2d4660] font-medium text-base">{votingSession.title}</p>
             </div>
             
-            <h3 className="font-medium text-gray-700 mt-3 mb-1">Status</h3>
-            <div className="flex items-center">
-              <Clock className="h-4 w-4 mr-2 text-gray-600" />
-              {votingStatus}
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-1">Goal</h3>
+              <p className="text-[#2d4660] text-base">{votingSession.goal}</p>
+            </div>
+          </div>
+          
+          {/* Right side: Metrics */}
+          <div className="flex gap-6 items-stretch">
+            <div className="flex flex-col">
+              <h3 className="text-sm font-medium text-gray-700 mb-2 mt-[3px]">Votes Per User</h3>
+              <div className="border border-gray-300 rounded-md p-4 text-center bg-white flex-1 flex items-center justify-center">
+                <p className="text-[#2d4660] font-bold text-4xl">{votingSession.votesPerUser}</p>
+              </div>
+            </div>
+            
+            <div className="min-w-[280px] flex flex-col">
+              <div className="flex items-center justify-center gap-3 mb-2">
+                <h3 className="text-sm font-medium text-gray-700">Voting Period</h3>
+                <div className="flex items-center">
+                  <Clock className="h-4 w-4 mr-1 text-gray-600" />
+                  {votingStatus}
+                </div>
+              </div>
+              <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 border ${
+                daysRemaining <= 2 ? 'border-red-200' : 
+                daysRemaining <= 4 ? 'border-yellow-200' : 
+                'border-[#1E6154]/20'
+              } flex-1 flex flex-col justify-center`}>
+                <div className="flex items-center justify-center mb-2">
+                  <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
+                  <span className={`font-medium text-sm ${deadlineColor}`}>
+                    {formatDate(votingSession.startDate)} - {formatDate(votingSession.endDate)}
+                  </span>
+                </div>
+                <p className={`text-sm font-medium text-center ${deadlineColor}`}>
+                  {daysRemaining <= 0 
+                    ? "Voting ends today!" 
+                    : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining`
+                  }
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1164,9 +2542,24 @@ function AdminScreen({
 
       {/* Azure DevOps Integration */}
       <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-        <div className="flex items-center mb-4">
-          <Cloud className="h-5 w-5 text-[#2d4660] mr-2" />
-          <h2 className="text-xl font-semibold text-[#2d4660]">Azure DevOps Integration</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <Cloud className="h-5 w-5 text-[#2d4660] mr-2" />
+            <h2 className="text-xl font-semibold text-[#2d4660]">Azure DevOps Integration</h2>
+          </div>
+          {azureDevOpsConfig.enabled && (
+            <Button 
+              variant="primary"
+              onClick={() => {
+                setShowAzureDevOpsForm(true);
+                setHasImportedFeatures(false);
+              }}
+              className="flex items-center w-44"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Edit Settings
+            </Button>
+          )}
         </div>
 
         {showAzureDevOpsForm ? (
@@ -1178,67 +2571,71 @@ function AdminScreen({
             isFetching={isFetchingAzureDevOps}
             error={azureFetchError}
             onInitiateOAuth={onInitiateOAuth}
+            availableStates={availableStates}
+            availableAreaPaths={availableAreaPaths}
+            availableTags={availableTags}
           />
         ) : (
           <div>
             {azureDevOpsConfig.enabled ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium text-gray-700 mb-1">Organization</h3>
-                  <p className="text-[#2d4660] font-semibold mb-2">{azureDevOpsConfig.organization}</p>
+              <div className="flex justify-between gap-6">
+                <div className="flex-1 space-y-2">
+                  <p className="text-sm leading-[25px] flex items-baseline">
+                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Organization:</span>
+                    <span className="text-[#2d4660] font-semibold text-[20px]">{azureDevOpsConfig.organization}</span>
+                  </p>
                   
-                  <h3 className="font-medium text-gray-700 mb-1">Project</h3>
-                  <p className="text-[#2d4660] font-semibold mb-2">{azureDevOpsConfig.project}</p>
+                  <p className="text-sm leading-[25px] flex items-baseline">
+                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Project:</span>
+                    <span className="text-[#2d4660] font-semibold text-[20px]">{azureDevOpsConfig.project}</span>
+                  </p>
                   
-                  <h3 className="font-medium text-gray-700 mb-1">Work Item Type</h3>
-                  <p className="text-[#2d4660] font-semibold">{azureDevOpsConfig.workItemType}</p>
+                  <p className="text-sm leading-[25px] flex items-baseline">
+                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Work Item Type:</span>
+                    <span className="text-[#2d4660] font-semibold text-[20px]">{azureDevOpsConfig.workItemType}</span>
+                  </p>
                 </div>
                 
-                <div>
-                  <h3 className="font-medium text-gray-700 mb-1">Status</h3>
-                  <div className="flex items-center">
-                    <div className="h-3 w-3 rounded-full bg-[#1E6154] mr-2"></div>
-                    <span className="text-[#1E6154] font-medium">Connected</span>
-                  </div>
+                <div className="flex-1 space-y-2">
+                  <p className="text-sm leading-[25px] flex items-baseline">
+                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Status:</span>
+                    <span className="inline-flex items-baseline">
+                      <span className="h-2 w-2 rounded-full bg-[#1E6154] mr-1.5 self-center"></span>
+                      <span className="text-[#1E6154] font-medium text-[20px]">Connected</span>
+                      <button
+                        onClick={onDisconnectAzureDevOps}
+                        className="ml-2 text-red-600 hover:text-red-800 cursor-pointer self-center flex items-center"
+                        title="Disconnect"
+                      >
+                        <X className="h-4 w-4" />
+                        <span className="ml-1 text-sm font-medium">Disconnect</span>
+                      </button>
+                    </span>
+                  </p>
                   
                   {azureDevOpsConfig.lastSyncTime && (
-                    <div className="mt-3">
-                      <h3 className="font-medium text-gray-700 mb-1">Last Synchronized</h3>
-                      <div className="flex items-center">
-                        <Clock className="h-4 w-4 mr-2 text-gray-500" />
-                        <span className="text-gray-700">{formatDate(azureDevOpsConfig.lastSyncTime)}</span>
-                      </div>
-                    </div>
+                    <p className="text-sm leading-[25px] flex items-baseline">
+                      <span className="font-medium text-gray-700 w-36 text-right mr-2">Last Synchronized:</span>
+                      <span className="inline-flex items-baseline text-gray-700 text-[20px]">
+                        <Clock className="h-3.5 w-3.5 mr-1 text-gray-500 self-center" />
+                        {formatDate(azureDevOpsConfig.lastSyncTime)}
+                      </span>
+                    </p>
                   )}
-                  
-                  <div className="mt-4">
-                    <div className="flex gap-2">
-                      <Button 
-                        onClick={() => onPreviewAzureDevOpsFeatures()}
-                        disabled={isFetchingAzureDevOps}
-                        className="flex items-center"
-                      >
-                        <RefreshCw className={`h-4 w-4 mr-2 ${isFetchingAzureDevOps ? 'animate-spin' : ''}`} />
-                        {isFetchingAzureDevOps ? 'Loading...' : 'Preview Features'}
-                      </Button>
-                      <Button 
-                        variant="secondary"
-                        onClick={() => setShowAzureDevOpsForm(true)}
-                        className="flex items-center"
-                      >
-                        <Settings className="h-4 w-4 mr-2" />
-                        Edit Settings
-                      </Button>
-                      <Button 
-                        variant="danger"
-                        onClick={onDisconnectAzureDevOps}
-                        className="flex items-center"
-                      >
-                        <X className="h-4 w-4 mr-2" />
-                        Disconnect
-                      </Button>
-                    </div>
-                  </div>
+                </div>
+                
+                <div className="flex flex-col gap-3">
+                  {!hasImportedFeatures && (
+                    <Button 
+                      variant="gold"
+                      onClick={() => onPreviewAzureDevOpsFeatures()}
+                      disabled={isFetchingAzureDevOps}
+                      className="flex items-center w-44"
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isFetchingAzureDevOps ? 'animate-spin' : ''}`} />
+                      {isFetchingAzureDevOps ? 'Loading...' : 'Preview Features'}
+                    </Button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -1269,7 +2666,7 @@ function AdminScreen({
           <Button 
             variant="gold"
             onClick={() => setShowAddForm(true)}
-            className="flex items-center"
+            className="flex items-center w-44"
           >
             <Plus className="mr-2 h-4 w-4" />
             Add Feature
@@ -1280,18 +2677,21 @@ function AdminScreen({
           <table className="min-w-full divide-y divide-gray-200 table-fixed">
             <thead className="bg-gray-50">
               <tr>
-                <th scope="col" className="w-[25%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th scope="col" className="hidden sm:table-cell w-[40%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                <th scope="col" className="hidden md:table-cell w-[15%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
-                <th scope="col" className="w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
-                <th scope="col" className="w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th scope="col" className="w-[20%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                <th scope="col" className="hidden lg:table-cell w-[25%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                <th scope="col" className="hidden md:table-cell w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
+                <th scope="col" className="hidden md:table-cell w-[8%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
+                <th scope="col" className="hidden lg:table-cell w-[12%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Area Path</th>
+                <th scope="col" className="hidden xl:table-cell w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tags</th>
+                <th scope="col" className="w-[8%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
+                <th scope="col" className="w-[7%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {features.map((feature) => (
                 <tr key={feature.id} className="align-top group">
-                  <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium">
-                    <div className="max-w-xs overflow-hidden">
+                  <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium text-left">
+                    <div className="max-w-xs overflow-hidden text-left">
                       {feature.title}
                       {feature.azureDevOpsId && (
                         <div className="mt-1">
@@ -1300,13 +2700,43 @@ function AdminScreen({
                       )}
                     </div>
                   </td>
-                  <td className="hidden sm:table-cell px-4 py-4 text-sm text-gray-500">
-                    <div className="max-w-md overflow-hidden break-all">
+                  <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-500 text-left">
+                    <div className="max-w-md overflow-hidden break-words text-left">
                       {feature.description}
                     </div>
                   </td>
                   <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
                     {feature.epic && <EpicTag name={feature.epic} />}
+                  </td>
+                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
+                    {feature.state && (
+                      <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                        {feature.state}
+                      </span>
+                    )}
+                  </td>
+                  <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-600">
+                    <div className="max-w-xs truncate">
+                      {feature.areaPath || '-'}
+                    </div>
+                  </td>
+                  <td className="hidden xl:table-cell px-4 py-4 text-sm">
+                    {feature.tags && feature.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {feature.tags.slice(0, 3).map((tag, idx) => (
+                          <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+                            {tag}
+                          </span>
+                        ))}
+                        {feature.tags.length > 3 && (
+                          <span className="px-2 py-0.5 text-xs text-gray-500">
+                            +{feature.tags.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap text-sm">{feature.votes}</td>
                   <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
@@ -1410,6 +2840,9 @@ function AdminScreen({
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Epic</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Area Path</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -1423,6 +2856,36 @@ function AdminScreen({
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{feature.title}</td>
                         <td className="px-4 py-3 text-sm">
                           {feature.epic && <EpicTag name={feature.epic} />}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {feature.state && (
+                            <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                              {feature.state}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          <div className="max-w-xs truncate">
+                            {feature.areaPath || '-'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {feature.tags && feature.tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {feature.tags.slice(0, 2).map((tag, idx) => (
+                                <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+                                  {tag}
+                                </span>
+                              ))}
+                              {feature.tags.length > 2 && (
+                                <span className="px-2 py-0.5 text-xs text-gray-500">
+                                  +{feature.tags.length - 2}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1665,1042 +3128,6 @@ const VotingScreen = React.memo(function VotingScreen({
     </div>
   );
 });
-
-interface ResultsScreenProps {
-  features: Feature[];
-  onResetVotes: (id: string) => void;
-  onResetAllVotes: () => void;
-  onBack: () => void;
-  showVotersList: string | null;
-  setShowVotersList: (id: string | null) => void;
-  votingSession: VotingSession;
-}
-
-function ResultsScreen({ 
-  features, 
-  onResetVotes,
-  onResetAllVotes,
-  onBack,
-  showVotersList,
-  setShowVotersList,
-  votingSession
-}: ResultsScreenProps) {
-  const sortedFeatures = useMemo(() => {
-    return [...features].sort((a, b) => b.votes - a.votes);
-  }, [features]);
-  
-  const chartData = useMemo(() => {
-    return sortedFeatures.slice(0, 10).map(feature => ({
-      name: feature.title,
-      votes: feature.votes,
-      id: feature.id
-    }));
-  }, [sortedFeatures]);
-
-  const daysRemaining = getDaysRemaining(votingSession.endDate);
-  const deadlineColor = getDeadlineColor(daysRemaining);
-
-  return (
-    <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
-      {/* Desktop: Centered logo at top */}
-      <div className="hidden md:flex md:justify-center mb-2">
-        <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
-          alt="New Millennium Building Systems Logo"
-          className="-mt-8"
-          style={{ height: '96px', width: 'auto' }}
-        />
-      </div>
-      
-      {/* Title with back button and reset button in same row */}
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center">
-          {/* Mobile: small logo next to back button and title */}
-          <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
-            alt="New Millennium Building Systems Logo"
-            className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
-          />
-          <button 
-            onClick={onBack}
-            className="mr-2 p-1 rounded-full hover:bg-gray-200 cursor-pointer"
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Voting Results</h1>
-        </div>
-        <Button 
-          variant="danger"
-          onClick={onResetAllVotes}
-        >
-          Reset All Votes
-        </Button>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-[#2d4660]">{votingSession.title}</h2>
-          <div className="text-sm text-gray-600">
-            <span className="mr-2">Votes per user: {votingSession.votesPerUser}</span>
-            {votingSession.isActive ? (
-              <span className="text-[#1E6154] font-medium">Voting Active</span>
-            ) : isPastDate(votingSession.endDate) ? (
-              <span className="text-red-600 font-medium">Voting Closed</span>
-            ) : (
-              <span className="text-yellow-600 font-medium">Voting Upcoming</span>
-            )}
-          </div>
-        </div>
-        
-        <p className="text-gray-600 mb-4">{votingSession.goal}</p>
-        
-        {votingSession.isActive && (
-          <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 mb-4 inline-block border ${daysRemaining <= 2 ? 'border-red-200' : daysRemaining <= 4 ? 'border-yellow-200' : 'border-[#1E6154]/20'}`}>
-            <div className="flex items-center">
-              <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
-              <span className={`${deadlineColor} font-medium`}>
-                {daysRemaining <= 0 
-                  ? "Voting ends today!" 
-                  : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining until ${formatDate(votingSession.endDate)}`
-                }
-              </span>
-            </div>
-          </div>
-        )}
-        
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={chartData}
-              margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-            >
-              <XAxis 
-                dataKey="name" 
-                angle={-45}
-                textAnchor="end"
-                height={80}
-                tick={{ fontSize: 12 }}
-              />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="votes" fill="#3B82F6">
-                {chartData.map((_entry, index) => (
-                  <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#2d4660' : '#4f6d8e'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-md p-4">
-        <h2 className="text-xl font-semibold mb-4 text-[#2d4660]">Feature Details</h2>
-        <div className="w-full overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 table-fixed">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="w-12 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
-                <th scope="col" className="w-1/2 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th scope="col" className="hidden sm:table-cell w-1/4 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
-                <th scope="col" className="w-14 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
-                <th scope="col" className="hidden md:table-cell w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Voters</th>
-                <th scope="col" className="w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sortedFeatures.map((feature, index) => (
-                <tr key={feature.id} className="align-top group">
-                  <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">{index + 1}</td>
-                  <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium">
-                    {feature.title}
-                    {feature.azureDevOpsId && (
-                      <div className="mt-1">
-                        <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                      </div>
-                    )}
-                  </td>
-                  <td className="hidden sm:table-cell px-4 py-4 whitespace-nowrap text-sm">
-                    {feature.epic && <EpicTag name={feature.epic} />}
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm">{feature.votes}</td>
-                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
-                    <button
-                      onClick={() => setShowVotersList(feature.id)}
-                      className="text-[#2d4660] hover:text-[#bea263] flex items-center cursor-pointer"
-                      disabled={feature.voters.length === 0}
-                    >
-                      <Users className="h-4 w-4 mr-1" />
-                      {feature.voters.length} {feature.voters.length === 1 ? 'user' : 'users'}
-                    </button>
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => onResetVotes(feature.id)}
-                      className="text-red-600 hover:text-red-900 cursor-pointer"
-                      disabled={feature.votes === 0}
-                    >
-                      Reset Votes
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {showVotersList && (
-        <VotersListModal
-          feature={features.find(f => f.id === showVotersList) as Feature}
-          onClose={() => setShowVotersList(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ============================================
-// MAIN COMPONENT
-// ============================================
-
-interface FeatureVotingSystemProps {
-  defaultVotesPerUser?: number;
-  adminMode?: boolean;
-}
-
-function FeatureVotingSystem({ 
-  defaultVotesPerUser = 10, 
-  adminMode = false 
-}: FeatureVotingSystemProps) {
-  
-  const isOAuthCallback = useMemo(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.has('code') || urlParams.has('error');
-  }, []);
-  
-  const [features, setFeatures] = useState<Feature[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [users, setUsers] = useState(initialUsers);
-  const [currentUser, setCurrentUser] = useState(initialUsers[0]);
-  const [view, setView] = useState<'voting' | 'admin' | 'thankyou' | 'results'>(
-    adminMode || isOAuthCallback ? 'admin' : 'voting'
-  );
-  const [isAdmin, setIsAdmin] = useState(adminMode || isOAuthCallback);
-  const [editingFeature, setEditingFeature] = useState<Feature | null>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [showVotersList, setShowVotersList] = useState<string | null>(null);
-  const [showSessionForm, setShowSessionForm] = useState(false);
-  const [showAzureDevOpsForm, setShowAzureDevOpsForm] = useState(false);
-  const [votingSession, setVotingSession] = useState({
-    ...initialVotingSession,
-    votesPerUser: defaultVotesPerUser
-  });
-  
-  const [azureDevOpsConfig, setAzureDevOpsConfig] = useState(initialAzureDevOpsConfig);
-  const [isFetchingAzureDevOps, setIsFetchingAzureDevOps] = useState(false);
-  const [azureFetchError, setAzureFetchError] = useState<string | null>(null);
-  const [previewFeatures, setPreviewFeatures] = useState<Feature[] | null>(null);
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  
-  const [pendingVotes, setPendingVotes] = useState<Record<string, number>>({});
-  const [pendingUsedVotes, setPendingUsedVotes] = useState(0);
-
-  const [confirmState, setConfirmState] = useState<{
-    showReset: boolean;
-    showResetAll: boolean;
-    targetId: string | null;
-  }>({
-    showReset: false,
-    showResetAll: false,
-    targetId: null
-  });
-
-  const hasProcessedCallback = useRef(false);
-
-  useEffect(() => {
-    const handleCallback = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const hasOAuthParams = urlParams.has('code') || urlParams.has('error');
-      
-      if (!hasOAuthParams || hasProcessedCallback.current) {
-        return;
-      }
-      
-      hasProcessedCallback.current = true;
-      
-      try {
-        const tokens = await azureService.handleOAuthCallback();
-        
-        if (tokens) {
-          const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
-          
-          const updatedConfig = {
-            ...azureDevOpsConfig,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            tokenExpiresAt: expiresAt,
-            enabled: true,
-            clientId: azureService.AZURE_AD_CONFIG.clientId,
-            tenantId: azureService.AZURE_AD_CONFIG.tenantId
-          };
-          
-          await db.saveAzureDevOpsConfig(updatedConfig);
-          setAzureDevOpsConfig(updatedConfig);
-          
-          window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname
-          );
-          
-        }
-      } catch (error) {
-        console.error('OAuth callback error:', error);
-        setAzureFetchError('Failed to authenticate with Azure DevOps');
-        
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
-      }
-    };
-    
-    handleCallback();
-  }, []);
-
-  const handleInitiateOAuth = useCallback(() => {
-    azureService.initiateOAuthFlow();
-  }, []);
-
-  const ensureValidToken = useCallback(async (config: AzureDevOpsConfig): Promise<string> => {
-    if (!config.accessToken || !config.refreshToken || !config.tokenExpiresAt) {
-      throw new Error('Not authenticated');
-    }
-    
-    if (azureService.isTokenExpired(config.tokenExpiresAt)) {
-      const tokens = await azureService.refreshAccessToken(config.refreshToken);
-      const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
-      
-      const updatedConfig = {
-        ...config,
-        accessToken: tokens.accessToken,
-        tokenExpiresAt: expiresAt
-      };
-      
-      await db.saveAzureDevOpsConfig(updatedConfig);
-      setAzureDevOpsConfig(updatedConfig);
-      
-      return tokens.accessToken;
-    }
-    
-    return config.accessToken;
-  }, []);
-
-  useEffect(() => {
-    async function loadData() {
-      try {
-        console.log('Loading data from Supabase...');
-        setIsLoading(true);
-        
-        const featuresData = await db.getFeatures();
-        console.log(`Loaded ${featuresData.length} features from database`);
-        const votesData = await db.getVotes();
-        
-        const featuresWithVotes = featuresData.map(feature => {
-          const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-          const voters = featureVotes.map(v => ({
-            userId: v.user_id,
-            name: v.user_name,
-            email: v.user_email,
-            voteCount: v.vote_count
-          }));
-          const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-          
-          return {
-            id: feature.id,
-            title: feature.title,
-            description: feature.description,
-            epic: feature.epic,
-            azureDevOpsId: feature.azure_devops_id,
-            azureDevOpsUrl: feature.azure_devops_url,
-            votes: totalVotes,
-            voters
-          };
-        });
-        
-        setFeatures(featuresWithVotes);
-        console.log(`Features with votes loaded:`, featuresWithVotes.map(f => f.title));
-        
-        const session = await db.getActiveVotingSession();
-        if (session) {
-          setVotingSession({
-            title: session.title,
-            goal: session.goal,
-            votesPerUser: session.votes_per_user,
-            startDate: session.start_date,
-            endDate: session.end_date,
-            isActive: session.is_active
-          });
-        }
-        
-        const azureConfig = await db.getAzureDevOpsConfig();
-        if (azureConfig) {
-          setAzureDevOpsConfig({
-            organization: azureConfig.organization || 'newmill',
-            project: azureConfig.project || 'Product',
-            accessToken: azureConfig.access_token,
-            refreshToken: azureConfig.refresh_token,
-            tokenExpiresAt: azureConfig.token_expires_at,
-            tenantId: azureConfig.tenant_id,
-            clientId: azureConfig.client_id,
-            enabled: azureConfig.enabled,
-            workItemType: azureConfig.work_item_type || 'Feature',
-            query: azureConfig.query,
-            lastSyncTime: azureConfig.last_sync_time
-          });
-        } else {
-          setAzureDevOpsConfig({
-            organization: 'newmill',
-            project: 'Product',
-            enabled: false,
-            workItemType: 'Feature'
-          });
-        }
-      } catch (error) {
-        console.error('Error loading data:', error);
-        setFeatures([]);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    const checkVotingStatus = () => {
-      const isInVotingPeriod = isDateInRange(votingSession.startDate, votingSession.endDate);
-      if (votingSession.isActive !== isInVotingPeriod) {
-        setVotingSession(prev => ({
-          ...prev,
-          isActive: isInVotingPeriod
-        }));
-      }
-    };
-    
-    checkVotingStatus();
-    const intervalId = setInterval(checkVotingStatus, 600000);
-    return () => clearInterval(intervalId);
-  }, [votingSession.startDate, votingSession.endDate, votingSession.isActive]);
-
-  useEffect(() => {
-    document.body.style.overflow = '';
-    document.body.style.position = '';
-    document.body.style.width = '';
-  }, [view]);
-
-  useEffect(() => {
-    document.body.style.overflow = '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, []);
-
-  const handleFetchAzureDevOpsFeatures = useCallback(async (config = azureDevOpsConfig) => {
-    if (!config.organization || !config.project) {
-      setAzureFetchError("Organization and project name are required");
-      return;
-    }
-    
-    try {
-      setIsFetchingAzureDevOps(true);
-      setAzureFetchError(null);
-      
-      const validToken = await ensureValidToken(config);
-      
-      const configWithValidToken = {
-        ...config,
-        accessToken: validToken
-      };
-      
-      const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
-      const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
-      
-      for (const feature of newFeatures) {
-        const existingFeatures = await db.getFeatures();
-        const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
-        
-        if (existing) {
-          await db.updateFeature(existing.id, {
-            title: feature.title,
-            description: feature.description,
-            epic: feature.epic,
-            azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
-          });
-        } else {
-          await db.createFeature({
-            title: feature.title,
-            description: feature.description,
-            epic: feature.epic,
-            azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
-          });
-        }
-      }
-      
-      const allFeatures = await db.getFeatures();
-      const votesData = await db.getVotes();
-      
-      const featuresWithVotes = allFeatures.map(feature => {
-        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-        const voters = featureVotes.map(v => ({
-          userId: v.user_id,
-          name: v.user_name,
-          email: v.user_email,
-          voteCount: v.vote_count
-        }));
-        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-        
-        return {
-          id: feature.id,
-          title: feature.title,
-          description: feature.description,
-          epic: feature.epic,
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
-          votes: totalVotes,
-          voters
-        };
-      });
-      
-      setFeatures(featuresWithVotes);
-      
-      const updatedConfig = {
-        ...configWithValidToken,
-        lastSyncTime: new Date().toISOString()
-      };
-      
-      await db.saveAzureDevOpsConfig(updatedConfig);
-      setAzureDevOpsConfig(updatedConfig);
-      setShowAzureDevOpsForm(false);
-      
-    } catch (error) {
-      console.error('Azure DevOps sync error:', error);
-      
-      if (error instanceof Error && error.message === 'Not authenticated') {
-        setAzureFetchError('Please authenticate with Azure DevOps');
-        handleInitiateOAuth();
-      } else {
-        setAzureFetchError("Failed to fetch features from Azure DevOps. Please try reconnecting.");
-      }
-    } finally {
-      setIsFetchingAzureDevOps(false);
-    }
-  }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
-
-  const handlePreviewAzureDevOpsFeatures = useCallback(async () => {
-    if (!azureDevOpsConfig.organization || !azureDevOpsConfig.project) {
-      setAzureFetchError("Organization and project name are required");
-      return;
-    }
-    
-    try {
-      setIsFetchingAzureDevOps(true);
-      setAzureFetchError(null);
-      
-      const validToken = await ensureValidToken(azureDevOpsConfig);
-      
-      const configWithValidToken = {
-        ...azureDevOpsConfig,
-        accessToken: validToken
-      };
-      
-      const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
-      const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
-      
-      setPreviewFeatures(newFeatures);
-      setShowPreviewModal(true);
-      
-    } catch (error) {
-      console.error('Azure DevOps preview error:', error);
-      
-      if (error instanceof Error && error.message === 'Not authenticated') {
-        setAzureFetchError('Please authenticate with Azure DevOps');
-        handleInitiateOAuth();
-      } else {
-        setAzureFetchError("Failed to fetch features from Azure DevOps. Please try reconnecting.");
-      }
-    } finally {
-      setIsFetchingAzureDevOps(false);
-    }
-  }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
-
-  const handleConfirmSync = useCallback(async (replaceAll: boolean = false) => {
-    if (!previewFeatures) return;
-    
-    try {
-      setIsFetchingAzureDevOps(true);
-      
-      if (replaceAll) {
-        const existingFeatures = await db.getFeatures();
-        for (const feature of existingFeatures) {
-          await db.deleteFeature(feature.id);
-        }
-      }
-      
-      for (const feature of previewFeatures) {
-        const existingFeatures = await db.getFeatures();
-        const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
-        
-        if (existing) {
-          await db.updateFeature(existing.id, {
-            title: feature.title,
-            description: feature.description,
-            epic: feature.epic,
-            azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
-          });
-        } else {
-          await db.createFeature({
-            title: feature.title,
-            description: feature.description,
-            epic: feature.epic,
-            azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
-          });
-        }
-      }
-      
-      const allFeatures = await db.getFeatures();
-      const votesData = await db.getVotes();
-      
-      const featuresWithVotes = allFeatures.map(feature => {
-        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-        const voters = featureVotes.map(v => ({
-          userId: v.user_id,
-          name: v.user_name,
-          email: v.user_email,
-          voteCount: v.vote_count
-        }));
-        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-        
-        return {
-          id: feature.id,
-          title: feature.title,
-          description: feature.description,
-          epic: feature.epic,
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
-          votes: totalVotes,
-          voters
-        };
-      });
-      
-      setFeatures(featuresWithVotes);
-      
-      const updatedConfig = {
-        ...azureDevOpsConfig,
-        lastSyncTime: new Date().toISOString()
-      };
-      
-      await db.saveAzureDevOpsConfig(updatedConfig);
-      setAzureDevOpsConfig(updatedConfig);
-      
-    } catch (error) {
-      console.error('Azure DevOps sync error:', error);
-      setAzureFetchError("Failed to sync features from Azure DevOps.");
-    } finally {
-      setIsFetchingAzureDevOps(false);
-      setPreviewFeatures(null);
-    }
-  }, [previewFeatures, azureDevOpsConfig]);
-
-  const handleDisconnectAzureDevOps = useCallback(async () => {
-    try {
-      const updatedConfig = {
-        organization: azureDevOpsConfig.organization || 'newmill',
-        project: azureDevOpsConfig.project || 'Product',
-        workItemType: azureDevOpsConfig.workItemType || 'Feature',
-        query: azureDevOpsConfig.query,
-        accessToken: undefined,
-        refreshToken: undefined,
-        tokenExpiresAt: undefined,
-        enabled: false
-      };
-      
-      await db.saveAzureDevOpsConfig(updatedConfig);
-      setAzureDevOpsConfig(updatedConfig);
-      setAzureFetchError(null);
-      
-    } catch (error) {
-      console.error('Error disconnecting Azure DevOps:', error);
-      setAzureFetchError("Failed to disconnect from Azure DevOps");
-    }
-  }, [azureDevOpsConfig]);
-
-  const handleToggleAdmin = useCallback(() => {
-    if (isAdmin) {
-      setIsAdmin(false);
-      setView('voting');
-    } else {
-      setIsAdmin(true);
-      setView('admin');
-    }
-  }, [isAdmin]);
-
-  const handleAddFeature = useCallback(async (feature: any) => {
-    try {
-      const newFeature = await db.createFeature({
-        title: feature.title,
-        description: feature.description,
-        epic: feature.epic
-      });
-      
-      setFeatures(prev => [...prev, {
-        id: newFeature.id,
-        title: newFeature.title,
-        description: newFeature.description,
-        epic: newFeature.epic,
-        votes: 0,
-        voters: []
-      }]);
-      setShowAddForm(false);
-    } catch (error) {
-      console.error('Error adding feature:', error);
-      alert('Failed to add feature');
-    }
-  }, []);
-
-  const handleUpdateFeature = useCallback(async (updatedFeature: Feature) => {
-    try {
-      await db.updateFeature(updatedFeature.id, {
-        title: updatedFeature.title,
-        description: updatedFeature.description,
-        epic: updatedFeature.epic
-      });
-      
-      setFeatures(prev => prev.map(f => f.id === updatedFeature.id ? updatedFeature : f));
-      setEditingFeature(null);
-    } catch (error) {
-      console.error('Error updating feature:', error);
-      alert('Failed to update feature');
-    }
-  }, []);
-
-  const handleDeleteFeature = useCallback(async (id: string) => {
-    try {
-      await db.deleteFeature(id);
-      setFeatures(prev => prev.filter(f => f.id !== id));
-    } catch (error) {
-      console.error('Error deleting feature:', error);
-      alert('Failed to delete feature');
-    }
-  }, []);
-
-  const initiateResetVotes = useCallback((id: string) => {
-    setConfirmState({
-      showReset: true,
-      showResetAll: false,
-      targetId: id
-    });
-  }, []);
-
-  const handleResetVotes = useCallback(async () => {
-    const id = confirmState.targetId;
-    if (!id) return;
-    
-    try {
-      await db.deleteVotesForFeature(id);
-      
-      const featuresData = await db.getFeatures();
-      const votesData = await db.getVotes();
-      
-      const featuresWithVotes = featuresData.map(feature => {
-        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-        const voters = featureVotes.map(v => ({
-          userId: v.user_id,
-          name: v.user_name,
-          email: v.user_email,
-          voteCount: v.vote_count
-        }));
-        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-        
-        return {
-          id: feature.id,
-          title: feature.title,
-          description: feature.description,
-          epic: feature.epic,
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
-          votes: totalVotes,
-          voters
-        };
-      });
-      
-      setFeatures(featuresWithVotes);
-    } catch (error) {
-      console.error('Error resetting votes:', error);
-      alert('Failed to reset votes');
-    }
-  }, [confirmState.targetId]);
-
-  const initiateResetAllVotes = useCallback(() => {
-    setConfirmState({
-      showReset: false,
-      showResetAll: true,
-      targetId: null
-    });
-  }, []);
-
-  const handleResetAllVotes = useCallback(async () => {
-    try {
-      await db.deleteAllVotes();
-      setFeatures(prev => prev.map(feature => ({ ...feature, votes: 0, voters: [] })));
-    } catch (error) {
-      console.error('Error resetting all votes:', error);
-      alert('Failed to reset all votes');
-    }
-  }, []);
-
-  const handlePendingVote = useCallback((featureId: string, increment: boolean) => {
-    if (!currentUser || !votingSession.isActive) return;
-    
-    const currentVoteCount = pendingVotes[featureId] || 0;
-    let newVoteCount = currentVoteCount;
-    
-    if (increment) {
-      if (pendingUsedVotes < votingSession.votesPerUser) {
-        newVoteCount = currentVoteCount + 1;
-      } else {
-        return;
-      }
-    } else {
-      if (currentVoteCount > 0) {
-        newVoteCount = currentVoteCount - 1;
-      } else {
-        return;
-      }
-    }
-    
-    setPendingVotes(prev => {
-      const updated = { ...prev };
-      if (newVoteCount === 0) {
-        delete updated[featureId];
-      } else {
-        updated[featureId] = newVoteCount;
-      }
-      return updated;
-    });
-    
-    setPendingUsedVotes(prev => increment ? prev + 1 : prev - 1);
-  }, [currentUser, pendingVotes, pendingUsedVotes, votingSession.isActive, votingSession.votesPerUser]);
-
-  const handleSubmitVotes = useCallback(async () => {
-    if (!currentUser || !votingSession.isActive) return;
-    if (pendingUsedVotes < votingSession.votesPerUser) return;
-    
-    try {
-      for (const [featureId, voteCount] of Object.entries(pendingVotes)) {
-        if (voteCount > 0) {
-          await db.saveVote({
-            feature_id: featureId,
-            user_id: currentUser.id,
-            user_name: currentUser.name,
-            user_email: currentUser.email,
-            vote_count: voteCount
-          });
-        }
-      }
-      
-      const featuresData = await db.getFeatures();
-      const votesData = await db.getVotes();
-      
-      const featuresWithVotes = featuresData.map(feature => {
-        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-        const voters = featureVotes.map(v => ({
-          userId: v.user_id,
-          name: v.user_name,
-          email: v.user_email,
-          voteCount: v.vote_count
-        }));
-        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-        
-        return {
-          id: feature.id,
-          title: feature.title,
-          description: feature.description,
-          epic: feature.epic,
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
-          votes: totalVotes,
-          voters
-        };
-      });
-      
-      setFeatures(featuresWithVotes);
-      setView('thankyou');
-    } catch (error) {
-      console.error('Error submitting votes:', error);
-      alert('Failed to submit votes. Please try again.');
-    }
-  }, [currentUser, pendingUsedVotes, pendingVotes, votingSession.isActive, votingSession.votesPerUser]);
-
-  const handleUpdateVotingSession = useCallback((updatedSession: VotingSession) => {
-    setVotingSession(updatedSession);
-    setShowSessionForm(false);
-  }, []);
-
-  const handleUpdateAzureDevOpsConfig = useCallback(async (config: AzureDevOpsConfig) => {
-    setAzureDevOpsConfig(config);
-    
-    try {
-      await db.saveAzureDevOpsConfig({
-        organization: config.organization,
-        project: config.project,
-        accessToken: config.accessToken,
-        refreshToken: config.refreshToken,
-        tokenExpiresAt: config.tokenExpiresAt,
-        tenantId: config.tenantId,
-        clientId: config.clientId,
-        enabled: config.enabled,
-        workItemType: config.workItemType,
-        query: config.query,
-        lastSyncTime: config.lastSyncTime
-      });
-    } catch (error) {
-      console.error('Error saving config:', error);
-    }
-  }, []);
-
-  const handleReturnToVoting = useCallback(() => {
-    setPendingVotes({});
-    setPendingUsedVotes(0);
-    setView('voting');
-  }, []);
-
-  const renderContent = useMemo(() => {
-    switch (view) {
-      case 'voting':
-        return (
-          <VotingScreen 
-            features={features} 
-            currentUser={currentUser} 
-            pendingVotes={pendingVotes}
-            pendingUsedVotes={pendingUsedVotes}
-            onVote={handlePendingVote}
-            onSubmitVotes={handleSubmitVotes}
-            onToggleAdmin={handleToggleAdmin}
-            isAdmin={isAdmin}
-            votingSession={votingSession}
-          />
-        );
-      case 'results':
-        return (
-          <ResultsScreen 
-            features={features} 
-            onResetVotes={initiateResetVotes}
-            onResetAllVotes={initiateResetAllVotes}
-            onBack={() => setView('admin')}
-            showVotersList={showVotersList}
-            setShowVotersList={setShowVotersList}
-            votingSession={votingSession}
-          />
-        );
-      case 'thankyou':
-        return (
-          <ThankYouScreen
-            onReturn={handleReturnToVoting}
-            votingSession={votingSession}
-          />
-        );
-      case 'admin':
-      default:
-        return (
-          <AdminScreen 
-            features={features} 
-            onAddFeature={handleAddFeature} 
-            onUpdateFeature={handleUpdateFeature} 
-            onDeleteFeature={handleDeleteFeature}
-            onShowResults={() => setView('results')}
-            showAddForm={showAddForm}
-            setShowAddForm={setShowAddForm}
-            editingFeature={editingFeature}
-            setEditingFeature={setEditingFeature}
-            onLogout={handleToggleAdmin}
-            votingSession={votingSession}
-            onUpdateVotingSession={handleUpdateVotingSession}
-            showSessionForm={showSessionForm}
-            setShowSessionForm={setShowSessionForm}
-            azureDevOpsConfig={azureDevOpsConfig}
-            onUpdateAzureDevOpsConfig={handleUpdateAzureDevOpsConfig}
-            showAzureDevOpsForm={showAzureDevOpsForm}
-            setShowAzureDevOpsForm={setShowAzureDevOpsForm}
-            onFetchAzureDevOpsFeatures={handleFetchAzureDevOpsFeatures}
-            onPreviewAzureDevOpsFeatures={handlePreviewAzureDevOpsFeatures}
-            onDisconnectAzureDevOps={handleDisconnectAzureDevOps}
-            isFetchingAzureDevOps={isFetchingAzureDevOps}
-            azureFetchError={azureFetchError}
-            onInitiateOAuth={handleInitiateOAuth}
-            previewFeatures={previewFeatures}
-            showPreviewModal={showPreviewModal}
-            setShowPreviewModal={setShowPreviewModal}
-            onConfirmSync={handleConfirmSync}
-          />
-        );
-    }
-  }, [
-    view, features, currentUser, pendingVotes, pendingUsedVotes, 
-    handlePendingVote, handleSubmitVotes, handleToggleAdmin, isAdmin, 
-    votingSession, initiateResetVotes, initiateResetAllVotes, showVotersList,
-    setShowVotersList, handleReturnToVoting, handleAddFeature, handleUpdateFeature,
-    handleDeleteFeature, showAddForm, setShowAddForm, editingFeature,
-    setEditingFeature, handleUpdateVotingSession, showSessionForm, setShowSessionForm,
-    azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
-    setShowAzureDevOpsForm, handleFetchAzureDevOpsFeatures, handlePreviewAzureDevOpsFeatures,
-    handleDisconnectAzureDevOps, isFetchingAzureDevOps, azureFetchError, handleInitiateOAuth,
-    previewFeatures, showPreviewModal, setShowPreviewModal, handleConfirmSync
-  ]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full bg-gray-50 text-gray-900 font-sans">
-      {renderContent}
-      
-      <ConfirmDialog
-        show={confirmState.showReset}
-        title="Reset Votes"
-        message="Are you sure you want to reset all votes for this feature? This will remove all voting data for this feature."
-        onConfirm={handleResetVotes}
-        onCancel={() => setConfirmState(prev => ({ ...prev, showReset: false }))}
-        confirmText="Reset"
-        type="reset"
-      />
-      
-      <ConfirmDialog
-        show={confirmState.showResetAll}
-        title="Reset All Votes"
-        message="Are you sure you want to reset all votes for all features? This will remove all voting data and cannot be undone."
-        onConfirm={handleResetAllVotes}
-        onCancel={() => setConfirmState(prev => ({ ...prev, showResetAll: false }))}
-        confirmText="Reset All"
-        type="reset"
-      />
-    </div>
-  );
-}
 
 export default FeatureVotingSystem;
 

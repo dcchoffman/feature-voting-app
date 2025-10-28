@@ -18,12 +18,24 @@ export async function createFeature(feature: {
   title: string;
   description: string;
   epic: string | null;
+  state?: string | null;
+  areaPath?: string | null;
+  tags?: string[] | null;
   azure_devops_id?: string | null;
   azure_devops_url?: string | null;
 }) {
   const { data, error } = await supabase
     .from('features')
-    .insert([feature])
+    .insert([{
+      title: feature.title,
+      description: feature.description,
+      epic: feature.epic,
+      state: feature.state,
+      area_path: feature.areaPath,
+      tags: feature.tags,
+      azure_devops_id: feature.azure_devops_id,
+      azure_devops_url: feature.azure_devops_url
+    }])
     .select()
     .single();
   
@@ -35,12 +47,26 @@ export async function updateFeature(id: string, updates: {
   title?: string;
   description?: string;
   epic?: string | null;
+  state?: string | null;
+  areaPath?: string | null;
+  tags?: string[] | null;
   azure_devops_id?: string | null;
   azure_devops_url?: string | null;
 }) {
+  const dbUpdates: any = {};
+  
+  if (updates.title !== undefined) dbUpdates.title = updates.title;
+  if (updates.description !== undefined) dbUpdates.description = updates.description;
+  if (updates.epic !== undefined) dbUpdates.epic = updates.epic;
+  if (updates.state !== undefined) dbUpdates.state = updates.state;
+  if (updates.areaPath !== undefined) dbUpdates.area_path = updates.areaPath;
+  if (updates.tags !== undefined) dbUpdates.tags = updates.tags;
+  if (updates.azure_devops_id !== undefined) dbUpdates.azure_devops_id = updates.azure_devops_id;
+  if (updates.azure_devops_url !== undefined) dbUpdates.azure_devops_url = updates.azure_devops_url;
+  
   const { data, error } = await supabase
     .from('features')
-    .update(updates)
+    .update(dbUpdates)
     .eq('id', id)
     .select()
     .single();
@@ -191,6 +217,59 @@ export async function saveVotingSession(session: {
   }
 }
 
+export async function createVotingSession(session: {
+  title: string;
+  goal: string;
+  votes_per_user: number;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+}) {
+  const { data, error } = await supabase
+    .from('voting_sessions')
+    .insert([session])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateVotingSession(session: {
+  title: string;
+  goal: string;
+  votes_per_user: number;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+}) {
+  // First get the current active session to get its ID
+  const { data: currentSession, error: fetchError } = await supabase
+    .from('voting_sessions')
+    .select('id')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (fetchError) throw fetchError;
+  
+  if (!currentSession) {
+    // If no session exists, create one instead
+    return createVotingSession(session);
+  }
+
+  // Update the existing session
+  const { data, error } = await supabase
+    .from('voting_sessions')
+    .update(session)
+    .eq('id', currentSession.id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 // ============================================
 // AZURE DEVOPS CONFIG
 // ============================================
@@ -230,6 +309,9 @@ export async function saveAzureDevOpsConfig(config: {
   enabled: boolean;
   workItemType: string;
   query?: string | null;
+  states?: string[] | null;        // NEW
+  areaPath?: string | null;        // NEW
+  tags?: string[] | null;          // NEW
   lastSyncTime?: string | null;
 }) {
   try {
@@ -249,6 +331,11 @@ export async function saveAzureDevOpsConfig(config: {
     if (config.clientId !== undefined) dbConfig.client_id = config.clientId;
     if (config.query !== undefined) dbConfig.query = config.query;
     if (config.lastSyncTime !== undefined) dbConfig.last_sync_time = config.lastSyncTime;
+    
+    // NEW: Add filter fields
+    if (config.states !== undefined) dbConfig.states = config.states;
+    if (config.areaPath !== undefined) dbConfig.area_path = config.areaPath;
+    if (config.tags !== undefined) dbConfig.tags = config.tags;
     
     // Get existing config to use its ID
     const { data: existing } = await supabase

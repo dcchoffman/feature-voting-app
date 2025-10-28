@@ -10,6 +10,9 @@ export interface AzureDevOpsConfig {
   workItemType: string;
   query?: string;
   lastSyncTime?: string;
+  states?: string[];   
+  areaPath?: string;
+  tags?: string[];
 }
 
 export interface AzureDevOpsWorkItem {
@@ -34,6 +37,9 @@ export interface Feature {
   votes: number;
   voters: VoterInfo[];
   epic?: string;
+  state?: string; 
+  areaPath?: string;  
+  tags?: string[];
   azureDevOpsId?: string;
   azureDevOpsUrl?: string;
 }

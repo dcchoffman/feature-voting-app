@@ -51,3 +51,10 @@ export interface VoterInfo {
   voteCount: number;
 }
 
+export interface VotingSession {
+  // ... existing fields
+  originalEndDate?: string;  // Store original end date when ended early
+  endedEarlyBy?: string;     // Name of admin who ended early
+  endedEarlyReason?: string; // Reason selected from dropdown
+  endedEarlyDetails?: string; // Optional additional details
+}

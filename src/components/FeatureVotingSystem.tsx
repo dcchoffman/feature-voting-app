@@ -6,20 +6,27 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from "react";
 import { useForm } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { 
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database, Search
+  Cloud, Database, Search, Shield
 } from "lucide-react";
 
 // Import services
 import * as db from '../services/databaseService';
 import * as azureService from '../services/azureDevOpsService';
 
+// Import context
+import { useSession } from '../contexts/SessionContext';
+
 // Import types
 import type { AzureDevOpsConfig, Feature, VoterInfo } from '../types/azure';
+
+// Import screens
+import AdminDashboard from '../screens/AdminDashboard';
 
 // ============================================
 // TYPES & INTERFACES
@@ -38,6 +45,7 @@ interface VotingSession {
   title: string;
   goal: string;
   votesPerUser: number;
+  useAutoVotes: boolean;
   startDate: string;
   endDate: string;
   isActive: boolean;
@@ -63,6 +71,7 @@ const initialVotingSession: VotingSession = {
   title: "Q2 Product Roadmap",
   goal: "Prioritize features for the Purchasing Dashboard redesign",
   votesPerUser: 10,
+  useAutoVotes: true,
   startDate: new Date().toISOString(),
   endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   isActive: true
@@ -127,17 +136,17 @@ const getDaysRemaining = (dateString: string): number => {
 };
 
 const getDeadlineColor = (daysRemaining: number): string => {
-  if (daysRemaining <= 0) return 'text-red-600';
-  if (daysRemaining <= 2) return 'text-red-500';
-  if (daysRemaining <= 4) return 'text-yellow-500';
-  return 'text-[#1E6154]';
+  if (daysRemaining <= 0) return 'text-[#591D0F]';
+  if (daysRemaining <= 2) return 'text-[#6A4234]';
+  if (daysRemaining <= 4) return 'text-[#C89212]';
+  return 'text-[#1E5461]';
 };
 
 const getDeadlineBgColor = (daysRemaining: number): string => {
-  if (daysRemaining <= 0) return 'bg-red-100';
-  if (daysRemaining <= 2) return 'bg-red-50';
-  if (daysRemaining <= 4) return 'bg-yellow-50';
-  return 'bg-[#1E6154]/10';
+  if (daysRemaining <= 0) return 'bg-[#591D0F]/10';
+  if (daysRemaining <= 2) return 'bg-[#6A4234]/10';
+  if (daysRemaining <= 4) return 'bg-[#C89212]/10';
+  return 'bg-[#1E5461]/10';
 };
 
 const isPastDate = (dateString: string): boolean => {
@@ -168,14 +177,10 @@ const truncateText = (text: string, maxLength: number): string => {
 const stripHtmlTags = (html: string): string => {
   if (!html) return '';
   
-  // Create a temporary div element to parse HTML
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   
-  // Get text content and clean up whitespace
   let text = tmp.textContent || tmp.innerText || '';
-  
-  // Replace multiple spaces/newlines with single space
   text = text.replace(/\s+/g, ' ').trim();
   
   return text;
@@ -191,6 +196,24 @@ const randomizeText = (text: string): string => {
     }
   }
   return arr.join('');
+};
+
+// ============================================
+// EXPORTS FOR USE IN OTHER COMPONENTS
+// ============================================
+
+export { 
+  Button, 
+  Modal, 
+  EpicTag, 
+  AzureDevOpsBadge, 
+  ImageWithFallback, 
+  FeatureForm, 
+  AzureDevOpsForm,
+  formatDate,
+  getDaysRemaining,
+  getDeadlineColor,
+  isPastDate
 };
 
 // ============================================
@@ -248,12 +271,12 @@ const Button = React.memo(function Button({
   const baseClasses = "py-2 px-4 rounded-lg flex items-center transition-colors cursor-pointer";
   
   const variantClasses = {
-    primary: "bg-[#4f6d8e] text-white hover:bg-[#3d5670]",
+    primary: "bg-[#2d4660] text-white hover:bg-[#173B65]",
     secondary: "border border-gray-300 text-gray-700 hover:bg-gray-50",
-    danger: "bg-red-600 text-white hover:bg-red-700",
-    gold: "bg-[#c59f2d] text-white hover:bg-[#a88a26]",
-    blue: "bg-[#2d4660] text-white hover:bg-[#1d3a53]",
-    gray: "bg-gray-600 text-white hover:bg-gray-700"
+    danger: "bg-[#591D0F] text-white hover:bg-[#492434]",
+    gold: "bg-[#C89212] text-white hover:bg-[#A67810]",
+    blue: "bg-[#173B65] text-white hover:bg-[#1D2C49]",
+    gray: "bg-[#576C71] text-white hover:bg-[#1E5461]"
   };
   
   const disabledClasses = "opacity-60 cursor-not-allowed";
@@ -362,9 +385,9 @@ const DeadlineDisplay = React.memo(function DeadlineDisplay({ endDate }: Deadlin
   
   return (
     <div className={`${deadlineBgColor} rounded-md p-3 border ${
-      daysRemaining <= 2 ? 'border-red-200' : 
-      daysRemaining <= 4 ? 'border-yellow-200' : 
-      'border-[#1E6154]/20'
+      daysRemaining <= 2 ? 'border-[#6A4234]/20' : 
+      daysRemaining <= 4 ? 'border-[#C89212]/20' : 
+      'border-[#1E5461]/20'
     }`}>
       <div className="flex items-center">
         <Calendar className={`h-5 w-5 mr-2 ${deadlineColor}`} />
@@ -400,7 +423,7 @@ function ShuffleButton({ isShuffling, onShuffle }: ShuffleButtonProps) {
     if (isShuffling) {
       intervalRef.current = window.setInterval(() => {
         setDisplayText(randomizeText('Shuffle Features'));
-      }, 200);
+      }, 100);
     } else {
       if (intervalRef.current !== null) {
         window.clearInterval(intervalRef.current);
@@ -417,12 +440,14 @@ function ShuffleButton({ isShuffling, onShuffle }: ShuffleButtonProps) {
   return (
     <button
       onClick={onShuffle}
-      className={`py-2 px-4 rounded-lg flex items-center transition-colors ${
-        isShuffling ? 'bg-[#c59f2d]/80 text-white' : 'bg-[#c59f2d] hover:bg-[#a88a26] text-white'
+      className={`py-2 px-4 rounded-lg flex items-center transition-all duration-300 ${
+        isShuffling 
+          ? 'bg-[#C89212] text-white scale-95' 
+          : 'bg-[#C89212] hover:bg-[#A67810] text-white hover:scale-105'
       }`}
       disabled={isShuffling}
     >
-      <span className={isShuffling ? "mr-2 animate-spin" : "mr-2"}>
+      <span className={`transition-transform duration-500 ${isShuffling ? "mr-2 animate-spin" : "mr-2"}`}>
         <Shuffle className="h-4 w-4" />
       </span>
       <span className="font-medium tracking-wide whitespace-nowrap">{displayText}</span>
@@ -453,9 +478,9 @@ const ConfirmDialog = React.memo(function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!show) return null;
   
-  const bgColor = type === "delete" ? "bg-red-50" : "bg-orange-50";
-  const iconColor = type === "delete" ? "text-red-600" : "text-orange-600";
-  const buttonColor = type === "delete" ? "bg-red-600 hover:bg-red-700" : "bg-orange-600 hover:bg-orange-700";
+  const bgColor = type === "delete" ? "bg-[#591D0F]/10" : "bg-[#C89212]/10";
+  const iconColor = type === "delete" ? "text-[#591D0F]" : "text-[#C89212]";
+  const buttonColor = type === "delete" ? "bg-[#591D0F] hover:bg-[#492434]" : "bg-[#C89212] hover:bg-[#A67810]";
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -507,6 +532,9 @@ interface FeatureCardProps {
   votingIsActive?: boolean;
   onVote?: (featureId: string, increment: boolean) => void;
   isShuffling?: boolean;
+  shuffleStage?: 'idle' | 'fadeOut' | 'rearranging' | 'fadeIn';
+  currentUser?: any;
+  onRequestInfo?: (featureId: string) => void;
 }
 
 const FeatureCard = React.memo(function FeatureCard({
@@ -515,17 +543,75 @@ const FeatureCard = React.memo(function FeatureCard({
   remainingVotes = 0,
   votingIsActive = false,
   onVote,
-  isShuffling = false
+  isShuffling = false,
+  shuffleStage = 'idle',
+  currentUser,
+  onRequestInfo
 }: FeatureCardProps) {
+  const [infoRequested, setInfoRequested] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleRequestClick = async () => {
+    if (!onRequestInfo || isSubmitting) return;
+    
+    setIsSubmitting(true);
+    try {
+      await onRequestInfo(feature.id);
+      setInfoRequested(true);
+    } catch (error) {
+      console.error('Error requesting info:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getShuffleClasses = () => {
+    switch (shuffleStage) {
+      case 'fadeOut':
+        return 'opacity-0 scale-95 blur-sm';
+      case 'rearranging':
+        return 'opacity-0 scale-90';
+      case 'fadeIn':
+        return 'opacity-100 scale-100 blur-0';
+      default:
+        return 'opacity-100 scale-100 blur-0';
+    }
+  };
+
   return (
     <div 
-      className={`bg-white rounded-lg shadow-md overflow-hidden ${
-        userVoteCount > 0 ? 'border-2 border-[#1E6154]' : ''
-      } ${isShuffling ? 'opacity-75' : 'opacity-100'}`}
+      className={`bg-white rounded-lg shadow-md overflow-hidden transition-all duration-400 ease-in-out ${
+        userVoteCount > 0 ? 'border-2 border-[#1E5461]' : ''
+      } ${getShuffleClasses()}`}
     >
       <div className="p-6 flex flex-col h-full">
         <h3 className="text-lg font-semibold mb-2 text-[#2d4660]">{feature.title}</h3>
-        <p className="text-gray-600 mb-4 flex-grow">{feature.description}</p>
+        {feature.description ? (
+          <p className="text-gray-600 mb-4 flex-grow">{feature.description}</p>
+        ) : (
+          <div className="mb-4 flex-grow">
+            <p className="text-gray-400 italic mb-3">No description provided</p>
+            {currentUser && onRequestInfo && (
+              <div className="transition-all duration-300">
+                {!infoRequested ? (
+                  <button
+                    onClick={handleRequestClick}
+                    disabled={isSubmitting}
+                    className="text-sm px-3 py-2 bg-blue-50 hover:bg-blue-100 text-[#2d4660] rounded-md font-medium flex items-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span>{isSubmitting ? 'Sending...' : 'Ask Product Owner for more info'}</span>
+                  </button>
+                ) : (
+                  <div className="text-sm px-3 py-2 bg-green-50 text-green-700 rounded-md font-medium flex items-center animate-fadeIn">
+                    <CheckCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span>Thank you! Your request has been sent.</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         
         <div className="flex items-center justify-between mb-3">
           {feature.epic && <EpicTag name={feature.epic} />}
@@ -545,7 +631,7 @@ const FeatureCard = React.memo(function FeatureCard({
                   onClick={() => onVote(feature.id, true)}
                   className={`px-4 py-1 rounded-md text-sm font-medium cursor-pointer ${
                     votingIsActive && remainingVotes > 0
-                      ? 'bg-[#4f6d8e] text-white hover:bg-[#bea263]'
+                      ? 'bg-[#2d4660] text-white hover:bg-[#C89212]'
                       : 'bg-gray-300 text-gray-600 cursor-not-allowed'
                   }`}
                   disabled={!votingIsActive || remainingVotes <= 0}
@@ -562,14 +648,14 @@ const FeatureCard = React.memo(function FeatureCard({
                   >
                     <ChevronDown className="h-5 w-5" />
                   </button>
-                  <span className="px-3 py-1 bg-[#1E6154]/10 text-[#1E6154] rounded-full font-medium text-sm">
+                  <span className="px-3 py-1 bg-[#1E5461]/10 text-[#1E5461] rounded-full font-medium text-sm">
                     {userVoteCount}
                   </span>
                   <button
                     onClick={() => onVote(feature.id, true)}
                     className={`p-1 rounded-full cursor-pointer ${
                       votingIsActive && remainingVotes > 0 
-                        ? 'bg-[#4f6d8e]/10 hover:bg-[#bea263]/30 text-[#4f6d8e]' 
+                        ? 'bg-[#2d4660]/10 hover:bg-[#C89212]/30 text-[#2d4660]' 
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
                     disabled={!votingIsActive || remainingVotes <= 0}
@@ -636,6 +722,7 @@ interface ResultsScreenProps {
   showVotersList: string | null;
   setShowVotersList: (id: string | null) => void;
   votingSession: VotingSession;
+  effectiveVotesPerUser: number;
 }
 
 function ResultsScreen({ 
@@ -645,7 +732,8 @@ function ResultsScreen({
   onBack,
   showVotersList,
   setShowVotersList,
-  votingSession
+  votingSession,
+  effectiveVotesPerUser
 }: ResultsScreenProps) {
   const sortedFeatures = useMemo(() => {
     return [...features].sort((a, b) => b.votes - a.votes);
@@ -669,7 +757,7 @@ function ResultsScreen({
         <img
           src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
           alt="New Millennium Building Systems Logo"
-          className="-mt-8"
+          className="-mt-4"
           style={{ height: '96px', width: 'auto' }}
         />
       </div>
@@ -690,7 +778,9 @@ function ResultsScreen({
           >
             <ChevronLeft className="h-6 w-6" />
           </button>
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Voting Results</h1>
+          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">
+            {isPastDate(votingSession.endDate) ? 'Final Voting Results' : 'Current Voting Results'}
+          </h1>
         </div>
         <div className="flex space-x-2">
           <Button 
@@ -710,17 +800,17 @@ function ResultsScreen({
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+      <div className="relative z-10 bg-white rounded-lg shadow-md p-4 mb-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-[#2d4660]">{votingSession.title}</h2>
           <div className="text-sm text-gray-600">
-            <span className="mr-2">Votes per user: {votingSession.votesPerUser}</span>
+            <span className="mr-2">Votes per user: {effectiveVotesPerUser}</span>
             {votingSession.isActive ? (
-              <span className="text-[#1E6154] font-medium">Voting Active</span>
+              <span className="text-[#1E5461] font-medium">Voting Active</span>
             ) : isPastDate(votingSession.endDate) ? (
-              <span className="text-red-600 font-medium">Voting Closed</span>
+              <span className="text-[#591D0F] font-medium">Voting Closed</span>
             ) : (
-              <span className="text-yellow-600 font-medium">Voting Upcoming</span>
+              <span className="text-[#C89212] font-medium">Voting Upcoming</span>
             )}
           </div>
         </div>
@@ -728,7 +818,7 @@ function ResultsScreen({
         <p className="text-gray-600 mb-4">{votingSession.goal}</p>
         
         {votingSession.isActive && (
-          <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 mb-4 inline-block border ${daysRemaining <= 2 ? 'border-red-200' : daysRemaining <= 4 ? 'border-yellow-200' : 'border-[#1E6154]/20'}`}>
+          <div className={`${getDeadlineBgColor(daysRemaining)} relative z-10 rounded-md p-3 mb-4 inline-block border ${daysRemaining <= 2 ? 'border-[#6A4234]/20' : daysRemaining <= 4 ? 'border-[#C89212]/20' : 'border-[#1E5461]/20'}`}>
             <div className="flex items-center">
               <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
               <span className={`${deadlineColor} font-medium`}>
@@ -766,7 +856,7 @@ function ResultsScreen({
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-md p-4">
+      <div className="relative z-10 bg-white rounded-lg shadow-md p-4">
         <h2 className="text-xl font-semibold mb-4 text-[#2d4660]">Feature Details</h2>
         <div className="w-full overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 table-fixed">
@@ -799,7 +889,7 @@ function ResultsScreen({
                   <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
                     <button
                       onClick={() => setShowVotersList(feature.id)}
-                      className="text-[#2d4660] hover:text-[#bea263] flex items-center cursor-pointer"
+                      className="text-[#2d4660] hover:text-[#C89212] flex items-center cursor-pointer"
                       disabled={feature.voters.length === 0}
                     >
                       <Users className="h-4 w-4 mr-1" />
@@ -809,7 +899,7 @@ function ResultsScreen({
                   <td className="px-4 py-4 whitespace-nowrap text-sm md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onResetVotes(feature.id)}
-                      className="text-red-600 hover:text-red-900 cursor-pointer"
+                      className="text-[#591D0F] hover:text-[#492434] cursor-pointer"
                       disabled={feature.votes === 0}
                     >
                       Reset Votes
@@ -848,11 +938,11 @@ function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
           style={{ maxWidth: '200px', height: 'auto' }}
         />
         
-        <div className="w-20 h-20 bg-[#1E6154]/10 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle className="h-12 w-12 text-[#1E6154]" />
+        <div className="w-20 h-20 bg-[#1E5461]/10 rounded-full flex items-center justify-center mx-auto mb-6">
+          <CheckCircle className="h-12 w-12 text-[#1E5461]" />
         </div>
         
-        <h1 className="text-3xl font-bold text-[#1E6154] mb-4">Thank You!</h1>
+        <h1 className="text-3xl font-bold text-[#1E5461] mb-4">Thank You!</h1>
         
         <p className="text-gray-700 text-lg mb-6">
           Your votes for <span className="font-semibold">{votingSession.title}</span> have been submitted successfully.
@@ -873,126 +963,6 @@ function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
 // ============================================
 // FORM COMPONENTS
 // ============================================
-
-interface VotingSessionFormProps {
-  votingSession: VotingSession;
-  onSubmit: (data: VotingSession) => void;
-  onCancel: () => void;
-}
-
-function VotingSessionForm({ votingSession, onSubmit, onCancel }: VotingSessionFormProps) {
-  const { register, handleSubmit, formState: { errors }, watch } = useForm({
-    defaultValues: {
-      title: votingSession.title,
-      goal: votingSession.goal,
-      votesPerUser: votingSession.votesPerUser,
-      startDate: new Date(votingSession.startDate).toISOString().split('T')[0],
-      endDate: new Date(votingSession.endDate).toISOString().split('T')[0],
-    }
-  });
-
-  const startDate = watch('startDate');
-
-  const onFormSubmit = (data: any) => {
-    onSubmit({
-      title: data.title,
-      goal: data.goal,
-      votesPerUser: Number(data.votesPerUser),
-      startDate: new Date(data.startDate).toISOString(),
-      endDate: new Date(data.endDate).toISOString(),
-      isActive: isDateInRange(
-        new Date(data.startDate).toISOString(), 
-        new Date(data.endDate).toISOString()
-      )
-    });
-  };
-
-  return (
-    <form onSubmit={handleSubmit(onFormSubmit)}>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Session Title</label>
-          <input
-            {...register('title', { required: 'Title is required' })}
-            placeholder="e.g., Sprint 12 Planning"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
-        </div>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Votes Per User</label>
-          <input
-            type="number"
-            min="1"
-            max="100"
-            {...register('votesPerUser', { 
-              required: 'Votes per user is required',
-              min: { value: 1, message: 'Minimum 1 vote' },
-              max: { value: 100, message: 'Maximum 100 votes' }
-            })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          {errors.votesPerUser && <p className="mt-1 text-sm text-red-600">{errors.votesPerUser.message}</p>}
-        </div>
-      </div>
-      
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Goal</label>
-        <textarea
-          {...register('goal', { required: 'Goal is required' })}
-          rows={2}
-          placeholder="Describe the purpose of this voting session"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md"
-        />
-        {errors.goal && <p className="mt-1 text-sm text-red-600">{errors.goal.message}</p>}
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-          <input
-            type="date"
-            {...register('startDate', { required: 'Start date is required' })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          {errors.startDate && <p className="mt-1 text-sm text-red-600">{errors.startDate.message}</p>}
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-          <input
-            type="date"
-            {...register('endDate', { 
-              required: 'End date is required',
-              validate: value => 
-                !startDate || new Date(value) >= new Date(startDate) || 
-                'End date must be after start date'
-            })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          {errors.endDate && <p className="mt-1 text-sm text-red-600">{errors.endDate.message}</p>}
-        </div>
-      </div>
-      
-      <div className="flex justify-end space-x-2 mt-6">
-        <Button 
-          variant="secondary"
-          type="button"
-          onClick={onCancel}
-        >
-          Cancel
-        </Button>
-        <Button 
-          variant="primary"
-          type="submit"
-        >
-          Save Settings
-        </Button>
-      </div>
-    </form>
-  );
-}
 
 interface AzureDevOpsFormProps {
   config: AzureDevOpsConfig;
@@ -1036,11 +1006,9 @@ function AzureDevOpsForm({
   const isAuthenticated = config.accessToken && config.enabled;
   
   const onFormSubmit = async (data: any) => {
-    // Build query based on filters
     let finalQuery = undefined;
     const queryParts: string[] = [];
     
-    // Add state filter if selected
     if (data.states && data.states.length > 0) {
       if (data.states.length === 1) {
         queryParts.push(`[System.State] = '${data.states[0]}'`);
@@ -1050,12 +1018,10 @@ function AzureDevOpsForm({
       }
     }
     
-    // Add Area Path filter if selected
     if (data.areaPath) {
       queryParts.push(`[System.AreaPath] UNDER '${data.areaPath}'`);
     }
     
-    // Add Tags filter if selected
     if (data.tags && data.tags.length > 0) {
       const tagFilters = data.tags.map((tag: string) => 
         `[System.Tags] CONTAINS '${tag}'`
@@ -1063,12 +1029,10 @@ function AzureDevOpsForm({
       queryParts.push(`(${tagFilters.join(' OR ')})`);
     }
     
-    // Add custom advanced query if in advanced mode
     if (showAdvanced && data.query) {
       queryParts.push(`(${data.query})`);
     }
     
-    // Combine all query parts
     if (queryParts.length > 0) {
       finalQuery = queryParts.join(' AND ');
     }
@@ -1084,14 +1048,11 @@ function AzureDevOpsForm({
       tags: data.tags && data.tags.length > 0 ? data.tags : undefined
     };
     
-    // Always save the config first so org/project are persisted
     onUpdate(updatedConfig);
     
-    // If already authenticated, show preview modal
     if (isAuthenticated) {
       await onPreview();
     } else {
-      // Otherwise, initiate OAuth flow (config is already saved above)
       onInitiateOAuth();
     }
   };
@@ -1167,10 +1128,8 @@ function AzureDevOpsForm({
             </button>
           </div>
           
-          {/* State, Area Path, and Tags filters - only show when authenticated */}
           {isAuthenticated && (availableStates.length > 0 || availableAreaPaths.length > 0 || availableTags.length > 0) && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-              {/* State Filter */}
               {availableStates.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1192,7 +1151,6 @@ function AzureDevOpsForm({
                 </div>
               )}
               
-              {/* Area Path Filter */}
               {availableAreaPaths.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1213,7 +1171,6 @@ function AzureDevOpsForm({
                 </div>
               )}
               
-              {/* Tags Filter */}
               {availableTags.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1237,7 +1194,6 @@ function AzureDevOpsForm({
             </div>
           )}
           
-          {/* Advanced WIQL input */}
           {showAdvanced && (
             <div className="mt-3">
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1262,7 +1218,6 @@ function AzureDevOpsForm({
             </div>
           )}
           
-          {/* Message when not authenticated */}
           {!isAuthenticated && (
             <div className="bg-gray-50 rounded-md p-3 text-sm text-gray-600 border border-gray-200">
               Filter options will appear after connecting to Azure DevOps
@@ -1379,12 +1334,34 @@ function FeatureForm({ feature, onSubmit, onCancel }: FeatureFormProps) {
 interface FeatureVotingSystemProps {
   defaultVotesPerUser?: number;
   adminMode?: boolean;
+  resultsMode?: boolean;
 }
 
 function FeatureVotingSystem({ 
   defaultVotesPerUser = 10, 
-  adminMode = false 
+  adminMode = false,
+  resultsMode = false
 }: FeatureVotingSystemProps) {
+  
+  // Session context integration
+  const { currentSession, currentUser } = useSession();
+  const navigate = useNavigate();
+  
+  // Redirect if no session selected (but not during OAuth callback)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const isOAuthCallback = urlParams.has('code') || urlParams.has('error');
+    
+    // Check if there's a stored session ID that's still loading
+    const storedSessionId = localStorage.getItem('voting_system_current_session');
+    
+    // Don't redirect if:
+    // 1. OAuth callback in progress
+    // 2. Session is still loading from storage
+    if (!currentSession && !isOAuthCallback && !storedSessionId) {
+      navigate('/sessions');
+    }
+  }, [currentSession, navigate]);
   
   const isOAuthCallback = useMemo(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -1394,15 +1371,14 @@ function FeatureVotingSystem({
   const [features, setFeatures] = useState<Feature[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [users, setUsers] = useState(initialUsers);
-  const [currentUser, setCurrentUser] = useState(initialUsers[0]);
   const [view, setView] = useState<'voting' | 'admin' | 'thankyou' | 'results'>(
+    resultsMode ? 'results' :
     adminMode || isOAuthCallback ? 'admin' : 'voting'
   );
-  const [isAdmin, setIsAdmin] = useState(adminMode || isOAuthCallback);
+  const [isAdmin, setIsAdmin] = useState(adminMode || isOAuthCallback || resultsMode);
   const [editingFeature, setEditingFeature] = useState<Feature | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showVotersList, setShowVotersList] = useState<string | null>(null);
-  const [showSessionForm, setShowSessionForm] = useState(false);
   const [showAzureDevOpsForm, setShowAzureDevOpsForm] = useState(false);
   const [votingSession, setVotingSession] = useState({
     ...initialVotingSession,
@@ -1434,12 +1410,38 @@ function FeatureVotingSystem({
 
   const hasProcessedCallback = useRef(false);
 
-  useEffect(() => {
+  // Calculate effective votes per user based on auto-votes setting
+  const effectiveVotesPerUser = useMemo(() => {
+    return votingSession.useAutoVotes 
+      ? Math.max(1, Math.floor(features.length / 2))
+      : votingSession.votesPerUser;
+  }, [votingSession.useAutoVotes, votingSession.votesPerUser, features.length]);
+
+const isProcessingOAuthRef = useRef(false); // Add this at the top with your other refs
+
+useEffect(() => {
+    // Prevent double execution in React StrictMode
+    if (isProcessingOAuthRef.current) {
+      console.log('OAuth processing already in progress, skipping...');
+      return;
+    }
+
     const handleCallback = async () => {
       const urlParams = new URLSearchParams(window.location.search);
       const hasOAuthParams = urlParams.has('code') || urlParams.has('error');
       
-      // Check if we were in the middle of auth
+      // If we have OAuth params but no session yet, try to restore it
+      if (hasOAuthParams && !currentSession) {
+        console.log('OAuth callback detected, waiting for session to load...');
+        
+        // Try to get session from localStorage
+        const storedSessionId = localStorage.getItem('voting_system_current_session');
+        if (storedSessionId) {
+          console.log('Found stored session ID, waiting for SessionContext to restore it...');
+        }
+        return;
+      }
+      
       const authInProgress = localStorage.getItem('azureDevOpsAuthInProgress');
       if (authInProgress) {
         localStorage.removeItem('azureDevOpsAuthInProgress');
@@ -1449,7 +1451,15 @@ function FeatureVotingSystem({
         return;
       }
       
+      if (!currentSession) {
+        console.log('No session available yet, waiting...');
+        return; // Wait for session
+      }
+      
+      // Set both flags to prevent double execution
+      isProcessingOAuthRef.current = true;
       hasProcessedCallback.current = true;
+      console.log('Processing OAuth callback with session:', currentSession.id);
       
       try {
         const tokens = await azureService.handleOAuthCallback();
@@ -1467,33 +1477,35 @@ function FeatureVotingSystem({
             tenantId: azureService.AZURE_AD_CONFIG.tenantId
           };
           
-          await db.saveAzureDevOpsConfig(updatedConfig);
+          await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
           setAzureDevOpsConfig(updatedConfig);
           
-          window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname
-          );
-          
+          const returnPath = sessionStorage.getItem('oauth_return_path') || '/admin';
+          sessionStorage.removeItem('oauth_return_path');
+
+          console.log('OAuth successful, navigating to:', returnPath);
+
+          // Navigate to return path (React Router will handle the URL)
+          navigate(returnPath, { replace: true });
         }
       } catch (error) {
         console.error('OAuth callback error:', error);
         setAzureFetchError('Failed to authenticate with Azure DevOps');
         
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
+        // Navigate back to admin on error
+        const returnPath = '/admin';  // React Router will add basename automatically
+        sessionStorage.removeItem('oauth_return_path');
+        navigate(returnPath, { replace: true });
+      } finally {
+        // Reset the flag after processing completes
+        isProcessingOAuthRef.current = false;
       }
     };
     
     handleCallback();
-  }, []);
+  }, [currentSession, navigate, azureDevOpsConfig]);
 
   const handleInitiateOAuth = useCallback(() => {
-    // Store a flag that we're authenticating
     localStorage.setItem('azureDevOpsAuthInProgress', 'true');
     azureService.initiateOAuthFlow();
   }, []);
@@ -1513,24 +1525,28 @@ function FeatureVotingSystem({
         tokenExpiresAt: expiresAt
       };
       
-      await db.saveAzureDevOpsConfig(updatedConfig);
-      setAzureDevOpsConfig(updatedConfig);
+      if (currentSession) {
+        await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
+        setAzureDevOpsConfig(updatedConfig);
+      }
       
       return tokens.accessToken;
     }
     
     return config.accessToken;
-  }, []);
+  }, [currentSession]);
 
   useEffect(() => {
     async function loadData() {
+      if (!currentSession) return;
+      
       try {
-        console.log('Loading data from Supabase...');
+        console.log('Loading data from Supabase for session:', currentSession.id);
         setIsLoading(true);
         
-        const featuresData = await db.getFeatures();
+        const featuresData = await db.getFeatures(currentSession.id);
         console.log(`Loaded ${featuresData.length} features from database`);
-        const votesData = await db.getVotes();
+        const votesData = await db.getVotes(currentSession.id);
         
         const featuresWithVotes = featuresData.map(feature => {
           const featureVotes = votesData.filter(v => v.feature_id === feature.id);
@@ -1560,42 +1576,17 @@ function FeatureVotingSystem({
         setFeatures(featuresWithVotes);
         console.log(`Features with votes loaded:`, featuresWithVotes.map(f => f.title));
         
-        const session = await db.getActiveVotingSession();
-        if (session) {
-          setVotingSession({
-            title: session.title,
-            goal: session.goal,
-            votesPerUser: session.votes_per_user,
-            startDate: session.start_date,
-            endDate: session.end_date,
-            isActive: session.is_active
-          });
-        } else {
-          // Create initial voting session if none exists
-          const newSession = {
-            ...initialVotingSession,
-            votesPerUser: defaultVotesPerUser
-          };
-          
-          try {
-            await db.createVotingSession({
-              title: newSession.title,
-              goal: newSession.goal,
-              votes_per_user: newSession.votesPerUser,
-              start_date: newSession.startDate,
-              end_date: newSession.endDate,
-              is_active: newSession.isActive
-            });
-            
-            setVotingSession(newSession);
-          } catch (error) {
-            console.error('Error creating initial voting session:', error);
-            // Fall back to in-memory session if database create fails
-            setVotingSession(newSession);
-          }
-        }
+        setVotingSession({
+          title: currentSession.title,
+          goal: currentSession.goal,
+          votesPerUser: currentSession.votes_per_user,
+          useAutoVotes: currentSession.use_auto_votes || false,
+          startDate: currentSession.start_date,
+          endDate: currentSession.end_date,
+          isActive: currentSession.is_active
+        });
         
-        const azureConfig = await db.getAzureDevOpsConfig();
+        const azureConfig = await db.getAzureDevOpsConfig(currentSession.id);
         if (azureConfig) {
           setAzureDevOpsConfig({
             organization: azureConfig.organization || 'newmill',
@@ -1627,7 +1618,7 @@ function FeatureVotingSystem({
     }
     
     loadData();
-  }, []);
+  }, [currentSession?.id]);
 
   useEffect(() => {
     async function loadFilterOptions() {
@@ -1639,7 +1630,6 @@ function FeatureVotingSystem({
             accessToken: validToken
           };
 
-          // Fetch states, area paths, and tags in parallel
           const [states, areaPaths, tags] = await Promise.all([
             azureService.fetchStates(configWithValidToken),
             azureService.fetchAreaPaths(configWithValidToken),
@@ -1651,10 +1641,8 @@ function FeatureVotingSystem({
           setAvailableTags(tags);
         } catch (error) {
           console.error('Error loading filter options:', error);
-          // Silently fail - filters will just be empty
         }
       } else {
-        // Clear filters when disconnected
         setAvailableStates([]);
         setAvailableAreaPaths([]);
         setAvailableTags([]);
@@ -1662,7 +1650,26 @@ function FeatureVotingSystem({
     }
 
     loadFilterOptions();
-  }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, azureDevOpsConfig.workItemType]);
+  }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, azureDevOpsConfig.workItemType, ensureValidToken]);
+
+  // Add this callback to dynamically fetch states for a specific work item type
+  const handleFetchStatesForType = useCallback(async (workItemType: string) => {
+    if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) return;
+    
+    try {
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken,
+        workItemType: workItemType
+      };
+
+      const states = await azureService.fetchStates(configWithValidToken);
+      setAvailableStates(states);
+    } catch (error) {
+      console.error('Error loading states for work item type:', error);
+    }
+  }, [azureDevOpsConfig, ensureValidToken]);
 
   useEffect(() => {
     const checkVotingStatus = async () => {
@@ -1675,7 +1682,6 @@ function FeatureVotingSystem({
         
         setVotingSession(updatedSession);
         
-        // Update database with new active status
         try {
           await db.updateVotingSession({
             title: updatedSession.title,
@@ -1710,7 +1716,7 @@ function FeatureVotingSystem({
   }, []);
 
   const handleFetchAzureDevOpsFeatures = useCallback(async (config = azureDevOpsConfig) => {
-    if (!config.organization || !config.project) {
+    if (!config.organization || !config.project || !currentSession) {
       setAzureFetchError("Organization and project name are required");
       return;
     }
@@ -1730,10 +1736,9 @@ function FeatureVotingSystem({
       const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
       
       for (const feature of newFeatures) {
-        const existingFeatures = await db.getFeatures();
+        const existingFeatures = await db.getFeatures(currentSession.id);
         const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
         
-        // Strip HTML tags and limit description to 300 characters for Azure DevOps imports
         const plainTextDescription = stripHtmlTags(feature.description);
         const truncatedDescription = truncateText(plainTextDescription, 300);
         
@@ -1742,22 +1747,29 @@ function FeatureVotingSystem({
             title: feature.title,
             description: truncatedDescription,
             epic: feature.epic,
+            state: feature.state,
+            area_path: feature.areaPath,
+            tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
           });
         } else {
           await db.createFeature({
+            session_id: currentSession.id,
             title: feature.title,
             description: truncatedDescription,
             epic: feature.epic,
+            state: feature.state,
+            area_path: feature.areaPath,
+            tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
           });
         }
       }
       
-      const allFeatures = await db.getFeatures();
-      const votesData = await db.getVotes();
+      const allFeatures = await db.getFeatures(currentSession.id);
+      const votesData = await db.getVotes(currentSession.id);
       
       const featuresWithVotes = allFeatures.map(feature => {
         const featureVotes = votesData.filter(v => v.feature_id === feature.id);
@@ -1791,7 +1803,7 @@ function FeatureVotingSystem({
         lastSyncTime: new Date().toISOString()
       };
       
-      await db.saveAzureDevOpsConfig(updatedConfig);
+      await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
       setShowAzureDevOpsForm(false);
       
@@ -1807,7 +1819,7 @@ function FeatureVotingSystem({
     } finally {
       setIsFetchingAzureDevOps(false);
     }
-  }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
+  }, [azureDevOpsConfig, currentSession, ensureValidToken, handleInitiateOAuth]);
 
   const handlePreviewAzureDevOpsFeatures = useCallback(async () => {
     if (!azureDevOpsConfig.organization || !azureDevOpsConfig.project) {
@@ -1829,7 +1841,6 @@ function FeatureVotingSystem({
       const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
       const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
       
-      // Strip HTML tags and limit description to 300 characters for preview
       const featuresWithTruncatedDescriptions = newFeatures.map(feature => ({
         ...feature,
         description: truncateText(stripHtmlTags(feature.description), 300)
@@ -1853,23 +1864,22 @@ function FeatureVotingSystem({
   }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
 
   const handleConfirmSync = useCallback(async (replaceAll: boolean = false) => {
-    if (!previewFeatures) return;
+    if (!previewFeatures || !currentSession) return;
     
     try {
       setIsFetchingAzureDevOps(true);
       
       if (replaceAll) {
-        const existingFeatures = await db.getFeatures();
+        const existingFeatures = await db.getFeatures(currentSession.id);
         for (const feature of existingFeatures) {
           await db.deleteFeature(feature.id);
         }
       }
       
       for (const feature of previewFeatures) {
-        const existingFeatures = await db.getFeatures();
+        const existingFeatures = await db.getFeatures(currentSession.id);
         const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
         
-        // Strip HTML tags (if any remain) and limit description to 300 characters
         const plainTextDescription = stripHtmlTags(feature.description);
         const truncatedDescription = truncateText(plainTextDescription, 300);
         
@@ -1878,22 +1888,29 @@ function FeatureVotingSystem({
             title: feature.title,
             description: truncatedDescription,
             epic: feature.epic,
+            state: feature.state,
+            area_path: feature.areaPath,
+            tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
           });
         } else {
           await db.createFeature({
+            session_id: currentSession.id,
             title: feature.title,
             description: truncatedDescription,
             epic: feature.epic,
+            state: feature.state,
+            area_path: feature.areaPath,
+            tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
           });
         }
       }
       
-      const allFeatures = await db.getFeatures();
-      const votesData = await db.getVotes();
+      const allFeatures = await db.getFeatures(currentSession.id);
+      const votesData = await db.getVotes(currentSession.id);
       
       const featuresWithVotes = allFeatures.map(feature => {
         const featureVotes = votesData.filter(v => v.feature_id === feature.id);
@@ -1927,9 +1944,9 @@ function FeatureVotingSystem({
         lastSyncTime: new Date().toISOString()
       };
       
-      await db.saveAzureDevOpsConfig(updatedConfig);
+      await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
-      setHasImportedFeatures(true); // Mark that features have been imported
+      setHasImportedFeatures(true);
       
     } catch (error) {
       console.error('Azure DevOps sync error:', error);
@@ -1938,9 +1955,11 @@ function FeatureVotingSystem({
       setIsFetchingAzureDevOps(false);
       setPreviewFeatures(null);
     }
-  }, [previewFeatures, azureDevOpsConfig]);
+  }, [previewFeatures, currentSession, azureDevOpsConfig]);
 
   const handleDisconnectAzureDevOps = useCallback(async () => {
+    if (!currentSession) return;
+    
     try {
       const updatedConfig = {
         organization: azureDevOpsConfig.organization || 'newmill',
@@ -1953,16 +1972,16 @@ function FeatureVotingSystem({
         enabled: false
       };
       
-      await db.saveAzureDevOpsConfig(updatedConfig);
+      await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
       setAzureFetchError(null);
-      setHasImportedFeatures(false); // Reset when disconnecting
+      setHasImportedFeatures(false);
       
     } catch (error) {
       console.error('Error disconnecting Azure DevOps:', error);
       setAzureFetchError("Failed to disconnect from Azure DevOps");
     }
-  }, [azureDevOpsConfig]);
+  }, [azureDevOpsConfig, currentSession]);
 
   const handleToggleAdmin = useCallback(() => {
     if (isAdmin) {
@@ -1975,8 +1994,11 @@ function FeatureVotingSystem({
   }, [isAdmin]);
 
   const handleAddFeature = useCallback(async (feature: any) => {
+    if (!currentSession) return;
+    
     try {
       const newFeature = await db.createFeature({
+        session_id: currentSession.id,
         title: feature.title,
         description: feature.description,
         epic: feature.epic
@@ -1995,7 +2017,7 @@ function FeatureVotingSystem({
       console.error('Error adding feature:', error);
       alert('Failed to add feature');
     }
-  }, []);
+  }, [currentSession]);
 
   const handleUpdateFeature = useCallback(async (updatedFeature: Feature) => {
     try {
@@ -2033,13 +2055,13 @@ function FeatureVotingSystem({
 
   const handleResetVotes = useCallback(async () => {
     const id = confirmState.targetId;
-    if (!id) return;
+    if (!id || !currentSession) return;
     
     try {
       await db.deleteVotesForFeature(id);
       
-      const featuresData = await db.getFeatures();
-      const votesData = await db.getVotes();
+      const featuresData = await db.getFeatures(currentSession.id);
+      const votesData = await db.getVotes(currentSession.id);
       
       const featuresWithVotes = featuresData.map(feature => {
         const featureVotes = votesData.filter(v => v.feature_id === feature.id);
@@ -2071,7 +2093,7 @@ function FeatureVotingSystem({
       console.error('Error resetting votes:', error);
       alert('Failed to reset votes');
     }
-  }, [confirmState.targetId]);
+  }, [confirmState.targetId, currentSession]);
 
   const initiateResetAllVotes = useCallback(() => {
     setConfirmState({
@@ -2082,14 +2104,16 @@ function FeatureVotingSystem({
   }, []);
 
   const handleResetAllVotes = useCallback(async () => {
+    if (!currentSession) return;
+    
     try {
-      await db.deleteAllVotes();
+      await db.deleteAllVotes(currentSession.id);
       setFeatures(prev => prev.map(feature => ({ ...feature, votes: 0, voters: [] })));
     } catch (error) {
       console.error('Error resetting all votes:', error);
       alert('Failed to reset all votes');
     }
-  }, []);
+  }, [currentSession]);
 
   const handlePendingVote = useCallback((featureId: string, increment: boolean) => {
     if (!currentUser || !votingSession.isActive) return;
@@ -2098,7 +2122,7 @@ function FeatureVotingSystem({
     let newVoteCount = currentVoteCount;
     
     if (increment) {
-      if (pendingUsedVotes < votingSession.votesPerUser) {
+      if (pendingUsedVotes < effectiveVotesPerUser) {
         newVoteCount = currentVoteCount + 1;
       } else {
         return;
@@ -2122,16 +2146,17 @@ function FeatureVotingSystem({
     });
     
     setPendingUsedVotes(prev => increment ? prev + 1 : prev - 1);
-  }, [currentUser, pendingVotes, pendingUsedVotes, votingSession.isActive, votingSession.votesPerUser]);
+  }, [currentUser, pendingVotes, pendingUsedVotes, votingSession.isActive, effectiveVotesPerUser]);
 
   const handleSubmitVotes = useCallback(async () => {
-    if (!currentUser || !votingSession.isActive) return;
-    if (pendingUsedVotes < votingSession.votesPerUser) return;
+    if (!currentUser || !votingSession.isActive || !currentSession) return;
+    if (pendingUsedVotes < effectiveVotesPerUser) return;
     
     try {
       for (const [featureId, voteCount] of Object.entries(pendingVotes)) {
         if (voteCount > 0) {
           await db.saveVote({
+            session_id: currentSession.id,
             feature_id: featureId,
             user_id: currentUser.id,
             user_name: currentUser.name,
@@ -2141,8 +2166,8 @@ function FeatureVotingSystem({
         }
       }
       
-      const featuresData = await db.getFeatures();
-      const votesData = await db.getVotes();
+      const featuresData = await db.getFeatures(currentSession.id);
+      const votesData = await db.getVotes(currentSession.id);
       
       const featuresWithVotes = featuresData.map(feature => {
         const featureVotes = votesData.filter(v => v.feature_id === feature.id);
@@ -2175,11 +2200,10 @@ function FeatureVotingSystem({
       console.error('Error submitting votes:', error);
       alert('Failed to submit votes. Please try again.');
     }
-  }, [currentUser, pendingUsedVotes, pendingVotes, votingSession.isActive, votingSession.votesPerUser]);
+  }, [currentUser, currentSession, pendingUsedVotes, pendingVotes, votingSession.isActive, effectiveVotesPerUser]);
 
   const handleUpdateVotingSession = useCallback(async (updatedSession: VotingSession) => {
     try {
-      // Save to database
       await db.updateVotingSession({
         title: updatedSession.title,
         goal: updatedSession.goal,
@@ -2190,7 +2214,6 @@ function FeatureVotingSystem({
       });
       
       setVotingSession(updatedSession);
-      setShowSessionForm(false);
     } catch (error) {
       console.error('Error updating voting session:', error);
       alert('Failed to update voting session settings');
@@ -2198,10 +2221,12 @@ function FeatureVotingSystem({
   }, []);
 
   const handleUpdateAzureDevOpsConfig = useCallback(async (config: AzureDevOpsConfig) => {
+    if (!currentSession) return;
+    
     setAzureDevOpsConfig(config);
     
     try {
-      await db.saveAzureDevOpsConfig({
+      await db.saveAzureDevOpsConfig(currentSession.id, {
         organization: config.organization,
         project: config.project,
         accessToken: config.accessToken,
@@ -2217,11 +2242,15 @@ function FeatureVotingSystem({
     } catch (error) {
       console.error('Error saving config:', error);
     }
-  }, []);
+  }, [currentSession]);
 
   const handleReturnToVoting = useCallback(() => {
     setPendingVotes({});
     setPendingUsedVotes(0);
+    setView('voting');
+  }, []);
+
+  const handleShowVoterView = useCallback(() => {
     setView('voting');
   }, []);
 
@@ -2239,6 +2268,9 @@ function FeatureVotingSystem({
             onToggleAdmin={handleToggleAdmin}
             isAdmin={isAdmin}
             votingSession={votingSession}
+            navigate={navigate}
+            effectiveVotesPerUser={effectiveVotesPerUser}
+            sessionId={currentSession?.id || ''}
           />
         );
       case 'results':
@@ -2251,6 +2283,7 @@ function FeatureVotingSystem({
             showVotersList={showVotersList}
             setShowVotersList={setShowVotersList}
             votingSession={votingSession}
+            effectiveVotesPerUser={effectiveVotesPerUser}
           />
         );
       case 'thankyou':
@@ -2263,7 +2296,7 @@ function FeatureVotingSystem({
       case 'admin':
       default:
         return (
-          <AdminScreen 
+          <AdminDashboard 
             features={features} 
             onAddFeature={handleAddFeature} 
             onUpdateFeature={handleUpdateFeature} 
@@ -2275,9 +2308,6 @@ function FeatureVotingSystem({
             setEditingFeature={setEditingFeature}
             onLogout={handleToggleAdmin}
             votingSession={votingSession}
-            onUpdateVotingSession={handleUpdateVotingSession}
-            showSessionForm={showSessionForm}
-            setShowSessionForm={setShowSessionForm}
             azureDevOpsConfig={azureDevOpsConfig}
             onUpdateAzureDevOpsConfig={handleUpdateAzureDevOpsConfig}
             showAzureDevOpsForm={showAzureDevOpsForm}
@@ -2297,6 +2327,9 @@ function FeatureVotingSystem({
             onConfirmSync={handleConfirmSync}
             hasImportedFeatures={hasImportedFeatures}
             setHasImportedFeatures={setHasImportedFeatures}
+            onShowVoterView={handleShowVoterView}
+            onUpdateVotingSession={handleUpdateVotingSession}
+            onFetchStatesForType={handleFetchStatesForType}
           />
         );
     }
@@ -2306,13 +2339,25 @@ function FeatureVotingSystem({
     votingSession, initiateResetVotes, initiateResetAllVotes, showVotersList,
     setShowVotersList, handleReturnToVoting, handleAddFeature, handleUpdateFeature,
     handleDeleteFeature, showAddForm, setShowAddForm, editingFeature,
-    setEditingFeature, handleUpdateVotingSession, showSessionForm, setShowSessionForm,
-    azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
+    setEditingFeature, azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
     setShowAzureDevOpsForm, handleFetchAzureDevOpsFeatures, handlePreviewAzureDevOpsFeatures,
     handleDisconnectAzureDevOps, isFetchingAzureDevOps, azureFetchError, handleInitiateOAuth,
     previewFeatures, showPreviewModal, setShowPreviewModal, handleConfirmSync,
-    hasImportedFeatures, setHasImportedFeatures
+    hasImportedFeatures, setHasImportedFeatures, navigate, effectiveVotesPerUser,
+    availableStates, availableAreaPaths, availableTags, handleShowVoterView, handleFetchStatesForType
   ]);
+
+  // IMPORTANT: Return loading check AFTER all hooks
+  if (!currentSession) {
+    return (
+      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading session...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -2352,593 +2397,9 @@ function FeatureVotingSystem({
   );
 }
 
-// ============================================
-// ADMIN SCREEN COMPONENT
-// ============================================
-
-interface AdminScreenProps {
-  features: Feature[];
-  onAddFeature: (feature: any) => void;
-  onUpdateFeature: (feature: Feature) => void;
-  onDeleteFeature: (id: string) => Promise<void>;
-  onShowResults: () => void;
-  showAddForm: boolean;
-  setShowAddForm: (show: boolean) => void;
-  editingFeature: Feature | null;
-  setEditingFeature: (feature: Feature | null) => void;
-  onLogout: () => void;
-  votingSession: VotingSession;
-  onUpdateVotingSession: (session: VotingSession) => void;
-  showSessionForm: boolean;
-  setShowSessionForm: (show: boolean) => void;
-  azureDevOpsConfig: AzureDevOpsConfig;
-  onUpdateAzureDevOpsConfig: (config: AzureDevOpsConfig) => void;
-  showAzureDevOpsForm: boolean;
-  setShowAzureDevOpsForm: (show: boolean) => void;
-  onFetchAzureDevOpsFeatures: (config?: AzureDevOpsConfig) => Promise<void>;
-  onPreviewAzureDevOpsFeatures: () => Promise<void>;
-  onDisconnectAzureDevOps: () => Promise<void>;
-  isFetchingAzureDevOps: boolean;
-  azureFetchError: string | null;
-  onInitiateOAuth: () => void;
-  availableStates: string[];     
-  availableAreaPaths: string[];
-  availableTags: string[];
-  previewFeatures: Feature[] | null;
-  showPreviewModal: boolean;
-  setShowPreviewModal: (show: boolean) => void;
-  onConfirmSync: (replaceAll: boolean) => Promise<void>;
-  hasImportedFeatures: boolean;
-  setHasImportedFeatures: (value: boolean) => void;
-}
-
-function AdminScreen({ 
-  features, 
-  onAddFeature, 
-  onUpdateFeature, 
-  onDeleteFeature,
-  onShowResults,
-  showAddForm,
-  setShowAddForm,
-  editingFeature,
-  setEditingFeature,
-  onLogout,
-  votingSession,
-  onUpdateVotingSession,
-  showSessionForm,
-  setShowSessionForm,
-  azureDevOpsConfig,
-  onUpdateAzureDevOpsConfig,
-  showAzureDevOpsForm,
-  setShowAzureDevOpsForm,
-  onFetchAzureDevOpsFeatures,
-  onPreviewAzureDevOpsFeatures,
-  onDisconnectAzureDevOps,
-  isFetchingAzureDevOps,
-  azureFetchError,
-  onInitiateOAuth,
-  availableStates,
-  availableAreaPaths,
-  availableTags,
-  previewFeatures,
-  showPreviewModal,
-  setShowPreviewModal,
-  onConfirmSync,
-  hasImportedFeatures,
-  setHasImportedFeatures
-}: AdminScreenProps) {
-  const daysRemaining = getDaysRemaining(votingSession.endDate);
-  const deadlineColor = getDeadlineColor(daysRemaining);
-  
-  const votingStatus = votingSession.isActive 
-    ? <span className="text-[#1E6154] font-medium">Active</span>
-    : isPastDate(votingSession.endDate)
-      ? <span className="text-red-600 font-medium">Closed</span>
-      : <span className="text-yellow-600 font-medium">Upcoming</span>;
-
-  return (
-    <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
-      {/* Desktop: Centered logo at top */}
-      <div className="hidden md:flex md:justify-center mb-2">
-        <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
-          alt="New Millennium Building Systems Logo"
-          className="-mt-8"
-          style={{ height: '96px', width: 'auto' }}
-        />
-      </div>
-      
-      {/* Title and buttons in same row */}
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center">
-          {/* Mobile: small logo next to title */}
-          <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
-            alt="New Millennium Building Systems Logo"
-            className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
-          />
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Admin Dashboard</h1>
-        </div>
-        <div className="flex space-x-2">
-          <Button variant="gold" onClick={onShowResults} className="flex items-center">
-            <BarChart2 className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">View Results</span>
-          </Button>
-          <Button variant="gray" onClick={onLogout} className="flex items-center">
-            <LogOut className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Logout</span>
-          </Button>
-        </div>
-      </div>
-      
-      {/* Voting Session Settings */}
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-[#2d4660]">Voting Session Settings</h2>
-          <Button 
-            variant="primary"
-            onClick={() => setShowSessionForm(true)}
-            className="flex items-center w-44"
-          >
-            <Settings className="h-4 w-4 mr-2" />
-            Edit Settings
-          </Button>
-        </div>
-
-        <div className="flex gap-6">
-          {/* Left side: Session Title and Goal grouped together */}
-          <div className="flex-1">
-            <div className="mb-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-1">Session Title</h3>
-              <p className="text-[#2d4660] font-medium text-base">{votingSession.title}</p>
-            </div>
-            
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-1">Goal</h3>
-              <p className="text-[#2d4660] text-base">{votingSession.goal}</p>
-            </div>
-          </div>
-          
-          {/* Right side: Metrics */}
-          <div className="flex gap-6 items-stretch">
-            <div className="flex flex-col">
-              <h3 className="text-sm font-medium text-gray-700 mb-2 mt-[3px]">Votes Per User</h3>
-              <div className="border border-gray-300 rounded-md p-4 text-center bg-white flex-1 flex items-center justify-center">
-                <p className="text-[#2d4660] font-bold text-4xl">{votingSession.votesPerUser}</p>
-              </div>
-            </div>
-            
-            <div className="min-w-[280px] flex flex-col">
-              <div className="flex items-center justify-center gap-3 mb-2">
-                <h3 className="text-sm font-medium text-gray-700">Voting Period</h3>
-                <div className="flex items-center">
-                  <Clock className="h-4 w-4 mr-1 text-gray-600" />
-                  {votingStatus}
-                </div>
-              </div>
-              <div className={`${getDeadlineBgColor(daysRemaining)} rounded-md p-3 border ${
-                daysRemaining <= 2 ? 'border-red-200' : 
-                daysRemaining <= 4 ? 'border-yellow-200' : 
-                'border-[#1E6154]/20'
-              } flex-1 flex flex-col justify-center`}>
-                <div className="flex items-center justify-center mb-2">
-                  <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
-                  <span className={`font-medium text-sm ${deadlineColor}`}>
-                    {formatDate(votingSession.startDate)} - {formatDate(votingSession.endDate)}
-                  </span>
-                </div>
-                <p className={`text-sm font-medium text-center ${deadlineColor}`}>
-                  {daysRemaining <= 0 
-                    ? "Voting ends today!" 
-                    : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining`
-                  }
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Azure DevOps Integration */}
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center">
-            <Cloud className="h-5 w-5 text-[#2d4660] mr-2" />
-            <h2 className="text-xl font-semibold text-[#2d4660]">Azure DevOps Integration</h2>
-          </div>
-          {azureDevOpsConfig.enabled && (
-            <Button 
-              variant="primary"
-              onClick={() => {
-                setShowAzureDevOpsForm(true);
-                setHasImportedFeatures(false);
-              }}
-              className="flex items-center w-44"
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Edit Settings
-            </Button>
-          )}
-        </div>
-
-        {showAzureDevOpsForm ? (
-          <AzureDevOpsForm 
-            config={azureDevOpsConfig}
-            onUpdate={onUpdateAzureDevOpsConfig}
-            onPreview={onPreviewAzureDevOpsFeatures}
-            onCancel={() => setShowAzureDevOpsForm(false)}
-            isFetching={isFetchingAzureDevOps}
-            error={azureFetchError}
-            onInitiateOAuth={onInitiateOAuth}
-            availableStates={availableStates}
-            availableAreaPaths={availableAreaPaths}
-            availableTags={availableTags}
-          />
-        ) : (
-          <div>
-            {azureDevOpsConfig.enabled ? (
-              <div className="flex justify-between gap-6">
-                <div className="flex-1 space-y-2">
-                  <p className="text-sm leading-[25px] flex items-baseline">
-                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Organization:</span>
-                    <span className="text-[#2d4660] font-semibold text-[20px]">{azureDevOpsConfig.organization}</span>
-                  </p>
-                  
-                  <p className="text-sm leading-[25px] flex items-baseline">
-                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Project:</span>
-                    <span className="text-[#2d4660] font-semibold text-[20px]">{azureDevOpsConfig.project}</span>
-                  </p>
-                  
-                  <p className="text-sm leading-[25px] flex items-baseline">
-                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Work Item Type:</span>
-                    <span className="text-[#2d4660] font-semibold text-[20px]">{azureDevOpsConfig.workItemType}</span>
-                  </p>
-                </div>
-                
-                <div className="flex-1 space-y-2">
-                  <p className="text-sm leading-[25px] flex items-baseline">
-                    <span className="font-medium text-gray-700 w-36 text-right mr-2">Status:</span>
-                    <span className="inline-flex items-baseline">
-                      <span className="h-2 w-2 rounded-full bg-[#1E6154] mr-1.5 self-center"></span>
-                      <span className="text-[#1E6154] font-medium text-[20px]">Connected</span>
-                      <button
-                        onClick={onDisconnectAzureDevOps}
-                        className="ml-2 text-red-600 hover:text-red-800 cursor-pointer self-center flex items-center"
-                        title="Disconnect"
-                      >
-                        <X className="h-4 w-4" />
-                        <span className="ml-1 text-sm font-medium">Disconnect</span>
-                      </button>
-                    </span>
-                  </p>
-                  
-                  {azureDevOpsConfig.lastSyncTime && (
-                    <p className="text-sm leading-[25px] flex items-baseline">
-                      <span className="font-medium text-gray-700 w-36 text-right mr-2">Last Synchronized:</span>
-                      <span className="inline-flex items-baseline text-gray-700 text-[20px]">
-                        <Clock className="h-3.5 w-3.5 mr-1 text-gray-500 self-center" />
-                        {formatDate(azureDevOpsConfig.lastSyncTime)}
-                      </span>
-                    </p>
-                  )}
-                </div>
-                
-                <div className="flex flex-col gap-3">
-                  {!hasImportedFeatures && (
-                    <Button 
-                      variant="gold"
-                      onClick={() => onPreviewAzureDevOpsFeatures()}
-                      disabled={isFetchingAzureDevOps}
-                      className="flex items-center w-44"
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-2 ${isFetchingAzureDevOps ? 'animate-spin' : ''}`} />
-                      {isFetchingAzureDevOps ? 'Loading...' : 'Preview Features'}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="bg-gray-50 rounded-lg p-6 text-center border border-dashed border-gray-300">
-                <Cloud className="h-10 w-10 text-gray-400 mx-auto mb-3" />
-                <h3 className="text-lg font-medium text-gray-700 mb-2">Azure DevOps Integration Not Configured</h3>
-                <p className="text-gray-600 mb-4">
-                  Connect to Azure DevOps to import work items as features for voting.
-                </p>
-                <Button 
-                  variant="primary"
-                  onClick={() => setShowAzureDevOpsForm(true)}
-                  className="inline-flex items-center"
-                >
-                  <Settings className="h-4 w-4 mr-2" />
-                  Configure Integration
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Feature Management */}
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-[#2d4660]">Feature Management</h2>
-          <Button 
-            variant="gold"
-            onClick={() => setShowAddForm(true)}
-            className="flex items-center w-44"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Feature
-          </Button>
-        </div>
-
-        <div className="w-full overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 table-fixed">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="w-[20%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th scope="col" className="hidden lg:table-cell w-[25%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                <th scope="col" className="hidden md:table-cell w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
-                <th scope="col" className="hidden md:table-cell w-[8%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
-                <th scope="col" className="hidden lg:table-cell w-[12%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Area Path</th>
-                <th scope="col" className="hidden xl:table-cell w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tags</th>
-                <th scope="col" className="w-[8%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
-                <th scope="col" className="w-[7%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {features.map((feature) => (
-                <tr key={feature.id} className="align-top group">
-                  <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium text-left">
-                    <div className="max-w-xs overflow-hidden text-left">
-                      {feature.title}
-                      {feature.azureDevOpsId && (
-                        <div className="mt-1">
-                          <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                  <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-500 text-left">
-                    <div className="max-w-md overflow-hidden break-words text-left">
-                      {feature.description}
-                    </div>
-                  </td>
-                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
-                    {feature.epic && <EpicTag name={feature.epic} />}
-                  </td>
-                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
-                    {feature.state && (
-                      <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
-                        {feature.state}
-                      </span>
-                    )}
-                  </td>
-                  <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-600">
-                    <div className="max-w-xs truncate">
-                      {feature.areaPath || '-'}
-                    </div>
-                  </td>
-                  <td className="hidden xl:table-cell px-4 py-4 text-sm">
-                    {feature.tags && feature.tags.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {feature.tags.slice(0, 3).map((tag, idx) => (
-                          <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
-                            {tag}
-                          </span>
-                        ))}
-                        {feature.tags.length > 3 && (
-                          <span className="px-2 py-0.5 text-xs text-gray-500">
-                            +{feature.tags.length - 3}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm">{feature.votes}</td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => setEditingFeature(feature)}
-                      className="text-[#2d4660] hover:text-[#bea263] inline-block cursor-pointer"
-                      title="Edit Feature"
-                    >
-                      <Edit className="h-5 w-5" />
-                    </button>
-                    <button 
-                      onClick={() => onDeleteFeature(feature.id)}
-                      className="text-[#2d4660] hover:text-red-600 inline-block cursor-pointer"
-                      title="Delete Feature"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Modal Dialogs */}
-      <Modal
-        isOpen={showSessionForm}
-        onClose={() => setShowSessionForm(false)}
-        title="Edit Voting Session"
-      >
-        <VotingSessionForm
-          votingSession={votingSession}
-          onSubmit={(updatedSession) => {
-            onUpdateVotingSession(updatedSession);
-            setShowSessionForm(false);
-          }}
-          onCancel={() => setShowSessionForm(false)}
-        />
-      </Modal>
-      
-      <Modal
-        isOpen={showAddForm}
-        onClose={() => setShowAddForm(false)}
-        title="Add New Feature"
-      >
-        <FeatureForm
-          onSubmit={(data) => {
-            onAddFeature(data);
-            setShowAddForm(false);
-          }}
-          onCancel={() => setShowAddForm(false)}
-        />
-      </Modal>
-      
-      <Modal
-        isOpen={editingFeature !== null}
-        onClose={() => setEditingFeature(null)}
-        title="Edit Feature"
-      >
-        {editingFeature && (
-          <FeatureForm
-            feature={editingFeature}
-            onSubmit={(data) => {
-              onUpdateFeature({...editingFeature, ...data});
-              setEditingFeature(null);
-            }}
-            onCancel={() => setEditingFeature(null)}
-          />
-        )}
-      </Modal>
-
-      {/* Azure DevOps Preview Modal */}
-      <Modal
-        isOpen={showPreviewModal}
-        onClose={() => setShowPreviewModal(false)}
-        title="Preview Azure DevOps Features"
-        maxWidth="max-w-4xl"
-      >
-        <div className="space-y-4">
-          <p className="text-gray-600">
-            Review the features that will be synced from Azure DevOps. Choose an action:
-          </p>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-            <p className="text-blue-800"><strong>Add Features:</strong> Merge with existing features (updates matching Azure DevOps IDs)</p>
-            <p className="text-blue-800 mt-1"><strong>Replace All:</strong> Delete all existing features and add only these Azure DevOps features</p>
-          </div>
-          
-          {previewFeatures && previewFeatures.length > 0 ? (
-            <>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-blue-800 font-medium">
-                  Found {previewFeatures.length} work item{previewFeatures.length !== 1 ? 's' : ''} to sync
-                </p>
-              </div>
-              
-              <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Epic</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Area Path</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {previewFeatures.map((feature) => (
-                      <tr key={feature.id}>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.azureDevOpsId && (
-                            <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{feature.title}</td>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.epic && <EpicTag name={feature.epic} />}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.state && (
-                            <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
-                              {feature.state}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">
-                          <div className="max-w-xs truncate">
-                            {feature.areaPath || '-'}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.tags && feature.tags.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {feature.tags.slice(0, 2).map((tag, idx) => (
-                                <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
-                                  {tag}
-                                </span>
-                              ))}
-                              {feature.tags.length > 2 && (
-                                <span className="px-2 py-0.5 text-xs text-gray-500">
-                                  +{feature.tags.length - 2}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <Button 
-                  variant="secondary"
-                  onClick={() => setShowPreviewModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  variant="primary"
-                  onClick={async () => {
-                    await onConfirmSync(false); // false = add/merge features
-                    setShowPreviewModal(false);
-                  }}
-                  className="flex items-center"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add {previewFeatures.length} Feature{previewFeatures.length !== 1 ? 's' : ''}
-                </Button>
-                <Button 
-                  variant="danger"
-                  onClick={async () => {
-                    await onConfirmSync(true); // true = replace all features
-                    setShowPreviewModal(false);
-                  }}
-                  className="flex items-center"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Replace All Features
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-8">
-              <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No features found to sync</p>
-            </div>
-          )}
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
 interface VotingScreenProps {
   features: Feature[];
-  currentUser: User;
+  currentUser: any;
   pendingVotes: Record<string, number>;
   pendingUsedVotes: number;
   onVote: (featureId: string, increment: boolean) => void;
@@ -2946,6 +2407,9 @@ interface VotingScreenProps {
   onToggleAdmin: () => void;
   isAdmin: boolean;
   votingSession: VotingSession;
+  navigate: any;
+  effectiveVotesPerUser: number;
+  sessionId: string;
 }
 
 const VotingScreen = React.memo(function VotingScreen({ 
@@ -2957,12 +2421,16 @@ const VotingScreen = React.memo(function VotingScreen({
   onSubmitVotes,
   onToggleAdmin,
   isAdmin,
-  votingSession
+  votingSession,
+  navigate,
+  effectiveVotesPerUser,
+  sessionId
 }: VotingScreenProps) {
   if (!currentUser) return null;
   
   const [displayFeatures, setDisplayFeatures] = useState([...features]);
   const [isShuffling, setIsShuffling] = useState(false);
+  const [shuffleStage, setShuffleStage] = useState<'idle' | 'fadeOut' | 'rearranging' | 'fadeIn'>('idle');
 
   useEffect(() => {
     setDisplayFeatures([...features]);
@@ -2971,14 +2439,47 @@ const VotingScreen = React.memo(function VotingScreen({
   const handleShuffle = useCallback(() => {
     if (isShuffling) return;
     setIsShuffling(true);
+    setShuffleStage('fadeOut');
     
+    // Stage 1: Fade out (400ms)
     setTimeout(() => {
-      setDisplayFeatures(shuffleArray(features));
-      setIsShuffling(false);
-    }, 300);
+      setShuffleStage('rearranging');
+      // Stage 2: Rearrange while invisible (200ms)
+      setTimeout(() => {
+        setDisplayFeatures(shuffleArray(features));
+        setShuffleStage('fadeIn');
+        // Stage 3: Fade in (400ms)
+        setTimeout(() => {
+          setShuffleStage('idle');
+          setIsShuffling(false);
+        }, 400);
+      }, 200);
+    }, 400);
   }, [features, isShuffling]);
 
-  const remainingVotes = votingSession.votesPerUser - pendingUsedVotes;
+  const handleRequestInfo = useCallback(async (featureId: string) => {
+    const feature = features.find(f => f.id === featureId);
+    if (!feature || !currentUser) return;
+
+    try {
+      // Store the request in the database
+      await db.createInfoRequest({
+        session_id: sessionId,
+        feature_id: featureId,
+        feature_title: feature.title,
+        requester_id: currentUser.id,
+        requester_name: currentUser.name,
+        requester_email: currentUser.email,
+        created_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error submitting info request:', error);
+      alert('Failed to submit request. Please try again.');
+      throw error; // Re-throw so the component knows it failed
+    }
+  }, [features, currentUser, sessionId]);
+
+  const remainingVotes = effectiveVotesPerUser - pendingUsedVotes;
   const allVotesUsed = remainingVotes === 0;
   const votingIsActive = votingSession.isActive;
   
@@ -2989,7 +2490,7 @@ const VotingScreen = React.memo(function VotingScreen({
         <img
           src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
           alt="New Millennium Building Systems Logo"
-          className="-mt-8"
+          className="-mt-4"
           style={{ height: '96px', width: 'auto' }}
         />
       </div>
@@ -3006,34 +2507,41 @@ const VotingScreen = React.memo(function VotingScreen({
           />
           <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
         </div>
-        <div className="flex items-center">
-          <div className="mr-4 bg-white rounded-lg shadow px-4 py-2">
-            <span className="text-sm text-gray-600">
-              Votes remaining: <span className="font-bold text-[#2d4660]">{remainingVotes}</span>
-              <span className="text-xs text-gray-500 ml-1">/ {votingSession.votesPerUser}</span>
-            </span>
-          </div>
+        <div className="relative z-10 flex items-center space-x-2">
+          {isAdmin && (
+            <Button 
+              variant="primary"
+              onClick={onToggleAdmin}
+              className="flex items-center"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              <span className="hidden md:inline">Admin Dashboard</span>
+              <span className="md:hidden">Admin</span>
+            </Button>
+          )}
+          {!isAdmin && (
+            <Button 
+              variant="blue"
+              onClick={() => navigate('/login')}
+              className="flex items-center"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              <span className="hidden md:inline">Admin Login</span>
+              <span className="md:hidden">Login</span>
+            </Button>
+          )}
           <Button 
-            variant={isAdmin ? "gray" : "blue"}
-            onClick={onToggleAdmin}
+            variant="gray"
+            onClick={() => navigate('/sessions')}
             className="flex items-center"
           >
-            {isAdmin ? (
-              <>
-                <LogOut className="mr-2 h-4 w-4" />
-                <span className="hidden md:inline">Logout</span>
-              </>
-            ) : (
-              <>
-                <Settings className="mr-2 h-4 w-4" />
-                <span className="hidden md:inline">Admin Login</span>
-              </>
-            )}
+            <LogOut className="mr-2 h-4 w-4" />
+            <span className="hidden md:inline">Logout</span>
           </Button>
         </div>
       </div>
 
-      <div className="mb-6 bg-white rounded-lg shadow-md p-4">
+      <div className="relative z-10 mb-6 bg-white rounded-lg shadow-md p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2">
             <h2 className="text-xl font-semibold text-[#2d4660] mb-2">{votingSession.title}</h2>
@@ -3046,7 +2554,7 @@ const VotingScreen = React.memo(function VotingScreen({
             <div className="flex items-center mt-3">
               <Vote className="h-4 w-4 mr-2 text-[#2d4660]" />
               <p className="text-gray-700">
-                You have <span className="font-bold text-[#2d4660]">{remainingVotes}</span> votes remaining
+                You have <span className="font-bold text-[#2d4660]">{remainingVotes} / {effectiveVotesPerUser}</span> votes remaining
               </p>
             </div>
           </div>
@@ -3054,8 +2562,8 @@ const VotingScreen = React.memo(function VotingScreen({
       </div>
 
       {!votingIsActive && (
-        <div className="mb-6 bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-          <div className="flex items-center text-yellow-800">
+        <div className="mb-6 bg-[#C89212]/10 p-4 rounded-lg border border-[#C89212]/20">
+          <div className="flex items-center text-[#6A4234]">
             <Clock className="h-5 w-5 mr-2" />
             <span className="font-medium">
               Voting is currently {isPastDate(votingSession.endDate) ? 'closed' : 'not yet open'}.
@@ -3069,7 +2577,9 @@ const VotingScreen = React.memo(function VotingScreen({
 
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold text-[#2d4660]">Available Features</h2>
-        <ShuffleButton isShuffling={isShuffling} onShuffle={handleShuffle} />
+        {features.length > 6 && (
+          <ShuffleButton isShuffling={isShuffling} onShuffle={handleShuffle} />
+        )}
       </div>
 
       <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${pendingUsedVotes > 0 ? 'mb-32' : ''}`}>
@@ -3085,6 +2595,9 @@ const VotingScreen = React.memo(function VotingScreen({
               votingIsActive={votingIsActive}
               onVote={onVote}
               isShuffling={isShuffling}
+              shuffleStage={shuffleStage}
+              currentUser={currentUser}
+              onRequestInfo={handleRequestInfo}
             />
           );
         })}
@@ -3096,15 +2609,15 @@ const VotingScreen = React.memo(function VotingScreen({
             <div>
               {!allVotesUsed && (
                 <div className="flex items-center">
-                  <AlertTriangle className="h-5 w-5 text-yellow-500 mr-2" />
+                  <AlertTriangle className="h-5 w-5 text-[#C89212] mr-2" />
                   <span className="text-gray-700">
-                    You still have <span className="font-semibold text-yellow-600">{remainingVotes}</span> votes remaining.
+                    You still have <span className="font-semibold text-[#C89212]">{remainingVotes}</span> votes remaining.
                   </span>
                 </div>
               )}
               {allVotesUsed && (
                 <div className="flex items-center">
-                  <CheckCircle className="h-5 w-5 text-[#1E6154] mr-2" />
+                  <CheckCircle className="h-5 w-5 text-[#1E5461] mr-2" />
                   <span className="text-gray-700">
                     All votes allocated! You can now submit your votes.
                   </span>
@@ -3115,7 +2628,7 @@ const VotingScreen = React.memo(function VotingScreen({
               onClick={onSubmitVotes}
               className={`py-3 px-6 rounded-lg font-medium cursor-pointer ${
                 allVotesUsed
-                  ? 'bg-[#1E6154] hover:bg-[#195148] text-white'
+                  ? 'bg-[#1E5461] hover:bg-[#173B65] text-white'
                   : 'bg-gray-300 text-gray-600 cursor-not-allowed'
               }`}
               disabled={!allVotesUsed}

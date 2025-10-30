@@ -8,7 +8,7 @@ import type { AzureDevOpsConfig, AzureDevOpsWorkItem, Feature } from '../types/a
 export const AZURE_AD_CONFIG = {
   clientId: 'a6283b6c-2210-4d6c-bade-651acfdb6703',
   tenantId: '3bb4e039-9a0f-4671-9733-a9ae03d39395',
-  redirectUri: typeof window !== 'undefined' ? window.location.origin : '',
+  redirectUri: 'http://localhost:5173/feature-voting-app/admin',
   scopes: [
     'https://app.vssps.visualstudio.com/user_impersonation',
     'offline_access'
@@ -348,8 +348,7 @@ export async function handleOAuthCallback(): Promise<{
   // Clean up
   sessionStorage.removeItem('oauth_state');
   
-  // Clean up URL
-  window.history.replaceState({}, document.title, window.location.pathname);
+  // Don't clean up URL here - let the component handle navigation
   
   return tokens;
 }
@@ -361,6 +360,12 @@ export async function initiateOAuthFlow(): Promise<void> {
   // Generate and store state for CSRF protection
   const state = Math.random().toString(36).substring(7);
   sessionStorage.setItem('oauth_state', state);
+  
+  // Store current session info to restore after OAuth
+  const currentSessionData = sessionStorage.getItem('currentSession');
+  if (currentSessionData) {
+    sessionStorage.setItem('oauth_session_backup', currentSessionData);
+  }
   
   // Redirect to authorization URL
   const authUrl = await getAzureDevOpsAuthUrl(state);
@@ -504,13 +509,13 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
     return {
       id: `ado-${item.id}`,
       title: item.fields['System.Title'] || 'Untitled',
-    description: item.fields['System.Description'] || '',
-    epic: item.fields['System.AreaPath'] || null,
-    state: item.fields['System.State'] || null,                    // ADD THIS
-    areaPath: item.fields['System.AreaPath'] || null,             // ADD THIS
-    tags: item.fields['System.Tags']                               // ADD THIS
-      ? item.fields['System.Tags'].split(';').map((t: string) => t.trim()).filter((t: string) => t)
-      : [],
+      description: item.fields['System.Description'] || '',
+      epic: item.fields['System.AreaPath'] || null,
+      state: item.fields['System.State'] || null,
+      areaPath: item.fields['System.AreaPath'] || null,
+      tags: item.fields['System.Tags']
+        ? item.fields['System.Tags'].split(';').map((t: string) => t.trim()).filter((t: string) => t)
+        : [],
       azureDevOpsId: item.id.toString(),
       azureDevOpsUrl: item.url
     };

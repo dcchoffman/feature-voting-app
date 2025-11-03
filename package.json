@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "deploy": "npm run build && npm run create-404 && gh-pages -d dist",
+    "create-404": "node scripts/create-404.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.74.0",

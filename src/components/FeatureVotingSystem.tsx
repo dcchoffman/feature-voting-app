@@ -7,12 +7,13 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
+import { supabase } from '../supabaseClient';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { 
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database, Search, Shield
+  Cloud, Database, Search, Shield, List
 } from "lucide-react";
 
 // Import services
@@ -210,6 +211,8 @@ export {
   ImageWithFallback, 
   FeatureForm, 
   AzureDevOpsForm,
+  AlreadyVotedScreen,
+  Footer,
   formatDate,
   getDaysRemaining,
   getDeadlineColor,
@@ -484,7 +487,7 @@ const ConfirmDialog = React.memo(function ConfirmDialog({
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-auto overflow-hidden">
+      <div className="relative z-10 bg-white rounded-lg shadow-xl max-w-md w-full mx-auto overflow-hidden">
         <div className={`${bgColor} p-4 flex items-start space-x-4`}>
           <div className={iconColor}>
             {type === "delete" ? (
@@ -580,7 +583,7 @@ const FeatureCard = React.memo(function FeatureCard({
 
   return (
     <div 
-      className={`bg-white rounded-lg shadow-md overflow-hidden transition-all duration-400 ease-in-out ${
+      className={`relative z-10 bg-white rounded-lg shadow-md overflow-hidden transition-all duration-400 ease-in-out ${
         userVoteCount > 0 ? 'border-2 border-[#1E5461]' : ''
       } ${getShuffleClasses()}`}
     >
@@ -629,7 +632,7 @@ const FeatureCard = React.memo(function FeatureCard({
               {userVoteCount === 0 ? (
                 <button
                   onClick={() => onVote(feature.id, true)}
-                  className={`px-4 py-1 rounded-md text-sm font-medium cursor-pointer ${
+                  className={`px-6 py-2.5 rounded-lg text-base font-semibold cursor-pointer transition-colors ${
                     votingIsActive && remainingVotes > 0
                       ? 'bg-[#2d4660] text-white hover:bg-[#C89212]'
                       : 'bg-gray-300 text-gray-600 cursor-not-allowed'
@@ -642,18 +645,18 @@ const FeatureCard = React.memo(function FeatureCard({
                 <>
                   <button
                     onClick={() => onVote(feature.id, false)}
-                    className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer"
+                    className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer transition-colors"
                     aria-label="Remove vote"
                     disabled={!votingIsActive}
                   >
-                    <ChevronDown className="h-5 w-5" />
+                    <ChevronDown className="h-6 w-6" />
                   </button>
-                  <span className="px-3 py-1 bg-[#1E5461]/10 text-[#1E5461] rounded-full font-medium text-sm">
+                  <span className="px-4 py-2 bg-[#1E5461]/10 text-[#1E5461] rounded-full font-semibold text-base min-w-[3rem] text-center">
                     {userVoteCount}
                   </span>
                   <button
                     onClick={() => onVote(feature.id, true)}
-                    className={`p-1 rounded-full cursor-pointer ${
+                    className={`p-2 rounded-full cursor-pointer transition-colors ${
                       votingIsActive && remainingVotes > 0 
                         ? 'bg-[#2d4660]/10 hover:bg-[#C89212]/30 text-[#2d4660]' 
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -661,7 +664,7 @@ const FeatureCard = React.memo(function FeatureCard({
                     disabled={!votingIsActive || remainingVotes <= 0}
                     aria-label="Add vote"
                   >
-                    <ChevronUp className="h-5 w-5" />
+                    <ChevronUp className="h-6 w-6" />
                   </button>
                 </>
               )}
@@ -681,7 +684,7 @@ interface VotersListModalProps {
 function VotersListModal({ feature, onClose }: VotersListModalProps) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
+      <div className="relative z-10 bg-white rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-medium text-[#2d4660]">Voters for "{feature.title}"</h3>
           <button 
@@ -723,6 +726,7 @@ interface ResultsScreenProps {
   setShowVotersList: (id: string | null) => void;
   votingSession: VotingSession;
   effectiveVotesPerUser: number;
+  onLogout: () => void;
 }
 
 function ResultsScreen({ 
@@ -733,8 +737,27 @@ function ResultsScreen({
   showVotersList,
   setShowVotersList,
   votingSession,
-  effectiveVotesPerUser
+  effectiveVotesPerUser,
+  onLogout
 }: ResultsScreenProps) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside as any);
+    };
+  }, [mobileMenuOpen]);
+
   const sortedFeatures = useMemo(() => {
     return [...features].sort((a, b) => b.votes - a.votes);
   }, [features]);
@@ -751,7 +774,7 @@ function ResultsScreen({
   const deadlineColor = getDeadlineColor(daysRemaining);
 
   return (
-    <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
+    <div className="container mx-auto p-4 max-w-6xl pb-8">
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
@@ -762,7 +785,7 @@ function ResultsScreen({
         />
       </div>
       
-      {/* Title with back button and reset button in same row */}
+      {/* Title with back button - mobile menu in same row */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
@@ -782,21 +805,72 @@ function ResultsScreen({
             {isPastDate(votingSession.endDate) ? 'Final Voting Results' : 'Current Voting Results'}
           </h1>
         </div>
-        <div className="flex space-x-2">
-          <Button 
-            variant="primary"
-            onClick={onBack}
-            className="flex items-center"
-          >
-            <Settings className="mr-2 h-4 w-4" />
-            Admin Dashboard
-          </Button>
-          <Button 
-            variant="danger"
-            onClick={onResetAllVotes}
-          >
-            Reset All Votes
-          </Button>
+        <div ref={mobileMenuRef} className="relative z-40">
+          {/* Desktop buttons */}
+          <div className="hidden md:flex space-x-2">
+            <Button 
+              variant="primary"
+              onClick={onBack}
+              className="flex items-center"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              Admin Dashboard
+            </Button>
+            <Button 
+              variant="danger"
+              onClick={onResetAllVotes}
+            >
+              Reset All Votes
+            </Button>
+            <Button 
+              variant="gray"
+              onClick={onLogout}
+              className="flex items-center"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+
+          {/* Mobile menu trigger */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+              aria-label="Open menu"
+            >
+              <List className="h-5 w-5 text-gray-700" />
+            </button>
+          </div>
+
+          {/* Mobile dropdown menu */}
+          {mobileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+              <div className="py-1">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onBack(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                  Admin Dashboard
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onResetAllVotes(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50 text-red-600"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Reset All Votes
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onLogout(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -923,14 +997,14 @@ function ResultsScreen({
 }
 
 interface ThankYouScreenProps {
-  onReturn: () => void;
+  navigate: any;
   votingSession: VotingSession;
 }
 
-function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
+function ThankYouScreen({ navigate, votingSession }: ThankYouScreenProps) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6">
-      <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8 text-center">
+    <div className="relative z-10 flex flex-col items-center justify-center min-h-[80vh] p-6">
+      <div className="relative z-10 w-full max-w-md bg-white rounded-lg shadow-lg p-8 text-center">
         <img
           src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
           alt="New Millennium Building Systems Logo"
@@ -949,14 +1023,106 @@ function ThankYouScreen({ onReturn, votingSession }: ThankYouScreenProps) {
         </p>
         
         <p className="text-gray-600 mb-8">
-          We appreciate your input in helping prioritize features for our Purchasing Dashboard redesign.
+          We appreciate your input in helping prioritize features for our product roadmap.
         </p>
         
-        <Button variant="primary" onClick={onReturn} className="mx-auto">
-          Return to Voting
+        <Button variant="primary" onClick={() => navigate('/sessions')} className="mx-auto">
+          View All Voting Sessions
         </Button>
       </div>
     </div>
+  );
+}
+
+// ============================================
+// FOOTER COMPONENT
+// ============================================
+
+interface FooterProps {
+  isAdmin: boolean;
+  viewMode?: 'voting' | 'admin';
+  onToggleView?: () => void;
+}
+
+function Footer({ isAdmin, viewMode = 'voting', onToggleView }: FooterProps) {
+  const currentYear = new Date().getFullYear();
+  
+  return (
+    <footer className="mt-auto bg-gray-50 border-t border-gray-200">
+      <div className="container mx-auto px-4 py-6 max-w-6xl">
+        {/* View Toggle - Only show for admins */}
+        {isAdmin && onToggleView && (
+          <div className="flex justify-center mb-6">
+            <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => viewMode !== 'voting' && onToggleView()}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  viewMode === 'voting'
+                    ? 'bg-white text-[#2d4660] shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Vote className="h-4 w-4 inline mr-2" />
+                Voter View
+              </button>
+              <button
+                onClick={() => viewMode !== 'admin' && onToggleView()}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  viewMode === 'admin'
+                    ? 'bg-white text-[#2d4660] shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Settings className="h-4 w-4 inline mr-2" />
+                Admin View
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Footer Content */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-gray-600">
+          {/* Company Info */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-2">New Millennium Building Systems</h3>
+            <p className="text-xs leading-relaxed">
+              A Steel Dynamics Company<br />
+              Innovation in structural steel manufacturing
+            </p>
+          </div>
+
+          {/* Quick Links */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-2">Quick Links</h3>
+            <ul className="space-y-1 text-xs">
+              <li>
+                <a href="https://www.steeldynamics.com" target="_blank" rel="noopener noreferrer" className="hover:text-[#2d4660] transition-colors">
+                  Steel Dynamics Inc.
+                </a>
+              </li>
+              <li>
+                <a href="https://www.newmill.com" target="_blank" rel="noopener noreferrer" className="hover:text-[#2d4660] transition-colors">
+                  New Millennium
+                </a>
+              </li>
+            </ul>
+          </div>
+
+          {/* Support */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-2">Need Help?</h3>
+            <p className="text-xs">
+              Contact your Product Owner or session administrator for assistance with voting.
+            </p>
+          </div>
+        </div>
+
+        {/* Copyright */}
+        <div className="mt-6 pt-6 border-t border-gray-200 text-center text-xs text-gray-500">
+          <p>&copy; {currentYear} New Millennium Building Systems, LLC. All rights reserved.</p>
+        </div>
+      </div>
+    </footer>
   );
 }
 
@@ -971,7 +1137,7 @@ interface AzureDevOpsFormProps {
   onCancel: () => void;
   isFetching: boolean;
   error: string | null;
-  onInitiateOAuth: () => void;
+  onInitiateOAuth: (action?: 'preview' | 'sync') => void;
   availableStates: string[];
   availableAreaPaths: string[];
   availableTags: string[];
@@ -1053,7 +1219,7 @@ function AzureDevOpsForm({
     if (isAuthenticated) {
       await onPreview();
     } else {
-      onInitiateOAuth();
+      onInitiateOAuth('preview');
     }
   };
   
@@ -1328,6 +1494,548 @@ function FeatureForm({ feature, onSubmit, onCancel }: FeatureFormProps) {
 }
 
 // ============================================
+// ALREADY VOTED SCREEN
+// ============================================
+
+interface AlreadyVotedScreenProps {
+  currentUser: any;
+  votingSession: VotingSession;
+  onChangeVotes: () => void;
+  onToggleAdmin: () => void;
+  isAdmin: boolean;
+  navigate: any;
+  userVotes: Record<string, number>;
+  features: Feature[];
+}
+
+function AlreadyVotedScreen({
+  currentUser,
+  votingSession,
+  onChangeVotes,
+  onToggleAdmin,
+  isAdmin,
+  navigate,
+  userVotes,
+  features
+}: AlreadyVotedScreenProps) {
+  const [showChangeConfirm, setShowChangeConfirm] = useState(false);
+  
+  const totalVotes = Object.values(userVotes).reduce((sum, count) => sum + count, 0);
+  const votedFeatures = features.filter(f => userVotes[f.id] > 0);
+  
+  return (
+    <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
+      {/* Desktop: Centered logo at top */}
+      <div className="hidden md:flex md:justify-center mb-2">
+        <img
+          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          alt="New Millennium Building Systems Logo"
+          className="-mt-4"
+          style={{ height: '96px', width: 'auto' }}
+        />
+      </div>
+      
+      {/* Title and buttons - stack on mobile */}
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6">
+        <div className="flex items-center">
+          {/* Mobile: small logo next to title */}
+          <ImageWithFallback
+            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            alt="New Millennium Building Systems Logo"
+            className="mr-4 md:hidden"
+            style={{ width: '40px', height: '40px' }}
+          />
+          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
+        </div>
+        <div className="relative z-10 flex items-center space-x-2 mt-3 md:mt-0 md:justify-end">
+          {isAdmin && (
+            <Button 
+              variant="primary"
+              onClick={onToggleAdmin}
+              className="flex items-center"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              <span className="hidden md:inline">Admin Dashboard</span>
+              <span className="md:hidden">Admin</span>
+            </Button>
+          )}
+          <Button 
+            variant="gray"
+            onClick={() => navigate('/sessions')}
+            className="flex items-center"
+          >
+            <LogOut className="mr-2 h-4 w-4" />
+            <span className="hidden md:inline">All Sessions</span>
+            <span className="md:hidden">Sessions</span>
+          </Button>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto">
+        <div className="relative z-10 bg-white rounded-lg shadow-lg p-8 text-center">
+          <div className="w-20 h-20 bg-[#1E5461]/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="h-12 w-12 text-[#1E5461]" />
+          </div>
+          
+          <h2 className="text-3xl font-bold text-[#1E5461] mb-4">Votes Already Submitted</h2>
+          
+          <p className="text-gray-700 text-lg mb-2">
+            Welcome back, <span className="font-semibold">{currentUser.name}</span>!
+          </p>
+          
+          <p className="text-gray-600 mb-6">
+            You have already submitted your votes for <span className="font-semibold">{votingSession.title}</span>.
+          </p>
+
+          <div className="bg-gray-50 rounded-lg p-6 mb-6">
+            <h3 className="text-lg font-semibold text-[#2d4660] mb-4">Your Current Votes</h3>
+            <div className="space-y-3">
+              {votedFeatures.map(feature => (
+                <div key={feature.id} className="flex justify-between items-center">
+                  <span className="text-gray-700">{feature.title}</span>
+                  <span className="bg-[#1E5461]/10 text-[#1E5461] rounded-full px-3 py-1 font-medium">
+                    {userVotes[feature.id]} {userVotes[feature.id] === 1 ? 'vote' : 'votes'}
+                  </span>
+                </div>
+              ))}
+              <div className="border-t border-gray-200 pt-3 mt-3">
+                <div className="flex justify-between items-center font-semibold">
+                  <span className="text-[#2d4660]">Total Votes</span>
+                  <span className="text-[#2d4660]">{totalVotes}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#C89212]/10 border border-[#C89212]/20 rounded-lg p-4 mb-6">
+            <div className="flex items-start text-left">
+              <AlertTriangle className="h-5 w-5 text-[#C89212] mr-3 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm text-gray-700">
+                  If you'd like to change your votes, you can do so below. However, please note that this will 
+                  <span className="font-semibold"> permanently remove your previous votes</span> and allow you to vote again. 
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <Button 
+            variant="gold"
+            onClick={() => setShowChangeConfirm(true)}
+            className="mx-auto text-lg py-3 px-8"
+          >
+            <RefreshCw className="mr-2 h-5 w-5" />
+            Change My Votes
+          </Button>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        show={showChangeConfirm}
+        title="Change Your Votes?"
+        message="This will permanently remove all your previous votes for this session and allow you to vote again. This action cannot be undone. Are you sure you want to continue?"
+        onConfirm={onChangeVotes}
+        onCancel={() => setShowChangeConfirm(false)}
+        confirmText="Yes, Change My Votes"
+        cancelText="Cancel"
+        type="reset"
+      />
+    </div>
+  );
+}
+
+// ============================================
+// VOTING SCREEN
+// ============================================
+
+interface VotingScreenProps {
+  features: Feature[];
+  currentUser: any;
+  pendingVotes: Record<string, number>;
+  pendingUsedVotes: number;
+  onVote: (featureId: string, increment: boolean) => void;
+  onSubmitVotes: () => void;
+  onToggleAdmin: () => void;
+  isAdmin: boolean;
+  votingSession: VotingSession;
+  navigate: any;
+  effectiveVotesPerUser: number;
+  sessionId: string;
+  onLogout: () => void;
+}
+
+const VotingScreen = React.memo(function VotingScreen({ 
+  features, 
+  currentUser, 
+  pendingVotes,
+  pendingUsedVotes,
+  onVote,
+  onSubmitVotes,
+  onToggleAdmin,
+  isAdmin,
+  votingSession,
+  navigate,
+  effectiveVotesPerUser,
+  sessionId,
+  onLogout
+}: VotingScreenProps) {
+  // ALL HOOKS MUST BE AT THE TOP - BEFORE ANY RETURNS
+  const [displayFeatures, setDisplayFeatures] = useState([...features]);
+  const [isShuffling, setIsShuffling] = useState(false);
+  const [shuffleStage, setShuffleStage] = useState<'idle' | 'fadeOut' | 'rearranging' | 'fadeIn'>('idle');
+  const [hasAlreadyVoted, setHasAlreadyVoted] = useState(false);
+  const [existingVotes, setExistingVotes] = useState<Record<string, number>>({});
+  const [isCheckingVotes, setIsCheckingVotes] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside as any);
+    };
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    setDisplayFeatures([...features]);
+  }, [features]);
+
+  // Check if user has already voted
+  useEffect(() => {
+    async function checkExistingVotes() {
+      if (!currentUser || !sessionId) {
+        setIsCheckingVotes(false);
+        return;
+      }
+
+      try {
+        const votes = await db.getVotes(sessionId);
+        const userVotes = votes.filter(v => v.user_id === currentUser.id);
+        
+        if (userVotes.length > 0) {
+          const votesMap: Record<string, number> = {};
+          userVotes.forEach(v => {
+            votesMap[v.feature_id] = v.vote_count;
+          });
+          setExistingVotes(votesMap);
+          setHasAlreadyVoted(true);
+        } else {
+          setHasAlreadyVoted(false);
+          setExistingVotes({});
+        }
+      } catch (error) {
+        console.error('Error checking existing votes:', error);
+        setHasAlreadyVoted(false);
+      } finally {
+        setIsCheckingVotes(false);
+      }
+    }
+
+    checkExistingVotes();
+  }, [currentUser, sessionId]);
+
+  const handleChangeVotes = useCallback(async () => {
+    if (!currentUser || !sessionId) return;
+
+    try {
+      // Delete all existing votes for this user in this session with one query
+      await db.deleteVotesByUser(sessionId, currentUser.id);
+      
+      // Reset the state to allow voting again
+      setHasAlreadyVoted(false);
+      setExistingVotes({});
+    } catch (error) {
+      console.error('Error changing votes:', error);
+      alert('Failed to reset votes. Please try again.');
+    }
+  }, [currentUser, sessionId]);
+
+  const handleShuffle = useCallback(() => {
+    if (isShuffling) return;
+    setIsShuffling(true);
+    setShuffleStage('fadeOut');
+    
+    // Stage 1: Fade out (400ms)
+    setTimeout(() => {
+      setShuffleStage('rearranging');
+      // Stage 2: Rearrange while invisible (200ms)
+      setTimeout(() => {
+        setDisplayFeatures(shuffleArray(features));
+        setShuffleStage('fadeIn');
+        // Stage 3: Fade in (400ms)
+        setTimeout(() => {
+          setShuffleStage('idle');
+          setIsShuffling(false);
+        }, 400);
+      }, 200);
+    }, 400);
+  }, [features, isShuffling]);
+
+  const handleRequestInfo = useCallback(async (featureId: string) => {
+    const feature = features.find(f => f.id === featureId);
+    if (!feature || !currentUser) return;
+
+    try {
+      // Store the request in the database
+      await db.createInfoRequest({
+        session_id: sessionId,
+        feature_id: featureId,
+        feature_title: feature.title,
+        requester_id: currentUser.id,
+        requester_name: currentUser.name,
+        requester_email: currentUser.email,
+        created_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error submitting info request:', error);
+      alert('Failed to submit request. Please try again.');
+      throw error; // Re-throw so the component knows it failed
+    }
+  }, [features, currentUser, sessionId]);
+
+  // NOW CHECK CONDITIONS AND RETURN EARLY IF NEEDED
+  if (!currentUser) return null;
+
+  // Show loading state while checking
+  if (isCheckingVotes) {
+    return (
+      <div className="container mx-auto p-4 max-w-6xl min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your voting status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show "already voted" screen if user has submitted votes
+  if (hasAlreadyVoted) {
+    return (
+      <AlreadyVotedScreen
+        currentUser={currentUser}
+        votingSession={votingSession}
+        onChangeVotes={handleChangeVotes}
+        onToggleAdmin={onToggleAdmin}
+        isAdmin={isAdmin}
+        navigate={navigate}
+        userVotes={existingVotes}
+        features={features}
+      />
+    );
+  }
+
+  const remainingVotes = effectiveVotesPerUser - pendingUsedVotes;
+  const allVotesUsed = remainingVotes === 0;
+  const votingIsActive = votingSession.isActive;
+  
+  return (
+    <div className="container mx-auto p-4 max-w-6xl pb-8">
+      {/* Desktop: Centered logo at top */}
+      <div className="hidden md:flex md:justify-center mb-2">
+        <img
+          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          alt="New Millennium Building Systems Logo"
+          className="-mt-4"
+          style={{ height: '96px', width: 'auto' }}
+        />
+      </div>
+      
+      {/* Title and buttons - mobile menu in same row */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center">
+          {/* Mobile: small logo next to title */}
+          <ImageWithFallback
+            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            alt="New Millennium Building Systems Logo"
+            className="mr-4 md:hidden"
+            style={{ width: '40px', height: '40px' }}
+          />
+          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
+        </div>
+        <div ref={mobileMenuRef} className="relative z-40">
+          {/* Desktop buttons */}
+          <div className="hidden md:flex items-center space-x-2">
+            {isAdmin && (
+              <Button 
+                variant="primary"
+                onClick={onToggleAdmin}
+                className="flex items-center"
+              >
+                <Settings className="mr-2 h-4 w-4" />
+                Admin Dashboard
+              </Button>
+            )}
+            <Button 
+              variant="gray"
+              onClick={() => navigate('/sessions')}
+              className="flex items-center"
+            >
+              All Sessions
+            </Button>
+            <Button 
+              variant="gray"
+              onClick={onLogout}
+              className="flex items-center"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+
+          {/* Mobile menu trigger */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+              aria-label="Open menu"
+            >
+              <List className="h-5 w-5 text-gray-700" />
+            </button>
+          </div>
+
+          {/* Mobile dropdown menu */}
+          {mobileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+              <div className="py-1">
+                {isAdmin && (
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); onToggleAdmin(); }}
+                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                    Admin Dashboard
+                  </button>
+                )}
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigate('/sessions'); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  All Sessions
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onLogout(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="relative z-10 mb-6 bg-white rounded-lg shadow-md p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2">
+            <h2 className="text-xl font-semibold text-[#2d4660] mb-2">{votingSession.title}</h2>
+            <p className="text-gray-600">{votingSession.goal}</p>
+          </div>
+          
+          <div className="flex flex-col justify-center">
+            <DeadlineDisplay endDate={votingSession.endDate} />
+            
+            <div className="flex items-center mt-3">
+              <Vote className="h-4 w-4 mr-2 text-[#2d4660]" />
+              <p className="text-gray-700">
+                You have <span className="font-bold text-[#2d4660]">{remainingVotes} / {effectiveVotesPerUser}</span> votes remaining
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {!votingIsActive && (
+        <div className="mb-6 bg-[#C89212]/10 p-4 rounded-lg border border-[#C89212]/20">
+          <div className="flex items-center text-[#6A4234]">
+            <Clock className="h-5 w-5 mr-2" />
+            <span className="font-medium">
+              Voting is currently {isPastDate(votingSession.endDate) ? 'closed' : 'not yet open'}.
+              {isPastDate(votingSession.endDate) 
+                ? ` Voting ended on ${formatDate(votingSession.endDate)}.`
+                : ` Voting will open on ${formatDate(votingSession.startDate)}.`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold text-[#2d4660]">Available Features</h2>
+        {features.length > 6 && (
+          <ShuffleButton isShuffling={isShuffling} onShuffle={handleShuffle} />
+        )}
+      </div>
+
+      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${pendingUsedVotes > 0 ? 'mb-32' : ''}`}>
+        {displayFeatures.map((feature) => {
+          const userVoteCount = pendingVotes[feature.id] || 0;
+          
+          return (
+            <FeatureCard
+              key={feature.id}
+              feature={feature}
+              userVoteCount={userVoteCount}
+              remainingVotes={remainingVotes}
+              votingIsActive={votingIsActive}
+              onVote={onVote}
+              isShuffling={isShuffling}
+              shuffleStage={shuffleStage}
+              currentUser={currentUser}
+              onRequestInfo={handleRequestInfo}
+            />
+          );
+        })}
+      </div>
+      
+      {pendingUsedVotes > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-4">
+          <div className="container mx-auto max-w-6xl flex items-center justify-between">
+            <div>
+              {!allVotesUsed && (
+                <div className="flex items-center">
+                  <AlertTriangle className="h-5 w-5 text-[#C89212] mr-2" />
+                  <span className="text-gray-700">
+                    You still have <span className="font-semibold text-[#C89212]">{remainingVotes}</span> votes remaining.
+                  </span>
+                </div>
+              )}
+              {allVotesUsed && (
+                <div className="flex items-center">
+                  <CheckCircle className="h-5 w-5 text-[#1E5461] mr-2" />
+                  <span className="text-gray-700">
+                    All votes allocated! You can now submit your votes.
+                  </span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={onSubmitVotes}
+              className={`py-3 px-6 rounded-lg font-medium cursor-pointer ${
+                allVotesUsed
+                  ? 'bg-[#1E5461] hover:bg-[#173B65] text-white'
+                  : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+              }`}
+              disabled={!allVotesUsed}
+            >
+              Submit Votes
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -1344,8 +2052,25 @@ function FeatureVotingSystem({
 }: FeatureVotingSystemProps) {
   
   // Session context integration
-  const { currentSession, currentUser } = useSession();
+  const { currentSession, currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    try {
+      setCurrentSession(null as any);
+    } catch {}
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('voting_system_current_session');
+      localStorage.removeItem('azureDevOpsAuthInProgress');
+      sessionStorage.removeItem('oauth_return_path');
+      sessionStorage.removeItem('oauth_action');
+    } catch {}
+    navigate('/login', { replace: true });
+  };
   
   // Redirect if no session selected (but not during OAuth callback)
   useEffect(() => {
@@ -1505,8 +2230,15 @@ useEffect(() => {
     handleCallback();
   }, [currentSession, navigate, azureDevOpsConfig]);
 
-  const handleInitiateOAuth = useCallback(() => {
+  const handleInitiateOAuth = useCallback((action?: 'preview' | 'sync') => {
     localStorage.setItem('azureDevOpsAuthInProgress', 'true');
+    if (action) {
+      sessionStorage.setItem('oauth_action', action);
+    }
+    // Store return path so we land back in admin area
+    if (!sessionStorage.getItem('oauth_return_path')) {
+      sessionStorage.setItem('oauth_return_path', '/admin');
+    }
     azureService.initiateOAuthFlow();
   }, []);
 
@@ -1651,6 +2383,8 @@ useEffect(() => {
 
     loadFilterOptions();
   }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, azureDevOpsConfig.workItemType, ensureValidToken]);
+
+  
 
   // Add this callback to dynamically fetch states for a specific work item type
   const handleFetchStatesForType = useCallback(async (workItemType: string) => {
@@ -1983,15 +2717,44 @@ useEffect(() => {
     }
   }, [azureDevOpsConfig, currentSession]);
 
+  // After OAuth completes and tokens are present, automatically resume intended action
+  useEffect(() => {
+    const maybeResumePostOAuth = async () => {
+      const action = sessionStorage.getItem('oauth_action');
+      if (!action) return;
+      if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) return;
+      try {
+        if (action === 'preview') {
+          await handlePreviewAzureDevOpsFeatures();
+        } else if (action === 'sync') {
+          await handleFetchAzureDevOpsFeatures();
+        }
+      } finally {
+        sessionStorage.removeItem('oauth_action');
+      }
+    };
+    maybeResumePostOAuth();
+  }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, handlePreviewAzureDevOpsFeatures, handleFetchAzureDevOpsFeatures]);
+
   const handleToggleAdmin = useCallback(() => {
-    if (isAdmin) {
-      setIsAdmin(false);
-      setView('voting');
-    } else {
+    setIsAdmin(true);
+    setView('admin');
+  }, []);
+
+  const handleShowVoting = useCallback(() => {
+    setIsAdmin(false);
+    setView('voting');
+  }, []);
+
+  const handleToggleViewMode = useCallback(() => {
+    if (view === 'voting') {
       setIsAdmin(true);
       setView('admin');
+    } else if (view === 'admin') {
+      setIsAdmin(false);
+      setView('voting');
     }
-  }, [isAdmin]);
+  }, [view]);
 
   const handleAddFeature = useCallback(async (feature: any) => {
     if (!currentSession) return;
@@ -2244,15 +3007,7 @@ useEffect(() => {
     }
   }, [currentSession]);
 
-  const handleReturnToVoting = useCallback(() => {
-    setPendingVotes({});
-    setPendingUsedVotes(0);
-    setView('voting');
-  }, []);
 
-  const handleShowVoterView = useCallback(() => {
-    setView('voting');
-  }, []);
 
   const renderContent = useMemo(() => {
     switch (view) {
@@ -2271,6 +3026,7 @@ useEffect(() => {
             navigate={navigate}
             effectiveVotesPerUser={effectiveVotesPerUser}
             sessionId={currentSession?.id || ''}
+            onLogout={handleLogout}
           />
         );
       case 'results':
@@ -2284,12 +3040,13 @@ useEffect(() => {
             setShowVotersList={setShowVotersList}
             votingSession={votingSession}
             effectiveVotesPerUser={effectiveVotesPerUser}
+            onLogout={handleLogout}
           />
         );
       case 'thankyou':
         return (
           <ThankYouScreen
-            onReturn={handleReturnToVoting}
+            navigate={navigate}
             votingSession={votingSession}
           />
         );
@@ -2306,7 +3063,7 @@ useEffect(() => {
             setShowAddForm={setShowAddForm}
             editingFeature={editingFeature}
             setEditingFeature={setEditingFeature}
-            onLogout={handleToggleAdmin}
+            onLogout={handleShowVoting}
             votingSession={votingSession}
             azureDevOpsConfig={azureDevOpsConfig}
             onUpdateAzureDevOpsConfig={handleUpdateAzureDevOpsConfig}
@@ -2327,7 +3084,7 @@ useEffect(() => {
             onConfirmSync={handleConfirmSync}
             hasImportedFeatures={hasImportedFeatures}
             setHasImportedFeatures={setHasImportedFeatures}
-            onShowVoterView={handleShowVoterView}
+            onShowVoterView={handleShowVoting}
             onUpdateVotingSession={handleUpdateVotingSession}
             onFetchStatesForType={handleFetchStatesForType}
           />
@@ -2335,16 +3092,17 @@ useEffect(() => {
     }
   }, [
     view, features, currentUser, pendingVotes, pendingUsedVotes, 
-    handlePendingVote, handleSubmitVotes, handleToggleAdmin, isAdmin, 
+    handlePendingVote, handleSubmitVotes, handleToggleAdmin, handleShowVoting, isAdmin, 
     votingSession, initiateResetVotes, initiateResetAllVotes, showVotersList,
-    setShowVotersList, handleReturnToVoting, handleAddFeature, handleUpdateFeature,
+    setShowVotersList, handleAddFeature, handleUpdateFeature,
     handleDeleteFeature, showAddForm, setShowAddForm, editingFeature,
     setEditingFeature, azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
     setShowAzureDevOpsForm, handleFetchAzureDevOpsFeatures, handlePreviewAzureDevOpsFeatures,
     handleDisconnectAzureDevOps, isFetchingAzureDevOps, azureFetchError, handleInitiateOAuth,
     previewFeatures, showPreviewModal, setShowPreviewModal, handleConfirmSync,
     hasImportedFeatures, setHasImportedFeatures, navigate, effectiveVotesPerUser,
-    availableStates, availableAreaPaths, availableTags, handleShowVoterView, handleFetchStatesForType
+    availableStates, availableAreaPaths, availableTags, handleFetchStatesForType, currentSession,
+    handleToggleViewMode
   ]);
 
   // IMPORTANT: Return loading check AFTER all hooks
@@ -2371,8 +3129,16 @@ useEffect(() => {
   }
 
   return (
-    <div className="w-full bg-gray-50 text-gray-900 font-sans">
-      {renderContent}
+    <div className="w-full bg-gray-50 text-gray-900 font-sans min-h-screen flex flex-col">
+      <div className="flex-grow">
+        {renderContent}
+      </div>
+      
+      <Footer 
+        isAdmin={isAdmin} 
+        viewMode={view === 'admin' ? 'admin' : 'voting'}
+        onToggleView={handleToggleViewMode}
+      />
       
       <ConfirmDialog
         show={confirmState.showReset}
@@ -2396,251 +3162,6 @@ useEffect(() => {
     </div>
   );
 }
-
-interface VotingScreenProps {
-  features: Feature[];
-  currentUser: any;
-  pendingVotes: Record<string, number>;
-  pendingUsedVotes: number;
-  onVote: (featureId: string, increment: boolean) => void;
-  onSubmitVotes: () => void;
-  onToggleAdmin: () => void;
-  isAdmin: boolean;
-  votingSession: VotingSession;
-  navigate: any;
-  effectiveVotesPerUser: number;
-  sessionId: string;
-}
-
-const VotingScreen = React.memo(function VotingScreen({ 
-  features, 
-  currentUser, 
-  pendingVotes,
-  pendingUsedVotes,
-  onVote,
-  onSubmitVotes,
-  onToggleAdmin,
-  isAdmin,
-  votingSession,
-  navigate,
-  effectiveVotesPerUser,
-  sessionId
-}: VotingScreenProps) {
-  if (!currentUser) return null;
-  
-  const [displayFeatures, setDisplayFeatures] = useState([...features]);
-  const [isShuffling, setIsShuffling] = useState(false);
-  const [shuffleStage, setShuffleStage] = useState<'idle' | 'fadeOut' | 'rearranging' | 'fadeIn'>('idle');
-
-  useEffect(() => {
-    setDisplayFeatures([...features]);
-  }, [features]);
-
-  const handleShuffle = useCallback(() => {
-    if (isShuffling) return;
-    setIsShuffling(true);
-    setShuffleStage('fadeOut');
-    
-    // Stage 1: Fade out (400ms)
-    setTimeout(() => {
-      setShuffleStage('rearranging');
-      // Stage 2: Rearrange while invisible (200ms)
-      setTimeout(() => {
-        setDisplayFeatures(shuffleArray(features));
-        setShuffleStage('fadeIn');
-        // Stage 3: Fade in (400ms)
-        setTimeout(() => {
-          setShuffleStage('idle');
-          setIsShuffling(false);
-        }, 400);
-      }, 200);
-    }, 400);
-  }, [features, isShuffling]);
-
-  const handleRequestInfo = useCallback(async (featureId: string) => {
-    const feature = features.find(f => f.id === featureId);
-    if (!feature || !currentUser) return;
-
-    try {
-      // Store the request in the database
-      await db.createInfoRequest({
-        session_id: sessionId,
-        feature_id: featureId,
-        feature_title: feature.title,
-        requester_id: currentUser.id,
-        requester_name: currentUser.name,
-        requester_email: currentUser.email,
-        created_at: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Error submitting info request:', error);
-      alert('Failed to submit request. Please try again.');
-      throw error; // Re-throw so the component knows it failed
-    }
-  }, [features, currentUser, sessionId]);
-
-  const remainingVotes = effectiveVotesPerUser - pendingUsedVotes;
-  const allVotesUsed = remainingVotes === 0;
-  const votingIsActive = votingSession.isActive;
-  
-  return (
-    <div className="container mx-auto p-4 max-w-6xl min-h-screen">
-      {/* Desktop: Centered logo at top */}
-      <div className="hidden md:flex md:justify-center mb-2">
-        <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
-          alt="New Millennium Building Systems Logo"
-          className="-mt-4"
-          style={{ height: '96px', width: 'auto' }}
-        />
-      </div>
-      
-      {/* Title and buttons in same row */}
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center">
-          {/* Mobile: small logo next to title */}
-          <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
-            alt="New Millennium Building Systems Logo"
-            className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
-          />
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
-        </div>
-        <div className="relative z-10 flex items-center space-x-2">
-          {isAdmin && (
-            <Button 
-              variant="primary"
-              onClick={onToggleAdmin}
-              className="flex items-center"
-            >
-              <Settings className="mr-2 h-4 w-4" />
-              <span className="hidden md:inline">Admin Dashboard</span>
-              <span className="md:hidden">Admin</span>
-            </Button>
-          )}
-          {!isAdmin && (
-            <Button 
-              variant="blue"
-              onClick={() => navigate('/login')}
-              className="flex items-center"
-            >
-              <Settings className="mr-2 h-4 w-4" />
-              <span className="hidden md:inline">Admin Login</span>
-              <span className="md:hidden">Login</span>
-            </Button>
-          )}
-          <Button 
-            variant="gray"
-            onClick={() => navigate('/sessions')}
-            className="flex items-center"
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Logout</span>
-          </Button>
-        </div>
-      </div>
-
-      <div className="relative z-10 mb-6 bg-white rounded-lg shadow-md p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-2">
-            <h2 className="text-xl font-semibold text-[#2d4660] mb-2">{votingSession.title}</h2>
-            <p className="text-gray-600">{votingSession.goal}</p>
-          </div>
-          
-          <div className="flex flex-col justify-center">
-            <DeadlineDisplay endDate={votingSession.endDate} />
-            
-            <div className="flex items-center mt-3">
-              <Vote className="h-4 w-4 mr-2 text-[#2d4660]" />
-              <p className="text-gray-700">
-                You have <span className="font-bold text-[#2d4660]">{remainingVotes} / {effectiveVotesPerUser}</span> votes remaining
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {!votingIsActive && (
-        <div className="mb-6 bg-[#C89212]/10 p-4 rounded-lg border border-[#C89212]/20">
-          <div className="flex items-center text-[#6A4234]">
-            <Clock className="h-5 w-5 mr-2" />
-            <span className="font-medium">
-              Voting is currently {isPastDate(votingSession.endDate) ? 'closed' : 'not yet open'}.
-              {isPastDate(votingSession.endDate) 
-                ? ` Voting ended on ${formatDate(votingSession.endDate)}.`
-                : ` Voting will open on ${formatDate(votingSession.startDate)}.`}
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold text-[#2d4660]">Available Features</h2>
-        {features.length > 6 && (
-          <ShuffleButton isShuffling={isShuffling} onShuffle={handleShuffle} />
-        )}
-      </div>
-
-      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${pendingUsedVotes > 0 ? 'mb-32' : ''}`}>
-        {displayFeatures.map((feature) => {
-          const userVoteCount = pendingVotes[feature.id] || 0;
-          
-          return (
-            <FeatureCard
-              key={feature.id}
-              feature={feature}
-              userVoteCount={userVoteCount}
-              remainingVotes={remainingVotes}
-              votingIsActive={votingIsActive}
-              onVote={onVote}
-              isShuffling={isShuffling}
-              shuffleStage={shuffleStage}
-              currentUser={currentUser}
-              onRequestInfo={handleRequestInfo}
-            />
-          );
-        })}
-      </div>
-      
-      {pendingUsedVotes > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-4">
-          <div className="container mx-auto max-w-6xl flex items-center justify-between">
-            <div>
-              {!allVotesUsed && (
-                <div className="flex items-center">
-                  <AlertTriangle className="h-5 w-5 text-[#C89212] mr-2" />
-                  <span className="text-gray-700">
-                    You still have <span className="font-semibold text-[#C89212]">{remainingVotes}</span> votes remaining.
-                  </span>
-                </div>
-              )}
-              {allVotesUsed && (
-                <div className="flex items-center">
-                  <CheckCircle className="h-5 w-5 text-[#1E5461] mr-2" />
-                  <span className="text-gray-700">
-                    All votes allocated! You can now submit your votes.
-                  </span>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={onSubmitVotes}
-              className={`py-3 px-6 rounded-lg font-medium cursor-pointer ${
-                allVotesUsed
-                  ? 'bg-[#1E5461] hover:bg-[#173B65] text-white'
-                  : 'bg-gray-300 text-gray-600 cursor-not-allowed'
-              }`}
-              disabled={!allVotesUsed}
-            >
-              Submit Votes
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-});
 
 export default FeatureVotingSystem;
 

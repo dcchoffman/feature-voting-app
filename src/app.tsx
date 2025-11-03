@@ -14,6 +14,7 @@ import AdminManagementScreen from './screens/AdminManagementScreen';
 import FeatureVotingSystem from './components/FeatureVotingSystem';
 import UnauthorizedScreen from './screens/UnauthorizedScreen';
 import SystemAdminsScreen from './screens/SystemAdminsScreen';
+import UsersManagementScreen from './screens/UsersManagementScreen';
 import DecorativeLines from './components/DecorativeLines';
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
           <Route path="/results" element={<FeatureVotingSystem resultsMode={true} />} /> 
           <Route path="/unauthorized" element={<UnauthorizedScreen />} />
           <Route path="/system-admins" element={<SystemAdminsScreen />} />
+          <Route path="/users" element={<UsersManagementScreen />} />
         </Routes>
       </BrowserRouter>
     </SessionProvider>

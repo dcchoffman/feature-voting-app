@@ -4,19 +4,39 @@
 // Location: src/screens/AdminManagementScreen.tsx
 // ============================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
+import { sendInvitationEmail } from '../services/emailService';
 import type { User, SessionAdmin } from '../types';
 import { 
   ChevronLeft, UserPlus, Trash2, X, AlertCircle,
-  Mail, User as UserIcon, Shield, Settings
+  Mail, User as UserIcon, Shield, Settings, List, LogOut
 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 export default function AdminManagementScreen() {
-  const { currentSession, currentUser } = useSession();
+  const { currentSession, currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    try {
+      setCurrentSession(null as any);
+    } catch {}
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('voting_system_current_session');
+      localStorage.removeItem('azureDevOpsAuthInProgress');
+      sessionStorage.removeItem('oauth_return_path');
+      sessionStorage.removeItem('oauth_action');
+    } catch {}
+    setMobileMenuOpen(false);
+    navigate('/login', { replace: true });
+  };
   
   const [admins, setAdmins] = useState<SessionAdmin[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -24,6 +44,23 @@ export default function AdminManagementScreen() {
   const [formData, setFormData] = useState({ email: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside as any);
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     if (!currentSession) {
@@ -76,17 +113,24 @@ export default function AdminManagementScreen() {
     
     setIsSubmitting(true);
     try {
-      // First, get or create the user
-      const user = await db.getUserByEmail(formData.email);
-      
-      if (!user) {
-        setErrors({ email: 'User not found. They must log in first before being added as an admin.' });
-        setIsSubmitting(false);
-        return;
+      // Add as admin by email (auto-create user if needed)
+      const fallbackName = formData.email.split('@')[0].replace(/\./g, ' ');
+      await db.addSessionAdminByEmail(currentSession.id, formData.email, fallbackName);
+      // Send invite email via Edge Function (fallback to mailto)
+      try {
+        const inviteUrl = `${window.location.origin}/login?session=${currentSession.session_code}`;
+        await sendInvitationEmail({
+          to: formData.email,
+          subject: `You're invited to administer: ${currentSession.title}`,
+          text: `Hi,\n\nYou've been added as an admin for \"${currentSession.title}\".\n\nOpen: ${inviteUrl}\n\nBest regards,\n${currentUser?.name || ''}`,
+          html: `<p>Hi,</p><p>You've been added as an admin for <strong>${currentSession.title}</strong>.</p><p><a href="${inviteUrl}">Open the Feature Voting System</a></p><p>Best regards,<br/>${currentUser?.name || ''}</p>`
+        });
+      } catch {
+        try {
+          const mailto = db.buildSessionInviteMailto(currentSession as any, formData.email, currentUser?.name || '');
+          window.location.href = mailto;
+        } catch {}
       }
-      
-      // Add as admin
-      await db.addSessionAdmin(currentSession.id, user.id);
       
       await loadAdmins();
       setFormData({ email: '' });
@@ -163,7 +207,7 @@ export default function AdminManagementScreen() {
         />
       </div>
       
-      {/* Title and buttons in same row */}
+      {/* Title and buttons - mobile menu in same row */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
@@ -182,22 +226,71 @@ export default function AdminManagementScreen() {
           <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Session Admins</h1>
         </div>
         
-        <div className="flex space-x-2">
-          <button
-            onClick={() => navigate('/admin')}
-            className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
-          >
-            <Settings className="h-4 w-4 mr-2" />
-            Admin Dashboard
-          </button>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="flex items-center px-4 py-2 bg-[#c59f2d] text-white rounded-lg hover:bg-[#a88a26] transition-colors"
-          >
-            <UserPlus className="h-4 w-4 mr-2" />
-            <span className="hidden sm:inline">Add Admin</span>
-            <span className="sm:hidden">Add</span>
-          </button>
+        <div ref={mobileMenuRef} className="relative z-40">
+          {/* Desktop buttons */}
+          <div className="hidden md:flex space-x-2">
+            <button
+              onClick={() => navigate('/admin')}
+              className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Admin Dashboard
+            </button>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center px-4 py-2 bg-[#c59f2d] text-white rounded-lg hover:bg-[#a88a26] transition-colors"
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              Add Admin
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </button>
+          </div>
+
+          {/* Mobile menu trigger */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+              aria-label="Open menu"
+            >
+              <List className="h-5 w-5 text-gray-700" />
+            </button>
+          </div>
+
+          {/* Mobile dropdown menu */}
+          {mobileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+              <div className="py-1">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigate('/admin'); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                  Admin Dashboard
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); setShowAddForm(true); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <UserPlus className="h-4 w-4 mr-2 text-gray-700" />
+                  Add Admin
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -306,6 +399,9 @@ export default function AdminManagementScreen() {
               <li>View voting results and analytics for this session</li>
               <li>Add and remove other session admins</li>
             </ul>
+            <p className="mt-2 text-xs italic">
+              Note: System Admins have full admin access to all sessions in the system.
+            </p>
           </div>
         </div>
       </div>
@@ -348,9 +444,7 @@ export default function AdminManagementScreen() {
                     {errors.email}
                   </p>
                 )}
-                <p className="mt-1 text-xs text-gray-500">
-                  The user must have logged in at least once before being added as an admin.
-                </p>
+                
               </div>
 
               {errors.submit && (

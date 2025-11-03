@@ -8,11 +8,29 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
-import { ChevronLeft, Calendar, Users, Vote, CheckCircle, AlertCircle } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import { ChevronLeft, Calendar, Users, Vote, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
 
 export default function CreateSessionScreen() {
-  const { currentUser, setCurrentSession, refreshSessions } = useSession();
+  const { currentUser, setCurrentSession, refreshSessions, setCurrentUser } = useSession();
   const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    try {
+      setCurrentSession(null as any);
+    } catch {}
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('voting_system_current_session');
+      localStorage.removeItem('azureDevOpsAuthInProgress');
+      sessionStorage.removeItem('oauth_return_path');
+      sessionStorage.removeItem('oauth_action');
+    } catch {}
+    navigate('/login', { replace: true });
+  };
   
   const [formData, setFormData] = useState({
     title: '',
@@ -183,6 +201,13 @@ export default function CreateSessionScreen() {
           </button>
           <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Create Voting Session</h1>
         </div>
+        <button
+          onClick={handleLogout}
+          className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+        >
+          <LogOut className="h-4 w-4 mr-2" />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
       </div>
 
       {/* Form */}

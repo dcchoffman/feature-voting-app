@@ -37,14 +37,15 @@ export default function LoginScreen() {
         if (session) {
           setCurrentSession(session);
           
-          // Check if user is stakeholder or admin
-          const [isAdmin, isStakeholder] = await Promise.all([
+          // Check if user is system admin, session admin, or stakeholder
+          const [isSysAdmin, isAdmin, isStakeholder] = await Promise.all([
+            db.isUserSystemAdmin(user.id),
             db.isUserSessionAdmin(session.id, user.id),
             db.isUserSessionStakeholder(session.id, user.email)
           ]);
 
-          // Navigate based on role
-          if (isAdmin) {
+          // System admins have full access to all sessions
+          if (isSysAdmin || isAdmin) {
             navigate('/admin');
           } else if (isStakeholder) {
             navigate('/vote');
@@ -86,7 +87,7 @@ export default function LoginScreen() {
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+      <div className="relative z-10 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-lg sm:rounded-lg sm:px-10">
           <form onSubmit={handleLogin} className="space-y-6">
             <div>

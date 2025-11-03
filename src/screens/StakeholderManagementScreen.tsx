@@ -4,14 +4,16 @@
 // Location: src/screens/StakeholderManagementScreen.tsx
 // ============================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
+import { sendInvitationEmail } from '../services/emailService';
 import { 
   ChevronLeft, UserPlus, Trash2, CheckCircle, X, AlertCircle,
-  Mail, User, Clock, Settings
+  Mail, User, Clock, Settings, List, LogOut
 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 interface Stakeholder {
   id: string;
@@ -24,8 +26,26 @@ interface Stakeholder {
 }
 
 export default function StakeholderManagementScreen() {
-  const { currentSession, currentUser } = useSession();
+  const { currentSession, currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    try {
+      setCurrentSession(null as any);
+    } catch {}
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('voting_system_current_session');
+      localStorage.removeItem('azureDevOpsAuthInProgress');
+      sessionStorage.removeItem('oauth_return_path');
+      sessionStorage.removeItem('oauth_action');
+    } catch {}
+    setMobileMenuOpen(false);
+    navigate('/login', { replace: true });
+  };
   
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,6 +53,23 @@ export default function StakeholderManagementScreen() {
   const [formData, setFormData] = useState({ name: '', email: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside as any);
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     if (!currentSession) {
@@ -95,6 +132,21 @@ export default function StakeholderManagementScreen() {
         user_email: formData.email,
         has_voted: false
       });
+      // Send invite email via Edge Function (fallback to mailto)
+      try {
+        const inviteUrl = `${window.location.origin}/login?session=${currentSession.session_code}`;
+        await sendInvitationEmail({
+          to: formData.email,
+          subject: `You're invited to vote: ${currentSession.title}`,
+          text: `Hi,\n\nYou've been invited to vote in \"${currentSession.title}\".\n\nOpen: ${inviteUrl}\n\nBest regards,\n${currentUser?.name || ''}`,
+          html: `<p>Hi,</p><p>You've been invited to vote in <strong>${currentSession.title}</strong>.</p><p><a href="${inviteUrl}">Open the Feature Voting System</a></p><p>Best regards,<br/>${currentUser?.name || ''}</p>`
+        });
+      } catch {
+        try {
+          const mailto = db.buildSessionInviteMailto(currentSession as any, formData.email, currentUser?.name || '');
+          window.location.href = mailto;
+        } catch {}
+      }
       
       await loadStakeholders();
       setFormData({ name: '', email: '' });
@@ -159,43 +211,92 @@ export default function StakeholderManagementScreen() {
         />
       </div>
       
-      {/* Title and buttons in same row */}
-      {/* Title and buttons in same row */}
-<div className="flex justify-between items-center mb-6">
-  <div className="flex items-center">
-    {/* Mobile: small logo next to back button and title */}
-    <img
-      src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
-      alt="New Millennium Building Systems Logo"
-      className="mr-4 md:hidden"
-      style={{ width: '40px', height: '40px' }}
-    />
-    <button 
-      onClick={() => navigate('/admin')}
-      className="mr-2 p-1 rounded-full hover:bg-gray-200 cursor-pointer"
-    >
-      <ChevronLeft className="h-6 w-6" />
-    </button>
-    <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Manage Stakeholders</h1>
-  </div>
-  
-  <div className="flex space-x-2">
-    <button
-      onClick={() => navigate('/admin')}
-      className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
-    >
-      <Settings className="h-4 w-4 mr-2" />
-      Admin Dashboard
-    </button>
-    <button
-      onClick={() => setShowAddForm(true)}
-      className="flex items-center px-4 py-2 bg-[#c59f2d] text-white rounded-lg hover:bg-[#a88a26] transition-colors"
-    >
-      <UserPlus className="h-4 w-4 mr-2" />
-      Add Stakeholder
-    </button>
-  </div>
-</div>
+      {/* Title and buttons - mobile menu in same row */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center">
+          {/* Mobile: small logo next to back button and title */}
+          <img
+            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            alt="New Millennium Building Systems Logo"
+            className="mr-4 md:hidden"
+            style={{ width: '40px', height: '40px' }}
+          />
+          <button 
+            onClick={() => navigate('/admin')}
+            className="mr-2 p-1 rounded-full hover:bg-gray-200 cursor-pointer"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Manage Stakeholders</h1>
+        </div>
+        
+        <div ref={mobileMenuRef} className="relative z-40">
+          {/* Desktop buttons */}
+          <div className="hidden md:flex space-x-2">
+            <button
+              onClick={() => navigate('/admin')}
+              className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Admin Dashboard
+            </button>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center px-4 py-2 bg-[#c59f2d] text-white rounded-lg hover:bg-[#a88a26] transition-colors"
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              Add Stakeholder
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </button>
+          </div>
+
+          {/* Mobile menu trigger */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+              aria-label="Open menu"
+            >
+              <List className="h-5 w-5 text-gray-700" />
+            </button>
+          </div>
+
+          {/* Mobile dropdown menu */}
+          {mobileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+              <div className="py-1">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigate('/admin'); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                  Admin Dashboard
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); setShowAddForm(true); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <UserPlus className="h-4 w-4 mr-2 text-gray-700" />
+                  Add Stakeholder
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Session Info */}
       <div className="relative z-10 bg-white rounded-lg shadow-md p-4 mb-6">

@@ -49,6 +49,56 @@ export async function getOrCreateUser(email: string, name: string): Promise<User
   return user;
 }
 
+export async function getAllUsers(): Promise<User[]> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data || [];
+}
+
+export interface UserRoleInfo {
+  userId: string;
+  isSystemAdmin: boolean;
+  sessionAdminCount: number;
+  stakeholderSessionCount: number;
+}
+
+export async function getUserRoleInfo(userId: string): Promise<UserRoleInfo> {
+  const [isSystemAdmin, sessionAdminData, userData] = await Promise.all([
+    isUserSystemAdmin(userId),
+    supabase
+      .from('session_admins')
+      .select('session_id')
+      .eq('user_id', userId),
+    supabase
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .single()
+  ]);
+
+  const sessionAdminCount = sessionAdminData.data?.length || 0;
+  
+  let stakeholderCount = 0;
+  if (userData.data?.email) {
+    const { data: stakeholderData } = await supabase
+      .from('session_stakeholders')
+      .select('session_id')
+      .eq('user_email', userData.data.email);
+    stakeholderCount = stakeholderData?.length || 0;
+  }
+
+  return {
+    userId,
+    isSystemAdmin,
+    sessionAdminCount,
+    stakeholderSessionCount: stakeholderCount
+  };
+}
+
 // ============================================
 // VOTING SESSIONS
 // ============================================
@@ -94,6 +144,12 @@ export async function getSessionByCode(code: string): Promise<VotingSession | nu
 }
 
 export async function getSessionsForUser(userId: string): Promise<VotingSession[]> {
+  // Check if user is system admin first - system admins see ALL sessions
+  const isSysAdmin = await isUserSystemAdmin(userId);
+  if (isSysAdmin) {
+    return getAllSessions();
+  }
+  
   // Get sessions where user is admin
   const { data: adminSessions, error: adminError } = await supabase
     .from('session_admins')
@@ -206,6 +262,12 @@ export async function addSessionAdmin(sessionId: string, userId: string): Promis
   return data;
 }
 
+// Convenience: add a session admin by email, creating the user if needed
+export async function addSessionAdminByEmail(sessionId: string, email: string, name: string): Promise<SessionAdmin> {
+  const user = await getOrCreateUser(email, name);
+  return addSessionAdmin(sessionId, user.id);
+}
+
 export async function removeSessionAdmin(sessionId: string, userId: string): Promise<void> {
   const { error } = await supabase
     .from('session_admins')
@@ -218,6 +280,12 @@ export async function removeSessionAdmin(sessionId: string, userId: string): Pro
 
 export async function isUserSessionAdmin(sessionId: string, userId: string): Promise<boolean> {
   try {
+    // System admins have admin access to all sessions
+    const isSysAdmin = await isUserSystemAdmin(userId);
+    if (isSysAdmin) {
+      return true;
+    }
+    
     const { data, error } = await supabase
       .from('session_admins')
       .select('id')
@@ -261,6 +329,32 @@ export async function addSessionStakeholder(stakeholder: Omit<DbSessionStakehold
   
   if (error) throw error;
   return data;
+}
+
+// Convenience: ensure a stakeholder row exists for email (user account not required)
+export async function addSessionStakeholderByEmail(sessionId: string, email: string, name: string): Promise<SessionStakeholder> {
+  return addSessionStakeholder({ session_id: sessionId, user_email: email, user_name: name });
+}
+
+// Helper: Build a mailto link for inviting a user to a session
+export function buildSessionInviteMailto(session: VotingSession & { session_code?: string }, toEmail: string, inviterName: string): string {
+  const inviteUrl = `${window.location.origin}/login?session=${(session as any).session_code ?? ''}`;
+  const subject = encodeURIComponent(`You're invited to vote: ${session.title}`);
+  const body = encodeURIComponent(
+    `Hi,\n\nYou've been invited to participate in a feature voting session.\n\n` +
+    `Session: ${session.title}\n` +
+    `Goal: ${session.goal}\n\n` +
+    `To get started, copy and paste this link into your browser:\n\n` +
+    `${inviteUrl}\n\n` +
+    `Voting Period: ${session.start_date ? formatDateForEmail(session.start_date) : ''} - ${session.end_date ? formatDateForEmail(session.end_date) : ''}\n\n` +
+    `Best regards,\n${inviterName}`
+  );
+  return `mailto:${encodeURIComponent(toEmail)}?subject=${subject}&body=${body}`;
+}
+
+function formatDateForEmail(dateString: string): string {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export async function removeSessionStakeholder(sessionId: string, email: string): Promise<void> {
@@ -453,13 +547,20 @@ export async function saveVote(vote: {
   }
 }
 
-export async function deleteVotesForFeature(featureId: string) {
+export async function deleteVotesByUser(
+  sessionId: string, 
+  userId: string
+): Promise<void> {
   const { error } = await supabase
     .from('votes')
     .delete()
-    .eq('feature_id', featureId);
+    .eq('session_id', sessionId)
+    .eq('user_id', userId);
   
-  if (error) throw error;
+  if (error) {
+    console.error('Error deleting user votes:', error);
+    throw error;
+  }
 }
 
 export async function deleteAllVotes(sessionId: string) {
@@ -534,21 +635,39 @@ export async function saveAzureDevOpsConfig(sessionId: string, config: {
     if (config.areaPath !== undefined) dbConfig.area_path = config.areaPath;
     if (config.tags !== undefined) dbConfig.tags = config.tags;
     
-    // Delete any existing record first to handle corrupt/partial records
-    await supabase
+    // First try update existing row by session_id without forcing single-object response
+    const { data: updatedRows, error: updateError } = await supabase
       .from('azure_devops_config')
-      .delete()
-      .eq('session_id', sessionId);
-    
-    // Now insert the fresh record
-    const { data, error } = await supabase
+      .update(dbConfig)
+      .eq('session_id', sessionId)
+      .select();
+
+    if (!updateError && updatedRows && updatedRows.length > 0) {
+      return updatedRows[0];
+    }
+
+    // If no existing row, try upsert on session_id (avoids 409s when supported by constraint)
+    const { data: upserted, error: upsertError } = await supabase
       .from('azure_devops_config')
-      .insert([dbConfig])
+      .upsert([dbConfig], { onConflict: 'session_id' })
       .select()
       .single();
-    
-    if (error) throw error;
-    return data;
+
+    if (!upsertError) return upserted;
+
+    // If upsert still reports duplicate (race window / constraint behavior), fetch existing and return it
+    if ((upsertError as any)?.code === '23505') {
+      const { data: existing, error: fetchError } = await supabase
+        .from('azure_devops_config')
+        .select('*')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      return existing;
+    }
+
+    // Any other error
+    throw upsertError || updateError;
   } catch (error) {
     console.error('Error saving Azure DevOps config:', error);
     throw error;

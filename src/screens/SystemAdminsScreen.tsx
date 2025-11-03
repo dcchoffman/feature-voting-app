@@ -4,15 +4,17 @@
 // Location: src/screens/SystemAdminsScreen.tsx
 // ============================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
+import { sendInvitationEmail } from '../services/emailService';
 import type { User } from '../types';
 import { 
   ChevronLeft, UserPlus, Trash2, X, AlertCircle,
-  Mail, Shield, Settings, Crown
+  Mail, Shield, Settings, Crown, List, LogOut
 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 interface SystemAdmin {
   id: string;
@@ -22,8 +24,26 @@ interface SystemAdmin {
 }
 
 export default function SystemAdminsScreen() {
-  const { currentUser } = useSession();
+  const { currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    try {
+      setCurrentSession(null as any);
+    } catch {}
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('voting_system_current_session');
+      localStorage.removeItem('azureDevOpsAuthInProgress');
+      sessionStorage.removeItem('oauth_return_path');
+      sessionStorage.removeItem('oauth_action');
+    } catch {}
+    setMobileMenuOpen(false);
+    navigate('/login', { replace: true });
+  };
   
   const [admins, setAdmins] = useState<SystemAdmin[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,6 +51,23 @@ export default function SystemAdminsScreen() {
   const [formData, setFormData] = useState({ email: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside as any);
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     loadSystemAdmins();
@@ -84,17 +121,31 @@ export default function SystemAdminsScreen() {
     
     setIsSubmitting(true);
     try {
-      // First, get or create the user
-      const user = await db.getUserByEmail(formData.email);
-      
-      if (!user) {
-        setErrors({ email: 'User not found. They must log in first before being added as a system admin.' });
-        setIsSubmitting(false);
-        return;
-      }
-      
-      // Add as system admin
+      // Add as system admin by email (auto-create user if needed)
+      const fallbackName = formData.email.split('@')[0].replace(/\./g, ' ');
+      const user = await db.getOrCreateUser(formData.email, fallbackName);
       await db.addSystemAdmin(user.id);
+      // Send login email via Edge Function (fallback to mailto)
+      try {
+        const loginUrl = `${window.location.origin}/login`;
+        await sendInvitationEmail({
+          to: formData.email,
+          subject: `You're a System Admin: Feature Voting System` ,
+          text: `Hi,\n\nYou've been granted System Admin access to the Feature Voting System.\n\nLogin: ${loginUrl}\n\nBest regards,\nSystem`,
+          html: `<p>Hi,</p><p>You've been granted <strong>System Admin</strong> access to the Feature Voting System.</p><p><a href="${loginUrl}">Login</a></p><p>Best regards,<br/>System</p>`
+        });
+      } catch {
+        try {
+          const loginUrl = `${window.location.origin}/login`;
+          const subject = encodeURIComponent("You're a System Admin: Feature Voting System");
+          const body = encodeURIComponent(
+            `Hi,\n\nYou've been granted System Admin access to the Feature Voting System.\n\n` +
+            `To sign in, use this link:\n\n${loginUrl}\n\n` +
+            `Best regards,\nSystem`
+          );
+          window.location.href = `mailto:${encodeURIComponent(formData.email)}?subject=${subject}&body=${body}`;
+        } catch {}
+      }
       
       await loadSystemAdmins();
       setFormData({ email: '' });
@@ -176,7 +227,7 @@ export default function SystemAdminsScreen() {
         />
       </div>
       
-      {/* Title and buttons in same row */}
+      {/* Title and buttons - mobile menu in same row */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
@@ -195,23 +246,71 @@ export default function SystemAdminsScreen() {
           <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">System Admins</h1>
         </div>
         
-        <div className="flex space-x-2">
-          <button
-            onClick={() => navigate('/sessions')}
-            className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
-          >
-            <Settings className="h-4 w-4 mr-2" />
-            <span className="hidden sm:inline">My Sessions</span>
-            <span className="sm:hidden">Sessions</span>
-          </button>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="flex items-center px-4 py-2 bg-[#c59f2d] text-white rounded-lg hover:bg-[#a88a26] transition-colors"
-          >
-            <UserPlus className="h-4 w-4 mr-2" />
-            <span className="hidden sm:inline">Add System Admin</span>
-            <span className="sm:hidden">Add</span>
-          </button>
+        <div ref={mobileMenuRef} className="relative z-40">
+          {/* Desktop buttons */}
+          <div className="hidden md:flex space-x-2">
+            <button
+              onClick={() => navigate('/sessions')}
+              className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              My Sessions
+            </button>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center px-4 py-2 bg-[#c59f2d] text-white rounded-lg hover:bg-[#a88a26] transition-colors"
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              Add System Admin
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </button>
+          </div>
+
+          {/* Mobile menu trigger */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+              aria-label="Open menu"
+            >
+              <List className="h-5 w-5 text-gray-700" />
+            </button>
+          </div>
+
+          {/* Mobile dropdown menu */}
+          {mobileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+              <div className="py-1">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigate('/sessions'); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                  My Sessions
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); setShowAddForm(true); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <UserPlus className="h-4 w-4 mr-2 text-gray-700" />
+                  Add System Admin
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -262,15 +361,17 @@ export default function SystemAdminsScreen() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {admins.map((admin) => {
-                // Find the first admin (earliest created_at)
+              {(() => {
+                // Calculate first admin once (earliest created_at)
                 const firstAdmin = admins.reduce((earliest, current) => 
                   new Date(current.created_at) < new Date(earliest.created_at) ? current : earliest
                 );
-                const isFirstAdmin = admin.user_id === firstAdmin.user_id;
                 
-                return (
-                  <tr key={admin.id} className="hover:bg-gray-50">
+                return admins.map((admin) => {
+                  const isFirstAdmin = admin.user_id === firstAdmin.user_id;
+                  
+                  return (
+                    <tr key={admin.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <Crown className="h-5 w-5 text-[#c59f2d] mr-2" />
@@ -318,7 +419,8 @@ export default function SystemAdminsScreen() {
                     </td>
                   </tr>
                 );
-              })}
+              });
+              })()}
             </tbody>
           </table>
         </div>
@@ -382,9 +484,7 @@ export default function SystemAdminsScreen() {
                     {errors.email}
                   </p>
                 )}
-                <p className="mt-1 text-xs text-gray-500">
-                  The user must have logged in at least once before being added as a system admin.
-                </p>
+                
               </div>
 
               {errors.submit && (

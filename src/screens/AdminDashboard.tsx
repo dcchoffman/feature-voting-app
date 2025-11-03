@@ -776,14 +776,14 @@ export function AdminDashboard({
             <span className="hidden md:inline">Voter View</span>
           </button>
           <button 
-            onClick={() => navigate('/manage-stakeholders')} 
+            onClick={() => navigate('/users?filter=stakeholder')} 
             className="flex items-center px-4 py-2 bg-[#2d4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
           >
             <Users className="mr-2 h-4 w-4" />
             <span className="hidden md:inline">Stakeholders</span>
           </button>
           <button 
-            onClick={() => navigate('/manage-admins')} 
+            onClick={() => navigate('/users?filter=session-admin')} 
             className="flex items-center px-4 py-2 bg-[#2d4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
           >
             <Shield className="mr-2 h-4 w-4" />

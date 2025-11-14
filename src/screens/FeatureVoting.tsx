@@ -1,7 +1,7 @@
 // ============================================
-// FeatureVotingSystem.tsx - Complete Component
+// FeatureVoting.tsx - Feature Voting Screen
 // ============================================
-// Location: src/components/FeatureVotingSystem.tsx
+// Location: src/screens/FeatureVoting.tsx
 // ============================================
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from "react";
@@ -13,18 +13,20 @@ import {
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database, Search, Shield, List
+  Cloud, Database, Search, Shield, List, Lightbulb, Crown
 } from "lucide-react";
 
 // Import services
 import * as db from '../services/databaseService';
 import * as azureService from '../services/azureDevOpsService';
+import { getNewMillProjects } from '../utils/azureProjects';
+import { formatDate, isPastDate } from '../utils/date';
 
 // Import context
 import { useSession } from '../contexts/SessionContext';
 
 // Import types
-import type { AzureDevOpsConfig, Feature, VoterInfo } from '../types/azure';
+import type { AzureDevOpsConfig, Feature, FeatureSuggestion, VoterInfo } from '../types/azure';
 
 // Import screens
 import AdminDashboard from '../screens/AdminDashboard';
@@ -50,6 +52,18 @@ interface VotingSession {
   startDate: string;
   endDate: string;
   isActive: boolean;
+  originalEndDate?: string | null;
+  endedEarlyBy?: string | null;
+  endedEarlyReason?: string | null;
+  endedEarlyDetails?: string | null;
+  reopenReason?: string | null;
+  reopenDetails?: string | null;
+  reopenedBy?: string | null;
+  reopenedAt?: string | null;
+  productId?: string | null;
+  productName?: string | null;
+  product_id?: string | null;
+  product_name?: string | null;
 }
 
 // ============================================
@@ -75,7 +89,19 @@ const initialVotingSession: VotingSession = {
   useAutoVotes: true,
   startDate: new Date().toISOString(),
   endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-  isActive: true
+  isActive: true,
+  originalEndDate: null,
+  endedEarlyBy: null,
+  endedEarlyReason: null,
+  endedEarlyDetails: null,
+  reopenReason: null,
+  reopenDetails: null,
+  reopenedBy: null,
+  reopenedAt: null,
+  productId: null,
+  productName: null,
+  product_id: null,
+  product_name: null
 };
 
 const initialAzureDevOpsConfig: AzureDevOpsConfig = {
@@ -112,18 +138,31 @@ const initialUsers: User[] = [
   }
 ];
 
+interface RoleBadgeInfo {
+  label: string;
+  className: string;
+}
+
+const getRoleBadgeInfo = (
+  isSystemAdmin: boolean,
+  isSessionAdmin: boolean,
+  isStakeholder: boolean
+): RoleBadgeInfo | null => {
+  if (isSystemAdmin) {
+    return { label: 'System Admin', className: 'bg-purple-100 text-purple-800' };
+  }
+  if (isSessionAdmin) {
+    return { label: 'Session Admin', className: 'bg-blue-100 text-blue-800' };
+  }
+  if (isStakeholder) {
+    return { label: 'Stakeholder', className: 'bg-green-100 text-green-800' };
+  }
+  return null;
+};
+
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
-
-const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', { 
-    year: 'numeric', 
-    month: 'short', 
-    day: 'numeric' 
-  });
-};
 
 const getDaysRemaining = (dateString: string): number => {
   const targetDate = new Date(dateString);
@@ -148,10 +187,6 @@ const getDeadlineBgColor = (daysRemaining: number): string => {
   if (daysRemaining <= 2) return 'bg-[#6A4234]/10';
   if (daysRemaining <= 4) return 'bg-[#C89212]/10';
   return 'bg-[#1E5461]/10';
-};
-
-const isPastDate = (dateString: string): boolean => {
-  return new Date(dateString) < new Date();
 };
 
 const isDateInRange = (startDate: string, endDate: string): boolean => {
@@ -320,11 +355,21 @@ class Modal extends Component<ModalProps> {
           ></div>
           
           <div className={`inline-block w-full ${maxWidth} p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-xl rounded-lg`}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-[#2d4660]">{title}</h3>
+            <div className="flex items-start justify-between mb-5">
+              <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
+                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-[#C89212]/15 text-[#C89212]">
+                  <Lightbulb className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2d4660] tracking-tight">{title}</h3>
+                  <p className="text-xs text-[#8A6D3B] font-medium mt-1 uppercase tracking-widest">
+                    Spark the roadmap with your ideas
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                className="ml-3 text-gray-400 hover:text-gray-500 focus:outline-none"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -342,15 +387,20 @@ class Modal extends Component<ModalProps> {
 
 interface EpicTagProps {
   name: string;
+  truncateAt?: number | null;
+  className?: string;
 }
 
-const EpicTag = React.memo(function EpicTag({ name }: EpicTagProps) {
+const EpicTag = React.memo(function EpicTag({ name, truncateAt = 30, className }: EpicTagProps) {
   if (!name) return null;
   
+  const displayName = truncateAt === null ? name : truncateText(name, truncateAt);
+  const combinedClassName = ['flex items-center text-xs text-[#2d4660]', className].filter(Boolean).join(' ');
+
   return (
-    <div className="flex items-center text-xs text-[#2d4660]">
+    <div className={combinedClassName}>
       <Tag className="h-3 w-3 mr-1 text-[#2d4660]" />
-      <span className="font-medium">{truncateText(name, 30)}</span>
+      <span className="font-medium leading-tight break-words">{displayName}</span>
     </div>
   );
 });
@@ -589,6 +639,13 @@ const FeatureCard = React.memo(function FeatureCard({
     >
       <div className="p-6 flex flex-col h-full">
         <h3 className="text-lg font-semibold mb-2 text-[#2d4660]">{feature.title}</h3>
+
+        {feature.azureDevOpsId && (
+          <div className="flex justify-end mb-4">
+            <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
+          </div>
+        )}
+
         {feature.description ? (
           <p className="text-gray-600 mb-4 flex-grow">{feature.description}</p>
         ) : (
@@ -616,58 +673,61 @@ const FeatureCard = React.memo(function FeatureCard({
           </div>
         )}
         
-        <div className="flex items-center justify-between mb-3">
-          {feature.epic && <EpicTag name={feature.epic} />}
-          
-          {feature.azureDevOpsId && (
-            <div className="flex items-center text-xs">
-              <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-            </div>
-          )}
-        </div>
-        
         {onVote && (
-          <div className="flex justify-end items-center">
-            <div className="flex items-center space-x-2">
-              {userVoteCount === 0 ? (
-                <button
-                  onClick={() => onVote(feature.id, true)}
-                  className={`px-6 py-2.5 rounded-lg text-base font-semibold cursor-pointer transition-colors ${
-                    votingIsActive && remainingVotes > 0
-                      ? 'bg-[#2d4660] text-white hover:bg-[#C89212]'
-                      : 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                  }`}
-                  disabled={!votingIsActive || remainingVotes <= 0}
-                >
-                  Vote
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={() => onVote(feature.id, false)}
-                    className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer transition-colors"
-                    aria-label="Remove vote"
-                    disabled={!votingIsActive}
-                  >
-                    <ChevronDown className="h-6 w-6" />
-                  </button>
-                  <span className="px-4 py-2 bg-[#1E5461]/10 text-[#1E5461] rounded-full font-semibold text-base min-w-[3rem] text-center">
-                    {userVoteCount}
-                  </span>
+          <div className="mt-auto pt-3">
+            <div
+              className={`flex items-center mb-3 ${
+                feature.epic ? 'justify-between' : 'justify-end'
+              }`}
+            >
+              {feature.epic && (
+                <EpicTag
+                  name={feature.epic}
+                  truncateAt={null}
+                  className="text-sm bg-[#1E5461]/10 px-2 py-1 rounded-md"
+                />
+              )}
+              <div className="flex items-center space-x-2">
+                {userVoteCount === 0 ? (
                   <button
                     onClick={() => onVote(feature.id, true)}
-                    className={`p-2 rounded-full cursor-pointer transition-colors ${
-                      votingIsActive && remainingVotes > 0 
-                        ? 'bg-[#2d4660]/10 hover:bg-[#C89212]/30 text-[#2d4660]' 
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    className={`px-6 py-2.5 rounded-lg text-base font-semibold cursor-pointer transition-colors ${
+                      votingIsActive && remainingVotes > 0
+                        ? 'bg-[#2d4660] text-white hover:bg-[#C89212]'
+                        : 'bg-gray-300 text-gray-600 cursor-not-allowed'
                     }`}
                     disabled={!votingIsActive || remainingVotes <= 0}
-                    aria-label="Add vote"
                   >
-                    <ChevronUp className="h-6 w-6" />
+                    Vote
                   </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button
+                      onClick={() => onVote(feature.id, false)}
+                      className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer transition-colors"
+                      aria-label="Remove vote"
+                      disabled={!votingIsActive}
+                    >
+                      <ChevronDown className="h-6 w-6" />
+                    </button>
+                    <span className="px-4 py-2 bg-[#1E5461]/10 text-[#1E5461] rounded-full font-semibold text-base min-w-[3rem] text-center">
+                      {userVoteCount}
+                    </span>
+                    <button
+                      onClick={() => onVote(feature.id, true)}
+                      className={`p-2 rounded-full cursor-pointer transition-colors ${
+                        votingIsActive && remainingVotes > 0 
+                          ? 'bg-[#2d4660]/10 hover:bg-[#C89212]/30 text-[#2d4660]' 
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                      disabled={!votingIsActive || remainingVotes <= 0}
+                      aria-label="Add vote"
+                    >
+                      <ChevronUp className="h-6 w-6" />
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1039,43 +1099,83 @@ function ThankYouScreen({ navigate, votingSession }: ThankYouScreenProps) {
 // ============================================
 
 interface FooterProps {
-  isAdmin: boolean;
-  viewMode?: 'voting' | 'admin';
-  onToggleView?: () => void;
+  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
+  onSelectStakeholder?: () => void;
+  onSelectSessionAdmin?: () => void;
+  onSelectSystemAdmin?: () => void;
+  showRoleToggle?: boolean;
 }
 
-function Footer({ isAdmin, viewMode = 'voting', onToggleView }: FooterProps) {
+function Footer({
+  currentRole = 'stakeholder',
+  onSelectStakeholder,
+  onSelectSessionAdmin,
+  onSelectSystemAdmin,
+  showRoleToggle = true
+}: FooterProps) {
   const currentYear = new Date().getFullYear();
+  const roleButtons: Array<{
+    key: 'stakeholder' | 'session-admin' | 'system-admin';
+    label: string;
+    icon: React.ReactNode;
+    onClick?: () => void;
+  }> = [];
+
+  if (onSelectStakeholder || currentRole === 'stakeholder') {
+    roleButtons.push({
+      key: 'stakeholder',
+      label: 'Stakeholder View',
+      icon: <Users className="h-4 w-4 inline mr-2" />,
+      onClick: onSelectStakeholder
+    });
+  }
+
+  if (onSelectSessionAdmin || currentRole === 'session-admin') {
+    roleButtons.push({
+      key: 'session-admin',
+      label: 'Session Admin',
+      icon: <Shield className="h-4 w-4 inline mr-2" />,
+      onClick: onSelectSessionAdmin
+    });
+  }
+
+  if (onSelectSystemAdmin || currentRole === 'system-admin') {
+    roleButtons.push({
+      key: 'system-admin',
+      label: 'System Admin',
+      icon: <Crown className="h-4 w-4 inline mr-2" />,
+      onClick: onSelectSystemAdmin
+    });
+  }
+
+  const hasToggle = showRoleToggle && roleButtons.length > 0;
   
   return (
     <footer className="mt-auto bg-gray-50 border-t border-gray-200">
       <div className="container mx-auto px-4 py-6 max-w-6xl">
-        {/* View Toggle - Only show for admins */}
-        {isAdmin && onToggleView && (
+        {hasToggle && (
           <div className="flex justify-center mb-6">
             <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => viewMode !== 'voting' && onToggleView()}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  viewMode === 'voting'
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Vote className="h-4 w-4 inline mr-2" />
-                Voter View
-              </button>
-              <button
-                onClick={() => viewMode !== 'admin' && onToggleView()}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  viewMode === 'admin'
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Settings className="h-4 w-4 inline mr-2" />
-                Admin View
-              </button>
+              {roleButtons.map(({ key, label, icon, onClick }) => {
+                const isActive = currentRole === key;
+                const isDisabled = !onClick;
+
+                return (
+                  <button
+                    key={key}
+                    onClick={onClick}
+                    disabled={isDisabled}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                      isActive
+                        ? 'bg-white text-[#2d4660] shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    } ${isDisabled && !isActive ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    {icon}
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1156,10 +1256,11 @@ function AzureDevOpsForm({
   availableTags
 }: AzureDevOpsFormProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const projectOptions = useMemo(() => getNewMillProjects(), []);
   const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: {
       organization: config.organization || 'newmill',
-      project: config.project || 'Product',
+      project: config.project || (projectOptions.length > 0 ? projectOptions[0] : 'Product'),
       workItemType: config.workItemType || 'Feature',
       quickFilter: config.query ? 'custom' : 'all',
       query: config.query || '',
@@ -1248,18 +1349,24 @@ function AzureDevOpsForm({
           <input
             {...register('organization', { required: 'Organization name is required' })}
             placeholder="your-organization"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600"
+            readOnly
           />
           {errors.organization && <p className="mt-1 text-sm text-red-600">{errors.organization.message}</p>}
         </div>
         
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
-          <input
+          <select
             {...register('project', { required: 'Project name is required' })}
-            placeholder="your-project"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
+            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+          >
+            {projectOptions.map((project) => (
+              <option key={project} value={project}>
+                {project}
+              </option>
+            ))}
+          </select>
           {errors.project && <p className="mt-1 text-sm text-red-600">{errors.project.message}</p>}
         </div>
       </div>
@@ -1506,6 +1613,9 @@ interface AlreadyVotedScreenProps {
   navigate: any;
   userVotes: Record<string, number>;
   features: Feature[];
+  isSystemAdmin: boolean;
+  isSessionAdmin: boolean;
+  isStakeholder: boolean;
 }
 
 function AlreadyVotedScreen({
@@ -1516,12 +1626,16 @@ function AlreadyVotedScreen({
   isAdmin,
   navigate,
   userVotes,
-  features
+  features,
+  isSystemAdmin,
+  isSessionAdmin,
+  isStakeholder
 }: AlreadyVotedScreenProps) {
   const [showChangeConfirm, setShowChangeConfirm] = useState(false);
   
   const totalVotes = Object.values(userVotes).reduce((sum, count) => sum + count, 0);
   const votedFeatures = features.filter(f => userVotes[f.id] > 0);
+  const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
   
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
@@ -1537,7 +1651,7 @@ function AlreadyVotedScreen({
       
       {/* Title and buttons - stack on mobile */}
       <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6">
-        <div className="flex items-center">
+        <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
             src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
@@ -1545,7 +1659,27 @@ function AlreadyVotedScreen({
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}
           />
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Welcome, {currentUser?.name}
+              {currentUser?.email && (
+                <a
+                  href={`mailto:${currentUser.email}`}
+                  className="ml-2 text-[#2D4660] hover:underline"
+                >
+                  ({currentUser.email})
+                </a>
+              )}
+              {roleBadge && (
+                <span
+                  className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge.className}`}
+                >
+                  {roleBadge.label}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
         <div className="relative z-10 flex items-center space-x-2 mt-3 md:mt-0 md:justify-end">
           {isAdmin && (
@@ -1591,9 +1725,20 @@ function AlreadyVotedScreen({
             <h3 className="text-lg font-semibold text-[#2d4660] mb-4">Your Current Votes</h3>
             <div className="space-y-3">
               {votedFeatures.map(feature => (
-                <div key={feature.id} className="flex justify-between items-center">
-                  <span className="text-gray-700">{feature.title}</span>
-                  <span className="bg-[#1E5461]/10 text-[#1E5461] rounded-full px-3 py-1 font-medium">
+                <div key={feature.id} className="flex justify-between items-start gap-4">
+                  <div>
+                    <span className="block text-gray-700 font-medium">{feature.title}</span>
+                    {feature.epic && (
+                      <div className="mt-1">
+                        <EpicTag
+                          name={feature.epic}
+                          truncateAt={null}
+                          className="text-xs bg-[#1E5461]/10 px-2 py-0.5 rounded"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <span className="bg-[#1E5461]/10 text-[#1E5461] rounded-full px-3 py-1 font-medium self-center">
                     {userVotes[feature.id]} {userVotes[feature.id] === 1 ? 'vote' : 'votes'}
                   </span>
                 </div>
@@ -1663,6 +1808,10 @@ interface VotingScreenProps {
   effectiveVotesPerUser: number;
   sessionId: string;
   onLogout: () => void;
+  onSuggestionSubmitted?: (suggestion: FeatureSuggestion) => void;
+  isSystemAdmin: boolean;
+  isSessionAdmin: boolean;
+  isStakeholder: boolean;
 }
 
 const VotingScreen = React.memo(function VotingScreen({ 
@@ -1678,7 +1827,11 @@ const VotingScreen = React.memo(function VotingScreen({
   navigate,
   effectiveVotesPerUser,
   sessionId,
-  onLogout
+  onLogout,
+  onSuggestionSubmitted,
+  isSystemAdmin,
+  isSessionAdmin,
+  isStakeholder
 }: VotingScreenProps) {
   // ALL HOOKS MUST BE AT THE TOP - BEFORE ANY RETURNS
   const [displayFeatures, setDisplayFeatures] = useState([...features]);
@@ -1688,7 +1841,16 @@ const VotingScreen = React.memo(function VotingScreen({
   const [existingVotes, setExistingVotes] = useState<Record<string, number>>({});
   const [isCheckingVotes, setIsCheckingVotes] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showSuggestModal, setShowSuggestModal] = useState(false);
+  const [suggestionTitle, setSuggestionTitle] = useState('');
+  const [suggestionDetails, setSuggestionDetails] = useState('');
+  const [suggestionWhatWouldItDo, setSuggestionWhatWouldItDo] = useState('');
+  const [suggestionHowWouldItWork, setSuggestionHowWouldItWork] = useState('');
+  const [suggestionSubmitting, setSuggestionSubmitting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [suggestionSuccess, setSuggestionSuccess] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -1802,6 +1964,81 @@ const VotingScreen = React.memo(function VotingScreen({
     }
   }, [features, currentUser, sessionId]);
 
+  const openSuggestModal = useCallback(() => {
+    setSuggestionError(null);
+    setSuggestionSuccess(false);
+    setShowSuggestModal(true);
+  }, []);
+
+  const closeSuggestModal = useCallback(() => {
+    if (!suggestionSubmitting) {
+      setShowSuggestModal(false);
+      setSuggestionError(null);
+      setSuggestionSuccess(false);
+      setSuggestionTitle('');
+      setSuggestionDetails('');
+      setSuggestionWhatWouldItDo('');
+      setSuggestionHowWouldItWork('');
+    }
+  }, [suggestionSubmitting]);
+
+  const handleSubmitSuggestion = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    const trimmedTitle = suggestionTitle.trim();
+    const trimmedDetails = suggestionDetails.trim();
+    const trimmedWhatWouldItDo = suggestionWhatWouldItDo.trim();
+    const trimmedHowWouldItWork = suggestionHowWouldItWork.trim();
+
+    if (!trimmedTitle) {
+      setSuggestionError('Please provide a brief title for your suggestion.');
+      return;
+    }
+
+    if (!sessionId) {
+      setSuggestionError('Unable to link this suggestion to the current session.');
+      return;
+    }
+
+    try {
+      setSuggestionSubmitting(true);
+      setSuggestionError(null);
+
+      const savedSuggestion = await db.createFeatureSuggestion({
+        session_id: sessionId,
+        title: trimmedTitle,
+        description: trimmedDetails || null,
+        requester_id: currentUser?.id ?? null,
+        requester_name: currentUser?.name ?? null,
+        requester_email: currentUser?.email ?? null,
+        whatWouldItDo: trimmedWhatWouldItDo || null,
+        howWouldItWork: trimmedHowWouldItWork || null
+      });
+
+      onSuggestionSubmitted?.(savedSuggestion);
+
+      setSuggestionSuccess(true);
+      setSuggestionTitle('');
+      setSuggestionDetails('');
+      setSuggestionWhatWouldItDo('');
+      setSuggestionHowWouldItWork('');
+    } catch (error) {
+      console.error('Error submitting feature suggestion:', error);
+      setSuggestionError('We were unable to submit your suggestion. Please try again in a moment.');
+    } finally {
+      setSuggestionSubmitting(false);
+    }
+  }, [
+    suggestionDetails,
+    suggestionTitle,
+    suggestionWhatWouldItDo,
+    suggestionHowWouldItWork,
+    currentUser,
+    sessionId,
+    suggestionSubmitting,
+    onSuggestionSubmitted
+  ]);
+  
   // NOW CHECK CONDITIONS AND RETURN EARLY IF NEEDED
   if (!currentUser) return null;
 
@@ -1829,6 +2066,9 @@ const VotingScreen = React.memo(function VotingScreen({
         navigate={navigate}
         userVotes={existingVotes}
         features={features}
+        isSystemAdmin={isSystemAdmin}
+        isSessionAdmin={isSessionAdmin}
+        isStakeholder={isStakeholder}
       />
     );
   }
@@ -1851,7 +2091,7 @@ const VotingScreen = React.memo(function VotingScreen({
       
       {/* Title and buttons - mobile menu in same row */}
       <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center">
+        <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
             src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
@@ -1859,7 +2099,27 @@ const VotingScreen = React.memo(function VotingScreen({
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}
           />
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Welcome, {currentUser?.name}
+              {currentUser?.email && (
+                <a
+                  href={`mailto:${currentUser.email}`}
+                  className="ml-2 text-[#2D4660] hover:underline"
+                >
+                  ({currentUser.email})
+                </a>
+              )}
+              {roleBadge && (
+                <span
+                  className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge.className}`}
+                >
+                  {roleBadge.label}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
         <div ref={mobileMenuRef} className="relative z-40">
           {/* Desktop buttons */}
@@ -1970,9 +2230,19 @@ const VotingScreen = React.memo(function VotingScreen({
 
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold text-[#2d4660]">Available Features</h2>
-        {features.length > 6 && (
-          <ShuffleButton isShuffling={isShuffling} onShuffle={handleShuffle} />
-        )}
+        <div className="flex items-center gap-3">
+          <Button 
+            variant="gold" 
+            onClick={openSuggestModal}
+            className="flex items-center"
+          >
+            <Lightbulb className="h-4 w-4 mr-2" />
+            Suggest a Feature
+          </Button>
+          {features.length > 6 && (
+            <ShuffleButton isShuffling={isShuffling} onShuffle={handleShuffle} />
+          )}
+        </div>
       </div>
 
       <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${pendingUsedVotes > 0 ? 'mb-32' : ''}`}>
@@ -2031,6 +2301,110 @@ const VotingScreen = React.memo(function VotingScreen({
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={showSuggestModal}
+        onClose={closeSuggestModal}
+        title="Suggest a Feature"
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleSubmitSuggestion} className="space-y-4">
+          <div className="bg-[#1E5461]/10 border border-[#1E5461]/30 text-sm text-[#1E5461] rounded-md px-3 py-2">
+            All suggested features will be reviewed for <strong>future sessions</strong>.<br />
+            Suggestions will not be added to the current session.
+          </div>
+
+          {suggestionError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">
+              {suggestionError}
+            </div>
+          )}
+
+          {suggestionSuccess && (
+            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-md px-3 py-2">
+              Thank you! Your suggestion has been recorded.
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Feature title
+            </label>
+            <input
+              type="text"
+              value={suggestionTitle}
+              onChange={(e) => setSuggestionTitle(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              placeholder="Give your feature a name"
+              disabled={suggestionSubmitting || suggestionSuccess}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              What problem would this solve? (optional)
+            </label>
+            <textarea
+              value={suggestionDetails}
+              onChange={(e) => setSuggestionDetails(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              rows={4}
+              placeholder="Share a few details so we understand the request."
+              disabled={suggestionSubmitting || suggestionSuccess}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              What would it do? (optional)
+            </label>
+            <textarea
+              value={suggestionWhatWouldItDo}
+              onChange={(e) => setSuggestionWhatWouldItDo(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              rows={3}
+              placeholder="Describe the functionality or outcome users would experience."
+              disabled={suggestionSubmitting || suggestionSuccess}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              How would it work? (optional)
+            </label>
+            <textarea
+              value={suggestionHowWouldItWork}
+              onChange={(e) => setSuggestionHowWouldItWork(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              rows={3}
+              placeholder="Share any ideas on workflow, technical approach, or integration."
+              disabled={suggestionSubmitting || suggestionSuccess}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={closeSuggestModal}
+              disabled={suggestionSubmitting}
+            >
+              Close
+            </Button>
+            {!suggestionSuccess && (
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={suggestionSubmitting}
+                className="flex items-center"
+              >
+                {suggestionSubmitting && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
+                Submit Suggestion
+              </Button>
+            )}
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 });
@@ -2052,7 +2426,16 @@ function FeatureVotingSystem({
 }: FeatureVotingSystemProps) {
   
   // Session context integration
-  const { currentSession, currentUser, setCurrentUser, setCurrentSession } = useSession();
+  const { 
+    currentSession, 
+    currentUser, 
+    setCurrentUser, 
+    setCurrentSession, 
+    refreshSessions,
+    isSystemAdmin,
+    isAdmin: sessionAdminRole,
+    isStakeholder
+  } = useSession();
   const navigate = useNavigate();
   
   const handleLogout = async () => {
@@ -2104,13 +2487,13 @@ function FeatureVotingSystem({
   const [editingFeature, setEditingFeature] = useState<Feature | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showVotersList, setShowVotersList] = useState<string | null>(null);
-  const [showAzureDevOpsForm, setShowAzureDevOpsForm] = useState(false);
   const [votingSession, setVotingSession] = useState({
     ...initialVotingSession,
     votesPerUser: defaultVotesPerUser
   });
   
   const [azureDevOpsConfig, setAzureDevOpsConfig] = useState(initialAzureDevOpsConfig);
+  const [availableProjects, setAvailableProjects] = useState<string[]>(getNewMillProjects());
   const [availableStates, setAvailableStates] = useState<string[]>([]);
   const [availableAreaPaths, setAvailableAreaPaths] = useState<string[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
@@ -2118,7 +2501,9 @@ function FeatureVotingSystem({
   const [azureFetchError, setAzureFetchError] = useState<string | null>(null);
   const [previewFeatures, setPreviewFeatures] = useState<Feature[] | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [hasImportedFeatures, setHasImportedFeatures] = useState(false);
+  const [suggestedFeatures, setSuggestedFeatures] = useState<FeatureSuggestion[]>([]);
+  const [futureSessions, setFutureSessions] = useState<Array<{ id: string; title: string; startDate: string }>>([]);
+  const [adminPerspective, setAdminPerspective] = useState<'session' | 'system'>(isSystemAdmin ? 'system' : 'session');
   
   const [pendingVotes, setPendingVotes] = useState<Record<string, number>>({});
   const [pendingUsedVotes, setPendingUsedVotes] = useState(0);
@@ -2126,12 +2511,16 @@ function FeatureVotingSystem({
   const [confirmState, setConfirmState] = useState<{
     showReset: boolean;
     showResetAll: boolean;
+    showDeleteSession: boolean;
     targetId: string | null;
   }>({
     showReset: false,
     showResetAll: false,
+    showDeleteSession: false,
     targetId: null
   });
+
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   const hasProcessedCallback = useRef(false);
 
@@ -2268,6 +2657,103 @@ useEffect(() => {
     return config.accessToken;
   }, [currentSession]);
 
+  const buildFeaturesWithVotes = useCallback(async (): Promise<Feature[]> => {
+    if (!currentSession) return [];
+
+    const [featuresData, votesData] = await Promise.all([
+      db.getFeatures(currentSession.id),
+      db.getVotes(currentSession.id)
+    ]);
+
+    return featuresData.map(feature => {
+      const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+      const voters = featureVotes.map(v => ({
+        userId: v.user_id,
+        name: v.user_name,
+        email: v.user_email,
+        voteCount: v.vote_count
+      }));
+      const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+
+      return {
+        id: feature.id,
+        title: feature.title,
+        description: feature.description,
+        epic: feature.epic,
+        state: feature.state,
+        areaPath: feature.area_path,
+        tags: feature.tags || [],
+        azureDevOpsId: feature.azure_devops_id,
+        azureDevOpsUrl: feature.azure_devops_url,
+        votes: totalVotes,
+        voters
+      };
+    });
+  }, [currentSession]);
+
+  const loadFeatureSuggestions = useCallback(async () => {
+    if (!currentSession) return;
+    
+    try {
+      const suggestions = await db.getFeatureSuggestions(currentSession.id);
+      setSuggestedFeatures(suggestions);
+    } catch (error) {
+      console.error('Error loading feature suggestions:', error);
+    }
+  }, [currentSession]);
+
+  const loadFutureSessions = useCallback(async () => {
+    if (!currentSession) return;
+
+    try {
+      const sessions = await db.getAllSessions();
+      const now = new Date();
+      const options = sessions
+        .filter(session => session.id !== currentSession.id && new Date(session.start_date) > now)
+        .map(session => ({
+          id: session.id,
+          title: session.title,
+          startDate: session.start_date
+        }));
+      setFutureSessions(options);
+    } catch (error) {
+      console.error('Error loading future sessions:', error);
+    }
+  }, [currentSession]);
+
+  const handleSuggestionSubmitted = useCallback((suggestion: FeatureSuggestion) => {
+    setSuggestedFeatures(prev => [suggestion, ...prev]);
+    loadFeatureSuggestions();
+    loadFutureSessions();
+  }, [loadFeatureSuggestions, loadFutureSessions]);
+
+  const handleUpdateSuggestion = useCallback(async (id: string, updates: {
+    title?: string;
+    summary?: string | null;
+    whatWouldItDo?: string | null;
+    howWouldItWork?: string | null;
+  }) => {
+    await db.updateFeatureSuggestion(id, updates);
+    await loadFeatureSuggestions();
+  }, [loadFeatureSuggestions]);
+
+  const handleDeleteSuggestion = useCallback(async (id: string) => {
+    await db.deleteFeatureSuggestion(id);
+    await loadFeatureSuggestions();
+  }, [loadFeatureSuggestions]);
+
+  const handleMoveSuggestion = useCallback(async (id: string, targetSessionId: string) => {
+    await db.moveFeatureSuggestionToSession(id, targetSessionId);
+    await loadFeatureSuggestions();
+  }, [loadFeatureSuggestions]);
+
+  const handlePromoteSuggestion = useCallback(async (id: string) => {
+    await db.promoteSuggestionToFeature(id);
+    const refreshed = await buildFeaturesWithVotes();
+    setFeatures(refreshed);
+    await loadFeatureSuggestions();
+  }, [buildFeaturesWithVotes, loadFeatureSuggestions]);
+
   useEffect(() => {
     async function loadData() {
       if (!currentSession) return;
@@ -2276,35 +2762,8 @@ useEffect(() => {
         console.log('Loading data from Supabase for session:', currentSession.id);
         setIsLoading(true);
         
-        const featuresData = await db.getFeatures(currentSession.id);
-        console.log(`Loaded ${featuresData.length} features from database`);
-        const votesData = await db.getVotes(currentSession.id);
-        
-        const featuresWithVotes = featuresData.map(feature => {
-          const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-          const voters = featureVotes.map(v => ({
-            userId: v.user_id,
-            name: v.user_name,
-            email: v.user_email,
-            voteCount: v.vote_count
-          }));
-          const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-          
-          return {
-            id: feature.id,
-            title: feature.title,
-            description: feature.description,
-            epic: feature.epic,
-            state: feature.state,
-            areaPath: feature.area_path,
-            tags: feature.tags || [],
-            azureDevOpsId: feature.azure_devops_id,
-            azureDevOpsUrl: feature.azure_devops_url,
-            votes: totalVotes,
-            voters
-          };
-        });
-        
+        const featuresWithVotes = await buildFeaturesWithVotes();
+        console.log(`Loaded ${featuresWithVotes.length} features from database`);
         setFeatures(featuresWithVotes);
         console.log(`Features with votes loaded:`, featuresWithVotes.map(f => f.title));
         
@@ -2315,7 +2774,19 @@ useEffect(() => {
           useAutoVotes: currentSession.use_auto_votes || false,
           startDate: currentSession.start_date,
           endDate: currentSession.end_date,
-          isActive: currentSession.is_active
+          isActive: currentSession.is_active,
+          originalEndDate: currentSession.original_end_date ?? undefined,
+          endedEarlyBy: currentSession.ended_early_by ?? undefined,
+          endedEarlyReason: currentSession.ended_early_reason ?? undefined,
+          endedEarlyDetails: currentSession.ended_early_details ?? undefined,
+          reopenReason: currentSession.reopen_reason ?? undefined,
+          reopenDetails: currentSession.reopen_details ?? undefined,
+          reopenedBy: currentSession.reopened_by ?? undefined,
+          reopenedAt: currentSession.reopened_at ?? undefined,
+          productId: currentSession.product_id ?? null,
+          productName: currentSession.product_name ?? null,
+          product_id: currentSession.product_id ?? null,
+          product_name: currentSession.product_name ?? null
         });
         
         const azureConfig = await db.getAzureDevOpsConfig(currentSession.id);
@@ -2341,6 +2812,8 @@ useEffect(() => {
             workItemType: 'Feature'
           });
         }
+
+        await loadFeatureSuggestions();
       } catch (error) {
         console.error('Error loading data:', error);
         setFeatures([]);
@@ -2350,11 +2823,17 @@ useEffect(() => {
     }
     
     loadData();
-  }, [currentSession?.id]);
+  }, [currentSession?.id, loadFeatureSuggestions, buildFeaturesWithVotes]);
 
   useEffect(() => {
     async function loadFilterOptions() {
-      if (azureDevOpsConfig.enabled && azureDevOpsConfig.accessToken) {
+      const fallbackProjects = getNewMillProjects();
+      setAvailableProjects(fallbackProjects);
+      setAvailableStates([]);
+      setAvailableAreaPaths([]);
+      setAvailableTags([]);
+
+      if (azureDevOpsConfig.enabled && azureDevOpsConfig.accessToken && azureDevOpsConfig.project) {
         try {
           const validToken = await ensureValidToken(azureDevOpsConfig);
           const configWithValidToken = {
@@ -2362,46 +2841,163 @@ useEffect(() => {
             accessToken: validToken
           };
 
-          const [states, areaPaths, tags] = await Promise.all([
-            azureService.fetchStates(configWithValidToken),
+          const [projects, states, areaPaths, tags] = await Promise.all([
+            azureService.fetchProjects(configWithValidToken).catch(error => {
+              console.error('Error loading Azure DevOps projects:', error);
+              return fallbackProjects;
+            }),
+            azureService.fetchAllStates(configWithValidToken),
             azureService.fetchAreaPaths(configWithValidToken),
             azureService.fetchTags(configWithValidToken)
           ]);
 
+          setAvailableProjects(projects.length > 0 ? projects : fallbackProjects);
           setAvailableStates(states);
           setAvailableAreaPaths(areaPaths);
           setAvailableTags(tags);
         } catch (error) {
           console.error('Error loading filter options:', error);
+          setAvailableProjects(fallbackProjects);
         }
-      } else {
-        setAvailableStates([]);
-        setAvailableAreaPaths([]);
-        setAvailableTags([]);
       }
     }
 
     loadFilterOptions();
-  }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, azureDevOpsConfig.workItemType, ensureValidToken]);
+  }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, azureDevOpsConfig.project, ensureValidToken]);
 
   
 
   // Add this callback to dynamically fetch states for a specific work item type
-  const handleFetchStatesForType = useCallback(async (workItemType: string) => {
+  const handleFetchStatesForType = useCallback(async (workItemType?: string, areaPaths?: string[]) => {
     if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) return;
     
     try {
       const validToken = await ensureValidToken(azureDevOpsConfig);
       const configWithValidToken = {
         ...azureDevOpsConfig,
-        accessToken: validToken,
-        workItemType: workItemType
+        accessToken: validToken
       };
-
-      const states = await azureService.fetchStates(configWithValidToken);
+      const states = workItemType
+        ? await azureService.fetchStates(configWithValidToken, workItemType)
+        : await azureService.fetchAllStates(configWithValidToken);
       setAvailableStates(states);
     } catch (error) {
       console.error('Error loading states for work item type:', error);
+    }
+  }, [azureDevOpsConfig, ensureValidToken]);
+
+  // Fetch types and states for area paths (bidirectional filtering)
+  const handleFetchTypesAndStatesForAreaPath = useCallback(async (areaPaths: string[]): Promise<{ types: string[]; states: string[] }> => {
+    if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) {
+      return { types: [], states: [] };
+    }
+    
+    try {
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken
+      };
+
+      const result = await azureService.fetchTypesAndStatesForAreaPath(configWithValidToken, areaPaths);
+      return result;
+    } catch (error) {
+      console.error('Error fetching types and states for area path:', error);
+      return { types: [], states: [] };
+    }
+  }, [azureDevOpsConfig, ensureValidToken]);
+
+  const handleFetchTypesAndAreaPathsForStates = useCallback(async (states: string[]): Promise<{ types: string[]; areaPaths: string[] }> => {
+    if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) {
+      return { types: [], areaPaths: [] };
+    }
+
+    try {
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken
+      };
+
+      const result = await azureService.fetchTypesAndAreaPathsForStates(configWithValidToken, states);
+
+      if (result.areaPaths.length > 0) {
+        setAvailableAreaPaths(result.areaPaths);
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error fetching types and area paths for states:', error);
+      return { types: [], areaPaths: [] };
+    }
+  }, [azureDevOpsConfig, ensureValidToken]);
+
+  // Fetch types, states, and area paths for tags (bidirectional filtering)
+  const handleFetchTypesAndStatesForTags = useCallback(async (tags: string[]): Promise<{ types: string[]; states: string[]; areaPaths: string[] }> => {
+    if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) {
+      return { types: [], states: [], areaPaths: [] };
+    }
+    
+    try {
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken
+      };
+
+      const result = await azureService.fetchTypesAndStatesForTags(configWithValidToken, tags);
+
+      if (result.states.length > 0) {
+        setAvailableStates(result.states);
+      }
+      if (result.areaPaths.length > 0) {
+        setAvailableAreaPaths(result.areaPaths);
+      }
+      return result;
+    } catch (error) {
+      console.error('Error fetching types, states, and area paths for tags:', error);
+      return { types: [], states: [], areaPaths: [] };
+    }
+  }, [azureDevOpsConfig, ensureValidToken]);
+
+  // Fetch tags filtered by work item type, states, and area paths
+  const handleFetchTagsForTypeStateAndAreaPath = useCallback(async (workItemType?: string, states: string[] = [], areaPaths: string[] = []) => {
+    if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) return;
+    
+    try {
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken
+      };
+
+      const tags = workItemType
+        ? await azureService.fetchTagsForTypeStateAndAreaPath(configWithValidToken, workItemType, states, areaPaths)
+        : await azureService.fetchTags(configWithValidToken);
+      setAvailableTags(tags);
+    } catch (error) {
+      console.error('Error loading tags for type, state, and area path:', error);
+    }
+  }, [azureDevOpsConfig, ensureValidToken]);
+
+  // Fetch area paths filtered by work item type and states
+  const handleFetchAreaPathsForTypeAndState = useCallback(async (workItemType?: string, states: string[] = []) => {
+    if (!azureDevOpsConfig.enabled || !azureDevOpsConfig.accessToken) return;
+    
+    try {
+      const validToken = await ensureValidToken(azureDevOpsConfig);
+      const configWithValidToken = {
+        ...azureDevOpsConfig,
+        accessToken: validToken
+      };
+
+      const areaPaths = workItemType
+        ? await azureService.fetchAreaPathsForTypeAndStates(configWithValidToken, workItemType, states)
+        : await azureService.fetchAreaPaths(configWithValidToken);
+
+      setAvailableAreaPaths(areaPaths);
+    } catch (error) {
+      console.error('Error loading area paths for type and state:', error);
     }
   }, [azureDevOpsConfig, ensureValidToken]);
 
@@ -2409,7 +3005,7 @@ useEffect(() => {
     const checkVotingStatus = async () => {
       const isInVotingPeriod = isDateInRange(votingSession.startDate, votingSession.endDate);
       if (votingSession.isActive !== isInVotingPeriod) {
-        const updatedSession = {
+    const updatedSession = {
           ...votingSession,
           isActive: isInVotingPeriod
         };
@@ -2417,14 +3013,16 @@ useEffect(() => {
         setVotingSession(updatedSession);
         
         try {
-          await db.updateVotingSession({
+      if (currentSession?.id) {
+        await db.updateVotingSessionById(currentSession.id, {
             title: updatedSession.title,
             goal: updatedSession.goal,
             votes_per_user: updatedSession.votesPerUser,
             start_date: updatedSession.startDate,
             end_date: updatedSession.endDate,
             is_active: updatedSession.isActive
-          });
+        });
+      }
         } catch (error) {
           console.error('Error updating voting session status:', error);
         }
@@ -2434,13 +3032,18 @@ useEffect(() => {
     checkVotingStatus();
     const intervalId = setInterval(checkVotingStatus, 600000);
     return () => clearInterval(intervalId);
-  }, [votingSession]);
+}, [votingSession, currentSession?.id]);
 
-  useEffect(() => {
-    document.body.style.overflow = '';
-    document.body.style.position = '';
-    document.body.style.width = '';
-  }, [view]);
+useEffect(() => {
+  document.body.style.overflow = '';
+  document.body.style.position = '';
+  document.body.style.width = '';
+
+  if (view === 'admin') {
+    loadFeatureSuggestions();
+    loadFutureSessions();
+  }
+}, [view, loadFeatureSuggestions, loadFutureSessions]);
 
   useEffect(() => {
     document.body.style.overflow = '';
@@ -2539,7 +3142,6 @@ useEffect(() => {
       
       await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
-      setShowAzureDevOpsForm(false);
       
     } catch (error) {
       console.error('Azure DevOps sync error:', error);
@@ -2680,7 +3282,6 @@ useEffect(() => {
       
       await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
-      setHasImportedFeatures(true);
       
     } catch (error) {
       console.error('Azure DevOps sync error:', error);
@@ -2709,7 +3310,6 @@ useEffect(() => {
       await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
       setAzureFetchError(null);
-      setHasImportedFeatures(false);
       
     } catch (error) {
       console.error('Error disconnecting Azure DevOps:', error);
@@ -2738,23 +3338,40 @@ useEffect(() => {
 
   const handleToggleAdmin = useCallback(() => {
     setIsAdmin(true);
+    setAdminPerspective(isSystemAdmin ? 'system' : 'session');
     setView('admin');
-  }, []);
+  }, [isSystemAdmin]);
 
   const handleShowVoting = useCallback(() => {
     setIsAdmin(false);
+    setAdminPerspective(isSystemAdmin ? 'system' : 'session');
     setView('voting');
-  }, []);
+  }, [isSystemAdmin]);
 
-  const handleToggleViewMode = useCallback(() => {
-    if (view === 'voting') {
-      setIsAdmin(true);
-      setView('admin');
-    } else if (view === 'admin') {
-      setIsAdmin(false);
+  const handleSelectSessionPerspective = useCallback(() => {
+    setIsAdmin(true);
+    setAdminPerspective('session');
+    if (adminMode) {
+      if (view !== 'admin') {
+        setView('admin');
+      }
+    } else if (view !== 'voting') {
       setView('voting');
     }
-  }, [view]);
+  }, [adminMode, view]);
+
+  const handleSelectSystemPerspective = useCallback(() => {
+    if (!isSystemAdmin) return;
+    setIsAdmin(true);
+    setAdminPerspective('system');
+    if (adminMode) {
+      if (view !== 'admin') {
+        setView('admin');
+      }
+    } else if (view !== 'voting') {
+      setView('voting');
+    }
+  }, [view, isSystemAdmin, adminMode]);
 
   const handleAddFeature = useCallback(async (feature: any) => {
     if (!currentSession) return;
@@ -2809,11 +3426,13 @@ useEffect(() => {
   }, []);
 
   const initiateResetVotes = useCallback((id: string) => {
-    setConfirmState({
+    setConfirmState(prev => ({
+      ...prev,
       showReset: true,
       showResetAll: false,
+      showDeleteSession: false,
       targetId: id
-    });
+    }));
   }, []);
 
   const handleResetVotes = useCallback(async () => {
@@ -2821,62 +3440,80 @@ useEffect(() => {
     if (!id || !currentSession) return;
     
     try {
-      await db.deleteVotesForFeature(id);
-      
-      const featuresData = await db.getFeatures(currentSession.id);
-      const votesData = await db.getVotes(currentSession.id);
-      
-      const featuresWithVotes = featuresData.map(feature => {
-        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
-        const voters = featureVotes.map(v => ({
-          userId: v.user_id,
-          name: v.user_name,
-          email: v.user_email,
-          voteCount: v.vote_count
-        }));
-        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
-        
-        return {
-          id: feature.id,
-          title: feature.title,
-          description: feature.description,
-          epic: feature.epic,
-          state: feature.state,
-          areaPath: feature.area_path,
-          tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
-          votes: totalVotes,
-          voters
-        };
-      });
-      
-      setFeatures(featuresWithVotes);
+      await db.deleteVotesForFeature(currentSession.id, id);
+      const refreshed = await buildFeaturesWithVotes();
+      setFeatures(refreshed);
     } catch (error) {
       console.error('Error resetting votes:', error);
       alert('Failed to reset votes');
     }
-  }, [confirmState.targetId, currentSession]);
+  }, [confirmState.targetId, currentSession, buildFeaturesWithVotes]);
 
   const initiateResetAllVotes = useCallback(() => {
-    setConfirmState({
+    setConfirmState(prev => ({
+      ...prev,
       showReset: false,
       showResetAll: true,
+      showDeleteSession: false,
       targetId: null
-    });
+    }));
   }, []);
 
+const handleRequestDeleteSession = useCallback(() => {
+  setConfirmState(prev => ({
+    ...prev,
+    showReset: false,
+    showResetAll: false,
+    showDeleteSession: true,
+    targetId: null
+  }));
+}, []);
+
+const handleDeleteSession = useCallback(async () => {
+  if (!currentSession) return;
+  
+  setIsDeletingSession(true);
+  
+  try {
+    // Delete the session
+    await db.deleteSession(currentSession.id);
+    
+    // Clear local state
+    setCurrentSession(null as any);
+    setCurrentUser(null);
+    
+    // Clear localStorage
+    try {
+      localStorage.removeItem('voting_system_current_session');
+    } catch {}
+    
+    // Refresh sessions list
+    await refreshSessions();
+    
+    // Navigate to sessions page
+    navigate('/sessions', { replace: true });
+  } catch (error) {
+    console.error('Error deleting session:', error);
+    alert('Failed to delete session. Please try again.');
+  } finally {
+    setIsDeletingSession(false);
+    setConfirmState(prev => ({ ...prev, showDeleteSession: false }));
+  }
+}, [currentSession, navigate, setCurrentSession, setCurrentUser, refreshSessions]);
+
+  
   const handleResetAllVotes = useCallback(async () => {
     if (!currentSession) return;
     
     try {
       await db.deleteAllVotes(currentSession.id);
-      setFeatures(prev => prev.map(feature => ({ ...feature, votes: 0, voters: [] })));
+      const refreshed = await buildFeaturesWithVotes();
+      setFeatures(refreshed);
     } catch (error) {
       console.error('Error resetting all votes:', error);
       alert('Failed to reset all votes');
     }
-  }, [currentSession]);
+  }, [currentSession, buildFeaturesWithVotes]);
 
   const handlePendingVote = useCallback((featureId: string, increment: boolean) => {
     if (!currentUser || !votingSession.isActive) return;
@@ -2966,22 +3603,175 @@ useEffect(() => {
   }, [currentUser, currentSession, pendingUsedVotes, pendingVotes, votingSession.isActive, effectiveVotesPerUser]);
 
   const handleUpdateVotingSession = useCallback(async (updatedSession: VotingSession) => {
+    const baseUpdates: Record<string, any> = {
+      title: updatedSession.title,
+      goal: updatedSession.goal,
+      votes_per_user: updatedSession.votesPerUser,
+      start_date: updatedSession.startDate,
+      end_date: updatedSession.endDate,
+      is_active: updatedSession.isActive,
+      use_auto_votes: updatedSession.useAutoVotes,
+      product_id: updatedSession.productId ?? updatedSession.product_id ?? null,
+      product_name: updatedSession.productName ?? updatedSession.product_name ?? null
+    };
+
+    const metadataUpdates: Record<string, string | null> = {};
+
+    const assignField = (
+      value: string | null | undefined,
+      columnName: keyof typeof metadataUpdates
+    ) => {
+      if (value !== undefined) {
+        metadataUpdates[columnName] = value;
+      }
+    };
+
+    assignField(updatedSession.originalEndDate, 'original_end_date');
+    assignField(updatedSession.endedEarlyBy, 'ended_early_by');
+    assignField(updatedSession.endedEarlyReason, 'ended_early_reason');
+    assignField(updatedSession.endedEarlyDetails, 'ended_early_details');
+    assignField(updatedSession.reopenReason, 'reopen_reason');
+    assignField(updatedSession.reopenDetails, 'reopen_details');
+    assignField(updatedSession.reopenedBy, 'reopened_by');
+    assignField(updatedSession.reopenedAt, 'reopened_at');
+
+    const fullUpdates = { ...baseUpdates, ...metadataUpdates };
+
+    const runUpdate = async (updates: Record<string, any>) => {
+      if (currentSession?.id) {
+        await db.updateVotingSessionById(currentSession.id, updates);
+      } else {
+        await db.updateVotingSession(updates);
+      }
+    };
+
     try {
-      await db.updateVotingSession({
-        title: updatedSession.title,
-        goal: updatedSession.goal,
-        votes_per_user: updatedSession.votesPerUser,
-        start_date: updatedSession.startDate,
-        end_date: updatedSession.endDate,
-        is_active: updatedSession.isActive
-      });
-      
+      await runUpdate(fullUpdates);
+
       setVotingSession(updatedSession);
-    } catch (error) {
-      console.error('Error updating voting session:', error);
-      alert('Failed to update voting session settings');
+
+      if (currentSession?.id) {
+        setCurrentSession({
+          ...currentSession,
+          title: baseUpdates.title ?? currentSession.title,
+          goal: baseUpdates.goal ?? currentSession.goal,
+          votes_per_user: baseUpdates.votes_per_user ?? currentSession.votes_per_user,
+          use_auto_votes: baseUpdates.use_auto_votes ?? currentSession.use_auto_votes,
+          start_date: baseUpdates.start_date ?? currentSession.start_date,
+          end_date: baseUpdates.end_date ?? currentSession.end_date,
+          is_active: baseUpdates.is_active ?? currentSession.is_active,
+          product_id:
+            (baseUpdates.product_id !== undefined
+              ? baseUpdates.product_id ?? null
+              : updatedSession.productId ?? currentSession.product_id) ??
+            null,
+          product_name:
+            (baseUpdates.product_name !== undefined
+              ? baseUpdates.product_name ?? null
+              : updatedSession.productName ?? currentSession.product_name) ??
+            null,
+          original_end_date:
+            metadataUpdates.original_end_date ?? currentSession.original_end_date ?? null,
+          ended_early_by:
+            metadataUpdates.ended_early_by ?? currentSession.ended_early_by ?? null,
+          ended_early_reason:
+            metadataUpdates.ended_early_reason ?? currentSession.ended_early_reason ?? null,
+          ended_early_details:
+            metadataUpdates.ended_early_details ?? currentSession.ended_early_details ?? null,
+          reopen_reason:
+            metadataUpdates.reopen_reason ?? currentSession.reopen_reason ?? null,
+          reopen_details:
+            metadataUpdates.reopen_details ?? currentSession.reopen_details ?? null,
+          reopened_by:
+            metadataUpdates.reopened_by ?? currentSession.reopened_by ?? null,
+          reopened_at:
+            metadataUpdates.reopened_at ?? currentSession.reopened_at ?? null,
+        });
+      }
+    } catch (error: any) {
+      const message = error?.message?.toLowerCase?.() ?? '';
+      const missingColumn =
+        message.includes('column') &&
+        (message.includes('reopen_reason') ||
+          message.includes('reopen_details') ||
+          message.includes('reopened_by') ||
+          message.includes('reopened_at') ||
+          message.includes('original_end_date') ||
+          message.includes('ended_early_by') ||
+          message.includes('ended_early_reason') ||
+          message.includes('ended_early_details'));
+      const missingProductName =
+        message.includes('product_name') || message.includes('"product_name"');
+      const missingProductId =
+        message.includes('product_id') || message.includes('"product_id"');
+
+      if (missingColumn || missingProductName || missingProductId) {
+        console.warn(
+          '[FeatureVoting] Voting session metadata/product columns missing, falling back to basic update.',
+          error
+        );
+
+        try {
+          const sanitizedBaseUpdates = { ...baseUpdates };
+          if (missingProductName) {
+            delete sanitizedBaseUpdates.product_name;
+          }
+          if (missingProductId) {
+            delete sanitizedBaseUpdates.product_id;
+          }
+
+          await runUpdate(sanitizedBaseUpdates);
+
+          setVotingSession(updatedSession);
+
+          if (currentSession?.id) {
+            setCurrentSession({
+              ...currentSession,
+              title: sanitizedBaseUpdates.title ?? currentSession.title,
+              goal: sanitizedBaseUpdates.goal ?? currentSession.goal,
+              votes_per_user:
+                sanitizedBaseUpdates.votes_per_user ?? currentSession.votes_per_user,
+              use_auto_votes:
+                sanitizedBaseUpdates.use_auto_votes ?? currentSession.use_auto_votes,
+              start_date: sanitizedBaseUpdates.start_date ?? currentSession.start_date,
+              end_date: sanitizedBaseUpdates.end_date ?? currentSession.end_date,
+              is_active: sanitizedBaseUpdates.is_active ?? currentSession.is_active,
+              product_id:
+                sanitizedBaseUpdates.product_id !== undefined
+                  ? sanitizedBaseUpdates.product_id ?? null
+                  : updatedSession.productId ?? currentSession.product_id ?? null,
+              product_name:
+                sanitizedBaseUpdates.product_name !== undefined
+                  ? sanitizedBaseUpdates.product_name ?? null
+                  : updatedSession.productName ?? currentSession.product_name ?? null,
+              original_end_date:
+                updatedSession.originalEndDate ?? currentSession.original_end_date ?? null,
+              ended_early_by:
+                updatedSession.endedEarlyBy ?? currentSession.ended_early_by ?? null,
+              ended_early_reason:
+                updatedSession.endedEarlyReason ?? currentSession.ended_early_reason ?? null,
+              ended_early_details:
+                updatedSession.endedEarlyDetails ?? currentSession.ended_early_details ?? null,
+              reopen_reason:
+                updatedSession.reopenReason ?? currentSession.reopen_reason ?? null,
+              reopen_details:
+                updatedSession.reopenDetails ?? currentSession.reopen_details ?? null,
+              reopened_by:
+                updatedSession.reopenedBy ?? currentSession.reopened_by ?? null,
+              reopened_at:
+                updatedSession.reopenedAt ?? currentSession.reopened_at ?? null
+            });
+          }
+        } catch (fallbackError) {
+          console.error('Error updating voting session (fallback):', fallbackError);
+          alert('Failed to update voting session settings');
+        }
+      } else {
+        console.error('Error updating voting session:', error);
+        alert('Failed to update voting session settings');
+      }
     }
-  }, []);
+  }, [currentSession, setCurrentSession]);
 
   const handleUpdateAzureDevOpsConfig = useCallback(async (config: AzureDevOpsConfig) => {
     if (!currentSession) return;
@@ -3007,7 +3797,13 @@ useEffect(() => {
     }
   }, [currentSession]);
 
-
+  const handleShowResultsPage = useCallback(() => {
+    if (currentSession) {
+      navigate('../results');
+    } else {
+      setView('results');
+    }
+  }, [currentSession, navigate]);
 
   const renderContent = useMemo(() => {
     switch (view) {
@@ -3027,6 +3823,10 @@ useEffect(() => {
             effectiveVotesPerUser={effectiveVotesPerUser}
             sessionId={currentSession?.id || ''}
             onLogout={handleLogout}
+            onSuggestionSubmitted={handleSuggestionSubmitted}
+            isSystemAdmin={isSystemAdmin}
+            isSessionAdmin={sessionAdminRole}
+            isStakeholder={isStakeholder}
           />
         );
       case 'results':
@@ -3035,7 +3835,7 @@ useEffect(() => {
             features={features} 
             onResetVotes={initiateResetVotes}
             onResetAllVotes={initiateResetAllVotes}
-            onBack={() => setView('admin')}
+            onBack={resultsMode ? () => navigate('../admin') : () => setView('admin')}
             showVotersList={showVotersList}
             setShowVotersList={setShowVotersList}
             votingSession={votingSession}
@@ -3052,57 +3852,86 @@ useEffect(() => {
         );
       case 'admin':
       default:
+        if (adminMode) {
+          return (
+            <AdminDashboard 
+              features={features} 
+              onAddFeature={handleAddFeature} 
+              onUpdateFeature={handleUpdateFeature} 
+              onDeleteFeature={handleDeleteFeature}
+              onShowResults={handleShowResultsPage}
+              onRequestDeleteSession={handleRequestDeleteSession}
+              isDeletingSession={isDeletingSession}
+              showAddForm={showAddForm}
+              setShowAddForm={setShowAddForm}
+              editingFeature={editingFeature}
+              setEditingFeature={setEditingFeature}
+              onLogout={handleLogout}
+              onShowVoterView={handleShowVoting}
+              votingSession={votingSession}
+              azureDevOpsConfig={azureDevOpsConfig}
+              onUpdateAzureDevOpsConfig={handleUpdateAzureDevOpsConfig}
+              onPreviewAzureDevOpsFeatures={handlePreviewAzureDevOpsFeatures}
+              onDisconnectAzureDevOps={handleDisconnectAzureDevOps}
+              isFetchingAzureDevOps={isFetchingAzureDevOps}
+              azureFetchError={azureFetchError}
+              onInitiateOAuth={handleInitiateOAuth}
+              availableStates={availableStates}
+              availableAreaPaths={availableAreaPaths}
+              availableTags={availableTags}
+              previewFeatures={previewFeatures}
+              showPreviewModal={showPreviewModal}
+              setShowPreviewModal={setShowPreviewModal}
+              onConfirmSync={handleConfirmSync}
+              onUpdateVotingSession={handleUpdateVotingSession}
+              onFetchStatesForType={handleFetchStatesForType}
+              onFetchAreaPathsForTypeAndState={handleFetchAreaPathsForTypeAndState}
+              onFetchTagsForTypeStateAndAreaPath={handleFetchTagsForTypeStateAndAreaPath}
+              onFetchTypesAndStatesForAreaPath={handleFetchTypesAndStatesForAreaPath}
+              onFetchTypesAndStatesForTags={handleFetchTypesAndStatesForTags}
+              onFetchTypesAndAreaPathsForStates={handleFetchTypesAndAreaPathsForStates}
+              suggestedFeatures={suggestedFeatures}
+              otherSessions={futureSessions}
+              onPromoteSuggestion={handlePromoteSuggestion}
+              onMoveSuggestion={handleMoveSuggestion}
+              onEditSuggestion={handleUpdateSuggestion}
+              onDeleteSuggestion={handleDeleteSuggestion}
+              adminPerspective={adminPerspective}
+              projectOptions={availableProjects}
+            />
+          );
+        }
+
         return (
-          <AdminDashboard 
-            features={features} 
-            onAddFeature={handleAddFeature} 
-            onUpdateFeature={handleUpdateFeature} 
-            onDeleteFeature={handleDeleteFeature}
-            onShowResults={() => setView('results')}
-            showAddForm={showAddForm}
-            setShowAddForm={setShowAddForm}
-            editingFeature={editingFeature}
-            setEditingFeature={setEditingFeature}
-            onLogout={handleShowVoting}
-            votingSession={votingSession}
-            azureDevOpsConfig={azureDevOpsConfig}
-            onUpdateAzureDevOpsConfig={handleUpdateAzureDevOpsConfig}
-            showAzureDevOpsForm={showAzureDevOpsForm}
-            setShowAzureDevOpsForm={setShowAzureDevOpsForm}
-            onFetchAzureDevOpsFeatures={handleFetchAzureDevOpsFeatures}
-            onPreviewAzureDevOpsFeatures={handlePreviewAzureDevOpsFeatures}
-            onDisconnectAzureDevOps={handleDisconnectAzureDevOps}
-            isFetchingAzureDevOps={isFetchingAzureDevOps}
-            azureFetchError={azureFetchError}
-            onInitiateOAuth={handleInitiateOAuth}
-            availableStates={availableStates}
-            availableAreaPaths={availableAreaPaths}
-            availableTags={availableTags}
-            previewFeatures={previewFeatures}
-            showPreviewModal={showPreviewModal}
-            setShowPreviewModal={setShowPreviewModal}
-            onConfirmSync={handleConfirmSync}
-            hasImportedFeatures={hasImportedFeatures}
-            setHasImportedFeatures={setHasImportedFeatures}
-            onShowVoterView={handleShowVoting}
-            onUpdateVotingSession={handleUpdateVotingSession}
-            onFetchStatesForType={handleFetchStatesForType}
-          />
+          <div className="max-w-3xl mx-auto text-center py-20 px-6">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#2d4660]/10 text-[#2d4660] mb-6">
+              <Shield className="h-8 w-8" />
+            </div>
+            <h2 className="text-2xl font-semibold text-[#2d4660] mb-4">Admin tools live on the Admin Dashboard</h2>
+            <p className="text-gray-600 mb-6">
+              You are viewing the voting experience. To manage sessions, stakeholders, or Azure DevOps connections, open the Admin dashboard from the Admin application.
+            </p>
+            <Button variant="primary" onClick={() => navigate('/admin')}>
+              Go to Admin Dashboard
+            </Button>
+          </div>
         );
     }
   }, [
     view, features, currentUser, pendingVotes, pendingUsedVotes, 
-    handlePendingVote, handleSubmitVotes, handleToggleAdmin, handleShowVoting, isAdmin, 
+    handlePendingVote, handleSubmitVotes, handleToggleAdmin, isAdmin, 
     votingSession, initiateResetVotes, initiateResetAllVotes, showVotersList,
     setShowVotersList, handleAddFeature, handleUpdateFeature,
     handleDeleteFeature, showAddForm, setShowAddForm, editingFeature,
-    setEditingFeature, azureDevOpsConfig, handleUpdateAzureDevOpsConfig, showAzureDevOpsForm,
-    setShowAzureDevOpsForm, handleFetchAzureDevOpsFeatures, handlePreviewAzureDevOpsFeatures,
+    setEditingFeature, azureDevOpsConfig, handleUpdateAzureDevOpsConfig,
+    handleFetchAzureDevOpsFeatures, handlePreviewAzureDevOpsFeatures,
     handleDisconnectAzureDevOps, isFetchingAzureDevOps, azureFetchError, handleInitiateOAuth,
     previewFeatures, showPreviewModal, setShowPreviewModal, handleConfirmSync,
-    hasImportedFeatures, setHasImportedFeatures, navigate, effectiveVotesPerUser,
+    navigate, effectiveVotesPerUser, adminMode,
     availableStates, availableAreaPaths, availableTags, handleFetchStatesForType, currentSession,
-    handleToggleViewMode
+    handleShowVoting, handleSuggestionSubmitted, suggestedFeatures,
+    futureSessions, handlePromoteSuggestion, handleMoveSuggestion, handleUpdateSuggestion, handleDeleteSuggestion, adminPerspective,
+    availableProjects, handleShowResultsPage
   ]);
 
   // IMPORTANT: Return loading check AFTER all hooks
@@ -3128,6 +3957,17 @@ useEffect(() => {
     );
   }
 
+  if (!isAdmin && view !== 'voting' && view !== 'thankyou') {
+    return (
+      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading voting experience...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full bg-gray-50 text-gray-900 font-sans min-h-screen flex flex-col">
       <div className="flex-grow">
@@ -3135,9 +3975,11 @@ useEffect(() => {
       </div>
       
       <Footer 
-        isAdmin={isAdmin} 
-        viewMode={view === 'admin' ? 'admin' : 'voting'}
-        onToggleView={handleToggleViewMode}
+        currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
+        onSelectStakeholder={handleShowVoting}
+        onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
+        onSelectSystemAdmin={isSystemAdmin ? handleSelectSystemPerspective : undefined}
+        showRoleToggle={isSystemAdmin || (isAdmin && adminPerspective === 'system')}
       />
       
       <ConfirmDialog
@@ -3159,9 +4001,19 @@ useEffect(() => {
         confirmText="Reset All"
         type="reset"
       />
-    </div>
-  );
-}
+
+      <ConfirmDialog
+        show={confirmState.showDeleteSession}
+        title="Delete Voting Session"
+        message="This will permanently delete the current voting session for all admins and stakeholders. Votes, notes, and settings for this session will be removed. This action cannot be undone."
+        onConfirm={handleDeleteSession}
+        onCancel={() => setConfirmState(prev => ({ ...prev, showDeleteSession: false }))}
+        confirmText={isDeletingSession ? 'Deleting…' : 'Delete Session'}
+        type="delete"
+      />
+     </div>
+   );
+ }
 
 export default FeatureVotingSystem;
 

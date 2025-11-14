@@ -12,15 +12,20 @@
     "create-404": "node scripts/create-404.js"
   },
   "dependencies": {
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "@microsoft/teams-js": "^2.46.0",
     "@supabase/supabase-js": "^2.74.0",
+    "lucide-react": "^0.553.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.9.4"
+    "react-hook-form": "^7.66.0",
+    "react-router-dom": "^7.9.4",
+    "recharts": "^3.4.1"
   },
   "devDependencies": {
     "@types/react-router-dom": "^5.3.3",
     "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.21",
+    "autoprefixer": "^10.4.22",
     "gh-pages": "^6.2.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",

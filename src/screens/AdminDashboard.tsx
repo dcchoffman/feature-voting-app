@@ -4,14 +4,34 @@
 // Location: src/screens/AdminDashboard.tsx
 // ============================================
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { useSession } from '../contexts/SessionContext';
-import { 
-  Plus, Edit, Trash2, X, BarChart2, Settings, 
-  LogOut, Users, Clock, Cloud, CheckCircle, 
-  RefreshCw, AlertCircle, Vote, Shield, Calendar, Filter, ChevronDown
+import * as db from '../services/databaseService';
+import {
+  Plus,
+  Edit,
+  Trash2,
+  X,
+  Users,
+  Clock,
+  CheckCircle,
+  RefreshCw,
+  AlertCircle,
+  Shield,
+  Filter,
+  ChevronDown,
+  Vote,
+  ArrowRight,
+  Calendar,
+  Workflow,
+  Lightbulb,
+  Minus,
+  Trophy,
+  LogOut,
+  BarChart2,
+  Settings
 } from "lucide-react";
 
 // Import shared components
@@ -21,16 +41,19 @@ import {
   EpicTag, 
   AzureDevOpsBadge, 
   ImageWithFallback, 
-  FeatureForm, 
-  AzureDevOpsForm,
-  formatDate,
-  getDaysRemaining,
-  getDeadlineColor,
-  isPastDate
-} from '../components/FeatureVotingSystem';
+  FeatureForm
+ } from '../screens/FeatureVoting';
+import ProductPicker from '../components/ProductPicker';
 
 // Import types
-import type { Feature, VotingSession, AzureDevOpsConfig } from '../types/azure';
+import type { Feature, FeatureSuggestion, VotingSession, AzureDevOpsConfig } from '../types/azure';
+import type { SessionStatusNote, Product } from '../types';
+import { WORK_ITEM_TYPES } from '../services/azureDevOpsService';
+
+// Import date utility
+import { formatDate, isPastDate } from '../utils/date';
+import { getProductColor } from '../utils/productColors';
+import { getDisplayProductName } from '../utils/productDisplay';
 
 // ============================================
 // TYPES & INTERFACES
@@ -42,17 +65,17 @@ interface AdminDashboardProps {
   onUpdateFeature: (feature: Feature) => void;
   onDeleteFeature: (id: string) => Promise<void>;
   onShowResults: () => void;
+  onRequestDeleteSession: () => void;
+  isDeletingSession: boolean;
   showAddForm: boolean;
   setShowAddForm: (show: boolean) => void;
   editingFeature: Feature | null;
   setEditingFeature: (feature: Feature | null) => void;
   onLogout: () => void;
+  onShowVoterView: () => void;
   votingSession: VotingSession;
   azureDevOpsConfig: AzureDevOpsConfig;
   onUpdateAzureDevOpsConfig: (config: AzureDevOpsConfig) => void;
-  showAzureDevOpsForm: boolean;
-  setShowAzureDevOpsForm: (show: boolean) => void;
-  onFetchAzureDevOpsFeatures: (config?: AzureDevOpsConfig) => Promise<void>;
   onPreviewAzureDevOpsFeatures: () => Promise<void>;
   onDisconnectAzureDevOps: () => Promise<void>;
   isFetchingAzureDevOps: boolean;
@@ -65,85 +88,109 @@ interface AdminDashboardProps {
   showPreviewModal: boolean;
   setShowPreviewModal: (show: boolean) => void;
   onConfirmSync: (replaceAll: boolean) => Promise<void>;
-  hasImportedFeatures: boolean;
-  setHasImportedFeatures: (value: boolean) => void;
-  onShowVoterView: () => void;
   onUpdateVotingSession: (session: VotingSession) => void;
-  onFetchStatesForType?: (workItemType: string) => Promise<void>;
+  onFetchStatesForType?: (workItemType?: string) => Promise<void>;
+  onFetchAreaPathsForTypeAndState?: (workItemType?: string, states?: string[]) => Promise<void>;
+  onFetchTagsForTypeStateAndAreaPath?: (workItemType?: string, states?: string[], areaPaths?: string[]) => Promise<void>;
+  onFetchTypesAndStatesForAreaPath?: (areaPaths: string[]) => Promise<{ types: string[]; states: string[] }>;
+  onFetchTypesAndStatesForTags?: (tags: string[]) => Promise<{ types: string[]; states: string[]; areaPaths: string[] }>;
+  onFetchTypesAndAreaPathsForStates?: (states: string[]) => Promise<{ types: string[]; areaPaths: string[] }>;
+  suggestedFeatures: FeatureSuggestion[];
+  otherSessions: Array<{ id: string; title: string; startDate: string }>;
+  onPromoteSuggestion: (id: string) => Promise<void>;
+  onMoveSuggestion: (id: string, targetSessionId: string) => Promise<void>;
+  onEditSuggestion: (id: string, updates: { title?: string; summary?: string | null; whatWouldItDo?: string | null; howWouldItWork?: string | null; }) => Promise<void>;
+  onDeleteSuggestion: (id: string) => Promise<void>;
+  adminPerspective?: 'session' | 'system';
+  projectOptions: string[];
 }
 
+const REOPEN_REASON_OPTIONS: string[] = [
+  'Stakeholders need more time',
+  'New backlog items require votes',
+  'Clarify previous results',
+  'Technical issue resolved',
+  'Other'
+];
+
+const AZURE_DEVOPS_ICON = "https://cdn.iconscout.com/icon/free/png-512/azure-devops-3628645-3029870.png";
+
 // ============================================
-// SIMPLE CONNECTION FORM
+// SINGLE SELECT DROPDOWN COMPONENT
 // ============================================
 
-interface ConnectionFormProps {
-  config: AzureDevOpsConfig;
-  onConnect: (org: string, project: string) => void;
-  onCancel: () => void;
-  isFetching: boolean;
-  error: string | null;
+interface SingleSelectDropdownProps {
+  options: string[];
+  value: string;
+  onChange: (selected: string) => void;
+  placeholder?: string;
+  label?: string;
+  disabled?: boolean;
+  variant?: 'default' | 'green';
 }
 
-function ConnectionForm({ config, onConnect, onCancel, isFetching, error }: ConnectionFormProps) {
-  const { register, handleSubmit, formState: { errors } } = useForm({
-    defaultValues: {
-      organization: config.organization || 'newmill',
-      project: config.project || 'Product'
+function SingleSelectDropdown({ options, value, onChange, placeholder = "Select...", label, disabled = false, variant = 'default' }: SingleSelectDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
     }
-  });
 
-  const onSubmit = (data: any) => {
-    onConnect(data.organization, data.project);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectOption = (option: string) => {
+    onChange(option);
+    setIsOpen(false);
   };
 
+  const displayValue = value || placeholder;
+
+  const borderColor = variant === 'green' ? 'border-green-600' : 'border-gray-300';
+  const chevronColor = variant === 'green' ? 'text-green-600' : 'text-gray-400';
+  const selectedBgColor = variant === 'green' ? 'bg-green-50' : 'bg-blue-50';
+  const selectedIconColor = variant === 'green' ? 'text-green-600' : 'text-[#1E5461]';
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="bg-blue-50 p-4 rounded-lg">
-      <h3 className="text-lg font-medium mb-4 text-[#2d4660] flex items-center">
-        <Cloud className="h-5 w-5 mr-2" />
-        Connect to Azure DevOps
-      </h3>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Organization Name *</label>
-          <input
-            {...register('organization', { required: 'Organization name is required' })}
-            placeholder="your-organization"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          {errors.organization && <p className="mt-1 text-sm text-red-600">{errors.organization.message}</p>}
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Project Name *</label>
-          <input
-            {...register('project', { required: 'Project name is required' })}
-            placeholder="your-project"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          />
-          {errors.project && <p className="mt-1 text-sm text-red-600">{errors.project.message}</p>}
-        </div>
+    <div ref={dropdownRef} className="relative">
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      
+      <div
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full px-3 py-2 border ${borderColor} rounded-md min-h-[38px] flex items-center justify-between ${
+          disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'
+        }`}
+      >
+        <span className={`text-sm ${!value ? 'text-gray-400' : 'text-gray-900'}`}>
+          {displayValue}
+        </span>
+        <ChevronDown className={`h-4 w-4 ${chevronColor} transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
       </div>
 
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-md">
-          <p className="flex items-center">
-            <AlertCircle className="h-4 w-4 mr-2" />
-            {error}
-          </p>
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {options.map(option => (
+            <div
+              key={option}
+              onClick={() => selectOption(option)}
+              className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between ${
+                value === option ? selectedBgColor : ''
+              }`}
+            >
+              <span className="text-sm text-gray-900">{option}</span>
+              {value === option && (
+                <CheckCircle className={`h-4 w-4 ${selectedIconColor}`} />
+              )}
+            </div>
+          ))}
         </div>
       )}
-
-      <div className="flex justify-end space-x-2">
-        <Button variant="secondary" onClick={onCancel} disabled={isFetching}>
-          Cancel
-        </Button>
-        <Button variant="primary" type="submit" disabled={isFetching} className="flex items-center">
-          {isFetching && <RefreshCw className="animate-spin h-4 w-4 mr-2" />}
-          {isFetching ? 'Connecting...' : 'Connect with Azure DevOps'}
-        </Button>
-      </div>
-    </form>
+    </div>
   );
 }
 
@@ -158,9 +205,10 @@ interface MultiSelectDropdownProps {
   placeholder?: string;
   label?: string;
   searchable?: boolean;
+  disabled?: boolean;
 }
 
-function MultiSelectDropdown({ options, value, onChange, placeholder = "Select...", label, searchable = false }: MultiSelectDropdownProps) {
+function MultiSelectDropdown({ options, value, onChange, placeholder = "Select...", label, searchable = false, disabled = false }: MultiSelectDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -211,32 +259,36 @@ function MultiSelectDropdown({ options, value, onChange, placeholder = "Select..
       {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
       
       <div
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white cursor-pointer min-h-[38px] flex items-center justify-between"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full px-3 py-2 border border-gray-300 rounded-md min-h-[38px] flex items-center justify-between ${
+          disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'
+        }`}
       >
         <div className="flex-1 flex flex-wrap gap-1">
           {value.length === 0 ? (
-            <span className="text-gray-400 text-sm">{placeholder}</span>
+            <span className={`text-sm ${disabled ? 'text-gray-400' : 'text-gray-400'}`}>{placeholder}</span>
           ) : (
             value.map(item => (
               <span
                 key={item}
-                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#2D4660]/10 text-[#2D4660]"
               >
                 {item}
-                <button
-                  type="button"
-                  onClick={(e) => removeOption(item, e)}
-                  className="ml-1 hover:text-blue-900"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={(e) => removeOption(item, e)}
+                    className="ml-1 hover:text-[#173B65]"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
               </span>
             ))
           )}
         </div>
         <div className="flex items-center gap-1 ml-2">
-          {value.length > 0 && (
+          {value.length > 0 && !disabled && (
             <button
               type="button"
               onClick={clearAll}
@@ -249,8 +301,8 @@ function MultiSelectDropdown({ options, value, onChange, placeholder = "Select..
         </div>
       </div>
 
-      {isOpen && (
-        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden flex flex-col">
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden flex flex-col">
           {searchable && (
             <div className="p-2 border-b border-gray-200">
               <input
@@ -260,7 +312,7 @@ function MultiSelectDropdown({ options, value, onChange, placeholder = "Select..
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
                 placeholder="Type to search..."
-                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#2D4660]"
               />
             </div>
           )}
@@ -271,12 +323,12 @@ function MultiSelectDropdown({ options, value, onChange, placeholder = "Select..
                   key={option}
                   onClick={() => toggleOption(option)}
                   className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between ${
-                    value.includes(option) ? 'bg-blue-50' : ''
+                    value.includes(option) ? 'bg-[#2D4660]/5' : ''
                   }`}
                 >
                   <span className="text-sm">{option}</span>
                   {value.includes(option) && (
-                    <CheckCircle className="h-4 w-4 text-blue-600" />
+                    <CheckCircle className="h-4 w-4 text-[#1E5461]" />
                   )}
                 </div>
               ))
@@ -304,108 +356,497 @@ interface FilterFormProps {
   availableStates: string[];
   availableAreaPaths: string[];
   availableTags: string[];
-  onFetchStatesForType?: (workItemType: string) => Promise<void>;
+  onFetchStatesForType?: (workItemType?: string) => Promise<void>;
+  onFetchAreaPathsForTypeAndState?: (workItemType?: string, states?: string[]) => Promise<void>;
+  onFetchTagsForTypeStateAndAreaPath?: (workItemType?: string, states?: string[], areaPaths?: string[]) => Promise<void>;
+  onFetchTypesAndStatesForAreaPath?: (areaPaths: string[]) => Promise<{ types: string[]; states: string[] }>;
+  onFetchTypesAndStatesForTags?: (tags: string[]) => Promise<{ types: string[]; states: string[]; areaPaths: string[] }>;
+  onFetchTypesAndAreaPathsForStates?: (states: string[]) => Promise<{ types: string[]; areaPaths: string[] }>;
+  previewFeatures?: Feature[] | null;
+  showPreviewModal?: boolean;
+  resetSignal: number;
 }
 
-function FilterForm({ config, onUpdateConfig, onPreview, isFetching, availableStates, availableAreaPaths, availableTags, onFetchStatesForType }: FilterFormProps) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const { register, handleSubmit, watch, control } = useForm({
-    defaultValues: {
-      workItemTypes: config.workItemType ? [config.workItemType] : ['Feature'],
-      states: config.states || [],
-      areaPaths: config.areaPath ? [config.areaPath] : [],
-      tags: config.tags || [],
-      query: config.query || ''
-    }
-  });
+function FilterForm({ 
+  config, 
+  onUpdateConfig, 
+  onPreview, 
+  isFetching, 
+  availableStates, 
+  availableAreaPaths, 
+  availableTags,
+  previewFeatures,
+  showPreviewModal,
+  onFetchStatesForType,
+  onFetchAreaPathsForTypeAndState,
+  onFetchTagsForTypeStateAndAreaPath,
+  onFetchTypesAndStatesForAreaPath,
+  onFetchTypesAndStatesForTags,
+  onFetchTypesAndAreaPathsForStates,
+  resetSignal
+}: FilterFormProps) {
+  const WORK_ITEM_TYPE_OPTIONS = WORK_ITEM_TYPES;
 
-  const selectedWorkItemTypes = watch('workItemTypes');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [featureCount, setFeatureCount] = useState<number | null>(null);
+  const [isFetchingCount, setIsFetchingCount] = useState(false);
+  const [isLoadingAreaPaths, setIsLoadingAreaPaths] = useState(false);
+  const [isLoadingTags, setIsLoadingTags] = useState(false);
+  const countTimeoutRef = useRef<number | null>(null);
+  const prevShowPreviewModalRef = useRef(false);
+  
+  // Flags to prevent cascading updates
+  const isUpdatingFromAreaPath = useRef(false);
+  const isUpdatingFromTags = useRef(false);
+  const isUpdatingFromStates = useRef(false);
+  
+  const defaultFilters = {
+    workItemTypes: [],
+    states: [],
+    areaPaths: [],
+    tags: [],
+    query: ''
+  };
+  
+  interface FilterFormData {
+    workItemTypes: string[];
+    states: string[];
+    areaPaths: string[];
+    tags: string[];
+    query: string;
+  }
+
+  const { register, handleSubmit, watch, control, setValue, reset } = useForm<FilterFormData>({
+    defaultValues: defaultFilters
+  });
+  
+  const clearFilters = useCallback(() => {
+    reset({ ...defaultFilters });
+    setShowAdvanced(false);
+    isUpdatingFromAreaPath.current = false;
+    isUpdatingFromTags.current = false;
+    isUpdatingFromStates.current = false;
+  }, [reset]);
 
   useEffect(() => {
-    if (onFetchStatesForType && selectedWorkItemTypes && selectedWorkItemTypes.length > 0) {
-      onFetchStatesForType(selectedWorkItemTypes[0]);
-    }
-  }, [selectedWorkItemTypes, onFetchStatesForType]);
+    clearFilters();
+  }, [resetSignal, clearFilters]);
 
-  const onSubmit = async (data: any) => {
+  const selectedWorkItemTypes = watch('workItemTypes');
+  const selectedStates = watch('states');
+  const selectedAreaPaths = watch('areaPaths');
+  const selectedTags = watch('tags');
+  const advancedQuery = watch('query');
+
+  // Build query from filters
+  const buildQueryFromFilters = useCallback((
+    workItemTypes: string[],
+    states: string[],
+    areaPaths: string[],
+    tags: string[],
+    query: string,
+    showAdvanced: boolean
+  ): string | undefined => {
     const queryParts: string[] = [];
     
-    if (data.workItemTypes && data.workItemTypes.length > 0) {
-      if (data.workItemTypes.length === 1) {
-        queryParts.push(`[System.WorkItemType] = '${data.workItemTypes[0]}'`);
+    if (workItemTypes && workItemTypes.length > 0) {
+      if (workItemTypes.length === 1) {
+        queryParts.push(`[System.WorkItemType] = '${workItemTypes[0]}'`);
       } else {
-        const typesList = data.workItemTypes.map((type: string) => `'${type}'`).join(', ');
+        const typesList = workItemTypes.map((type: string) => `'${type}'`).join(', ');
         queryParts.push(`[System.WorkItemType] IN (${typesList})`);
       }
     }
     
-    if (data.states && data.states.length > 0) {
-      if (data.states.length === 1) {
-        queryParts.push(`[System.State] = '${data.states[0]}'`);
+    if (states && states.length > 0) {
+      if (states.length === 1) {
+        queryParts.push(`[System.State] = '${states[0]}'`);
       } else {
-        const statesList = data.states.map((s: string) => `'${s}'`).join(', ');
+        const statesList = states.map((s: string) => `'${s}'`).join(', ');
         queryParts.push(`[System.State] IN (${statesList})`);
       }
     }
     
-    if (data.areaPaths && data.areaPaths.length > 0) {
-      if (data.areaPaths.length === 1) {
-        queryParts.push(`[System.AreaPath] UNDER '${data.areaPaths[0]}'`);
+    if (areaPaths && areaPaths.length > 0) {
+      if (areaPaths.length === 1) {
+        queryParts.push(`[System.AreaPath] UNDER '${areaPaths[0]}'`);
       } else {
-        const areaPathFilters = data.areaPaths.map((path: string) => `[System.AreaPath] UNDER '${path}'`);
+        const areaPathFilters = areaPaths.map((path: string) => `[System.AreaPath] UNDER '${path}'`);
         queryParts.push(`(${areaPathFilters.join(' OR ')})`);
       }
     }
     
-    if (data.tags && data.tags.length > 0) {
-      const tagFilters = data.tags.map((tag: string) => `[System.Tags] CONTAINS '${tag}'`);
+    if (tags && tags.length > 0) {
+      const tagFilters = tags.map((tag: string) => `[System.Tags] CONTAINS '${tag}'`);
       queryParts.push(`(${tagFilters.join(' OR ')})`);
     }
     
-    if (showAdvanced && data.query) {
-      queryParts.push(`(${data.query})`);
+    if (showAdvanced && query) {
+      queryParts.push(`(${query})`);
     }
     
-    const finalQuery = queryParts.length > 0 ? queryParts.join(' AND ') : undefined;
+    return queryParts.length > 0 ? queryParts.join(' AND ') : undefined;
+  }, []);
+
+  // Fetch states when work item type changes
+  useEffect(() => {
+    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current || isUpdatingFromStates.current) {
+      return;
+    }
+
+    if (!onFetchStatesForType) return;
+
+    if (!selectedWorkItemTypes || selectedWorkItemTypes.length === 0) {
+      onFetchStatesForType(undefined);
+      return;
+    }
+
+    onFetchStatesForType(selectedWorkItemTypes[0]);
+  }, [selectedWorkItemTypes, onFetchStatesForType]);
+
+  // Fetch area paths when work item type or states change
+  useEffect(() => {
+    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current) {
+      return;
+    }
+
+    if (!onFetchAreaPathsForTypeAndState) return;
+
+    const fetchAreaPaths = async () => {
+      setIsLoadingAreaPaths(true);
+      try {
+        await onFetchAreaPathsForTypeAndState(
+          selectedWorkItemTypes && selectedWorkItemTypes.length > 0 ? selectedWorkItemTypes[0] : undefined,
+          selectedStates || []
+        );
+      } finally {
+        setIsLoadingAreaPaths(false);
+      }
+    };
+
+    fetchAreaPaths();
+  }, [selectedWorkItemTypes, selectedStates, onFetchAreaPathsForTypeAndState]);
+
+  // Fetch tags when filters change
+  useEffect(() => {
+    if (isUpdatingFromTags.current) {
+      return;
+    }
+
+    if (!onFetchTagsForTypeStateAndAreaPath) return;
+
+    if (!selectedWorkItemTypes || selectedWorkItemTypes.length === 0) {
+      return;
+    }
+
+    const fetchTags = async () => {
+      setIsLoadingTags(true);
+      try {
+        await onFetchTagsForTypeStateAndAreaPath(
+          selectedWorkItemTypes[0],
+          selectedStates || [],
+          selectedAreaPaths || []
+        );
+      } finally {
+        setIsLoadingTags(false);
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      fetchTags();
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+      setIsLoadingTags(false);
+    };
+  }, [selectedWorkItemTypes, selectedStates, selectedAreaPaths, onFetchTagsForTypeStateAndAreaPath]);
+
+  // Auto-populate from Area Path
+  useEffect(() => {
+    if (!onFetchTypesAndStatesForAreaPath) return;
+    if (isUpdatingFromTags.current || isUpdatingFromStates.current) return;
+
+    if (!selectedAreaPaths || selectedAreaPaths.length === 0) {
+      return;
+    }
+
+    const hasManualType = selectedWorkItemTypes && selectedWorkItemTypes.length > 0;
+    const hasManualState = selectedStates && selectedStates.length > 0;
+
+    if (hasManualType && hasManualState) {
+      return;
+    }
+
+    isUpdatingFromAreaPath.current = true;
+
+    onFetchTypesAndStatesForAreaPath(selectedAreaPaths)
+      .then(({ types, states }) => {
+        if (types.length > 0 && !hasManualType) {
+          setValue('workItemTypes', types, { shouldDirty: false });
+        }
+        if (states.length > 0 && !hasManualState) {
+          setValue('states', states, { shouldDirty: false });
+        }
+      })
+      .finally(() => {
+        setTimeout(() => {
+          isUpdatingFromAreaPath.current = false;
+        }, 300);
+      });
+  }, [selectedAreaPaths, selectedWorkItemTypes, selectedStates, onFetchTypesAndStatesForAreaPath, setValue]);
+
+  // Auto-populate from Tags
+  useEffect(() => {
+    if (!onFetchTypesAndStatesForTags) return;
+    if (isUpdatingFromAreaPath.current || isUpdatingFromStates.current) return;
+
+    if (!selectedTags || selectedTags.length === 0) {
+      return;
+    }
+
+    isUpdatingFromTags.current = true;
+
+    onFetchTypesAndStatesForTags(selectedTags)
+      .then(({ types, states, areaPaths }) => {
+        if (types.length > 0) {
+          setValue('workItemTypes', types, { shouldDirty: false });
+        }
+        if (states.length > 0) {
+          setValue('states', states, { shouldDirty: false });
+        }
+        if (areaPaths.length > 0) {
+          setValue('areaPaths', areaPaths, { shouldDirty: false });
+        }
+      })
+      .finally(() => {
+        setTimeout(() => {
+          isUpdatingFromTags.current = false;
+        }, 300);
+      });
+  }, [selectedTags, onFetchTypesAndStatesForTags, setValue]);
+
+  // Auto-populate from States
+  useEffect(() => {
+    if (!onFetchTypesAndAreaPathsForStates) return;
+    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current) return;
+
+    if (!selectedStates || selectedStates.length === 0) {
+      return;
+    }
+
+    const hasType = selectedWorkItemTypes && selectedWorkItemTypes.length > 0;
+    if (hasType) {
+      return;
+    }
+
+    isUpdatingFromStates.current = true;
+
+    onFetchTypesAndAreaPathsForStates(selectedStates)
+      .then(({ types }) => {
+        if (types.length > 0) {
+          setValue('workItemTypes', types, { shouldDirty: false });
+        }
+      })
+      .finally(() => {
+        setTimeout(() => {
+          isUpdatingFromStates.current = false;
+        }, 300);
+      });
+  }, [selectedStates, selectedWorkItemTypes, onFetchTypesAndAreaPathsForStates, setValue]);
+
+  // Clear invalid options when available options change
+  useEffect(() => {
+    if (selectedStates && selectedStates.length > 0 && availableStates.length > 0) {
+      const validStates = selectedStates.filter(state => availableStates.includes(state));
+      if (validStates.length !== selectedStates.length) {
+        setValue('states', validStates);
+      }
+    }
+  }, [availableStates, selectedStates, setValue]);
+
+  useEffect(() => {
+    if (selectedAreaPaths && selectedAreaPaths.length > 0 && availableAreaPaths.length > 0) {
+      const validAreaPaths = selectedAreaPaths.filter(path => availableAreaPaths.includes(path));
+      if (validAreaPaths.length !== selectedAreaPaths.length) {
+        setValue('areaPaths', validAreaPaths);
+        if (validAreaPaths.length === 0) {
+          setValue('tags', []);
+        }
+      }
+    }
+  }, [availableAreaPaths, selectedAreaPaths, setValue]);
+
+  useEffect(() => {
+    if (selectedTags && selectedTags.length > 0 && availableTags.length > 0) {
+      const validTags = selectedTags.filter(tag => availableTags.includes(tag));
+      if (validTags.length !== selectedTags.length) {
+        setValue('tags', validTags);
+      }
+    }
+  }, [availableTags, selectedTags, setValue]);
+
+  // Fetch feature count
+  const fetchFeatureCount = useCallback(async () => {
+    if (!config.enabled || !config.accessToken || !selectedWorkItemTypes || selectedWorkItemTypes.length === 0) {
+      setFeatureCount(null);
+      return;
+    }
     
-    const updatedConfig = {
+    try {
+      setIsFetchingCount(true);
+      
+      const workItemType = selectedWorkItemTypes[0];
+      const query = buildQueryFromFilters(
+        selectedWorkItemTypes || [], 
+        selectedStates || [], 
+        selectedAreaPaths || [], 
+        selectedTags || [], 
+        advancedQuery || '',
+        showAdvanced
+      );
+      
+      let wiqlQuery = '';
+      if (query) {
+        wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE ${query}`;
+      } else {
+        wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = '${workItemType}' AND [System.State] = 'Active'`;
+      }
+      
+      const wiqlUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.0`;
+      
+      const wiqlResponse = await fetch(wiqlUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.accessToken}`
+        },
+        body: JSON.stringify({ query: wiqlQuery })
+      });
+      
+      if (!wiqlResponse.ok) {
+        throw new Error(`Azure DevOps query failed: ${wiqlResponse.status} ${wiqlResponse.statusText}`);
+      }
+      
+      const wiqlData = await wiqlResponse.json();
+      const count = wiqlData.workItems ? wiqlData.workItems.length : 0;
+      setFeatureCount(count);
+    } catch (error) {
+      console.error('[FilterForm] Error fetching feature count:', error);
+      setFeatureCount(null);
+    } finally {
+      setIsFetchingCount(false);
+    }
+  }, [config, selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, advancedQuery, showAdvanced, buildQueryFromFilters]);
+
+  // Debounced feature count fetch
+  useEffect(() => {
+    if (countTimeoutRef.current !== null) {
+      window.clearTimeout(countTimeoutRef.current);
+    }
+    
+    setFeatureCount(null);
+    
+    if (selectedWorkItemTypes && selectedWorkItemTypes.length > 0 && config.enabled && config.accessToken) {
+      countTimeoutRef.current = window.setTimeout(() => {
+        fetchFeatureCount();
+      }, 300);
+    }
+    
+    return () => {
+      if (countTimeoutRef.current !== null) {
+        window.clearTimeout(countTimeoutRef.current);
+      }
+    };
+  }, [selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, advancedQuery, showAdvanced, config.enabled, config.accessToken, fetchFeatureCount]);
+
+  // Sync with preview features
+  useEffect(() => {
+    if (showPreviewModal && !prevShowPreviewModalRef.current && previewFeatures) {
+      const count = previewFeatures.length;
+      setFeatureCount(count);
+    }
+    prevShowPreviewModalRef.current = showPreviewModal || false;
+  }, [showPreviewModal, previewFeatures]);
+
+  useEffect(() => {
+    if (previewFeatures && previewFeatures.length > 0 && !isFetchingCount) {
+      setFeatureCount(previewFeatures.length);
+    }
+  }, [previewFeatures, isFetchingCount]);
+
+  // Update config
+  useEffect(() => {
+    const finalQuery = buildQueryFromFilters(
+      selectedWorkItemTypes || [], 
+      selectedStates || [], 
+      selectedAreaPaths || [], 
+      selectedTags || [], 
+      advancedQuery || '',
+      showAdvanced
+    );
+    
+    const updatedConfig: AzureDevOpsConfig = {
       ...config,
-      workItemType: data.workItemTypes && data.workItemTypes.length > 0 ? data.workItemTypes[0] : 'Feature',
+      workItemType: selectedWorkItemTypes && selectedWorkItemTypes.length > 0 ? selectedWorkItemTypes[0] : config.workItemType || 'Feature',
       query: finalQuery,
-      states: data.states && data.states.length > 0 ? data.states : undefined,
-      areaPath: data.areaPaths && data.areaPaths.length > 0 ? data.areaPaths[0] : undefined,
-      tags: data.tags && data.tags.length > 0 ? data.tags : undefined
+      states: selectedStates && selectedStates.length > 0 ? selectedStates : undefined,
+      areaPath: selectedAreaPaths && selectedAreaPaths.length > 0 ? selectedAreaPaths[0] : undefined,
+      tags: selectedTags && selectedTags.length > 0 ? selectedTags : undefined
     };
     
-    onUpdateConfig(updatedConfig);
+    const configUpdateTimeout = window.setTimeout(() => {
+      onUpdateConfig(updatedConfig);
+    }, 100);
+    
+    return () => {
+      window.clearTimeout(configUpdateTimeout);
+    };
+  }, [selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, advancedQuery, showAdvanced, buildQueryFromFilters, onUpdateConfig]);
+
+  const onSubmit = async (_data: any) => {
     await onPreview();
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-medium text-[#2d4660] flex items-center">
+        <h3 className="text-lg font-medium text-[#2D4660] flex items-center">
           <Filter className="h-5 w-5 mr-2" />
           Filter Work Items
         </h3>
-        <button 
-          type="button" 
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-        >
-          {showAdvanced ? '← Hide Advanced WIQL' : 'Show Advanced WIQL →'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-xs text-[#576C71] hover:text-[#2D4660] font-medium border border-transparent hover:border-[#576C71] rounded-full px-2 py-0.5 transition"
+          >
+            Clear All Filters
+          </button>
+          <button 
+            type="button" 
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="text-xs text-[#1E5461] hover:text-[#2D4660] font-medium"
+          >
+            {showAdvanced ? '← Hide Advanced WIQL' : 'Show Advanced WIQL →'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-gray-700">Work Item Type</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white bg-[#2D4660]">
+              {WORK_ITEM_TYPE_OPTIONS.length}
+            </span>
+          </div>
           <Controller
             name="workItemTypes"
             control={control}
             render={({ field }) => (
               <MultiSelectDropdown
-                label="Work Item Type"
-                options={['Feature', 'User Story', 'Product Backlog Item', 'Epic', 'Issue']}
+                options={WORK_ITEM_TYPE_OPTIONS}
                 value={field.value}
                 onChange={field.onChange}
                 placeholder="Select types..."
@@ -415,64 +856,92 @@ function FilterForm({ config, onUpdateConfig, onPreview, isFetching, availableSt
           <p className="mt-1 text-xs text-gray-500">Click to select multiple types</p>
         </div>
 
-        {availableStates.length > 0 && (
-          <div>
-            <Controller
-              name="states"
-              control={control}
-              render={({ field }) => (
-                <MultiSelectDropdown
-                  label="State (Optional)"
-                  options={availableStates}
-                  value={field.value}
-                  onChange={field.onChange}
-                  placeholder="Select states..."
-                />
-              )}
-            />
-            <p className="mt-1 text-xs text-gray-500">Click to select multiple states</p>
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-gray-700">State (Optional)</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white bg-[#1E5461]">
+              {availableStates?.length || 0}
+            </span>
           </div>
-        )}
+          <Controller
+            name="states"
+            control={control}
+            render={({ field }) => (
+              <MultiSelectDropdown
+                options={availableStates}
+                value={field.value}
+                onChange={field.onChange}
+                placeholder="Select states..."
+                disabled={availableStates.length === 0}
+              />
+            )}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            {availableStates.length === 0 ? 'Loading states...' : 'Filtered by work item type'}
+          </p>
+        </div>
 
-        {availableAreaPaths.length > 0 && (
-          <div>
-            <Controller
-              name="areaPaths"
-              control={control}
-              render={({ field }) => (
-                <MultiSelectDropdown
-                  label="Area Path (Optional)"
-                  options={availableAreaPaths}
-                  value={field.value}
-                  onChange={field.onChange}
-                  placeholder="Select area paths..."
-                  searchable={true}
-                />
-              )}
-            />
-            <p className="mt-1 text-xs text-gray-500">Type to search and select paths</p>
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-gray-700">Area Path (Optional)</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white bg-[#576C71]">
+              {availableAreaPaths?.length || 0}
+            </span>
           </div>
-        )}
+          <Controller
+            name="areaPaths"
+            control={control}
+            render={({ field }) => (
+              <MultiSelectDropdown
+                options={availableAreaPaths}
+                value={field.value}
+                onChange={field.onChange}
+                placeholder="Select area paths..."
+                searchable={true}
+                disabled={availableAreaPaths.length === 0}
+              />
+            )}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            {isLoadingAreaPaths
+              ? 'Loading area paths...'
+              : availableAreaPaths.length === 0
+                ? 'No area paths found for current filters'
+                : 'Filtered by type & state'}
+          </p>
+        </div>
 
-        {availableTags.length > 0 && (
-          <div>
-            <Controller
-              name="tags"
-              control={control}
-              render={({ field }) => (
-                <MultiSelectDropdown
-                  label="Tags (Optional)"
-                  options={availableTags}
-                  value={field.value}
-                  onChange={field.onChange}
-                  placeholder="Select tags..."
-                  searchable={true}
-                />
-              )}
-            />
-            <p className="mt-1 text-xs text-gray-500">Type to search and select tags</p>
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-gray-700">Tags (Optional)</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white bg-[#C89212]">
+              {availableTags?.length || 0}
+            </span>
           </div>
-        )}
+          <Controller
+            name="tags"
+            control={control}
+            render={({ field }) => (
+              <MultiSelectDropdown
+                options={availableTags}
+                value={field.value}
+                onChange={field.onChange}
+                placeholder="Select tags..."
+                searchable={true}
+                disabled={availableTags.length === 0 && !isLoadingTags}
+              />
+            )}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            {!selectedWorkItemTypes || selectedWorkItemTypes.length === 0
+              ? 'Select work item type to see tags'
+              : isLoadingTags
+                ? 'Loading tags...'
+                : availableTags.length === 0
+                  ? 'No tags found for current filters'
+                  : 'Filtered by type, state & area'}
+          </p>
+        </div>
       </div>
 
       {showAdvanced && (
@@ -489,7 +958,7 @@ function FilterForm({ config, onUpdateConfig, onPreview, isFetching, availableSt
               href="https://learn.microsoft.com/en-us/azure/devops/boards/queries/wiql-syntax" 
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 hover:text-blue-800"
+              className="text-[#1E5461] hover:text-[#2D4660]"
             >
               WIQL syntax reference ↗
             </a>
@@ -498,9 +967,26 @@ function FilterForm({ config, onUpdateConfig, onPreview, isFetching, availableSt
       )}
 
       <div className="flex justify-end">
-        <Button variant="gold" type="submit" disabled={isFetching} className="flex items-center">
+        <Button 
+          variant="gold" 
+          type="submit" 
+          disabled={(() => {
+            const hasWorkItemTypes = (selectedWorkItemTypes?.length ?? 0) > 0;
+            const hasStates = (selectedStates?.length ?? 0) > 0;
+            const hasAreaPaths = (selectedAreaPaths?.length ?? 0) > 0;
+            const hasTags = (selectedTags?.length ?? 0) > 0;
+            const hasAdvancedQuery = advancedQuery && advancedQuery.trim().length > 0;
+            const hasAnyFilter = hasWorkItemTypes || hasStates || hasAreaPaths || hasTags || hasAdvancedQuery;
+            return isFetching || isFetchingCount || !hasAnyFilter;
+          })()} 
+          className="flex items-center"
+        >
           {isFetching && <RefreshCw className="animate-spin h-4 w-4 mr-2" />}
-          {isFetching ? 'Loading...' : 'Preview Features'}
+          {isFetching ? 'Loading...' : (
+            featureCount !== null && !isFetchingCount 
+              ? `Preview ${featureCount} Feature${featureCount !== 1 ? 's' : ''}`
+              : 'Preview Features'
+          )}
         </Button>
       </div>
     </form>
@@ -516,11 +1002,57 @@ interface SessionEditFormProps {
   featureCount: number;
   onSubmit: (data: any) => void;
   onCancel: () => void;
+  onRequestDeleteSession: () => void;
+  isDeletingSession: boolean;
+  productName: string;
+  products: Product[];
+  isLoadingProducts: boolean;
+  productError: string | null;
 }
 
-function SessionEditForm({ session, featureCount, onSubmit, onCancel }: SessionEditFormProps) {
-  const { register, handleSubmit, watch, formState: { errors } } = useForm({
+interface SessionEditFormValues {
+  productId: string;
+  title: string;
+  goal: string;
+  startDate: string;
+  endDate: string;
+  useAutoVotes: boolean;
+  votesPerUser: number;
+}
+
+function SessionEditForm({
+  session,
+  featureCount,
+  onSubmit,
+  onCancel,
+  onRequestDeleteSession,
+  isDeletingSession,
+  productName,
+  products,
+  isLoadingProducts,
+  productError
+}: SessionEditFormProps) {
+  const productLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((product) => {
+      if (product.id && product.name) {
+        map[product.id] = product.name;
+      }
+    });
+    return map;
+  }, [products]);
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    reset,
+    control,
+    setValue,
+    formState: { errors }
+  } = useForm<SessionEditFormValues>({
     defaultValues: {
+      productId: (session as any).productId ?? (session as any).product_id ?? '',
       title: session.title,
       goal: session.goal,
       startDate: session.startDate.split('T')[0],
@@ -530,6 +1062,37 @@ function SessionEditForm({ session, featureCount, onSubmit, onCancel }: SessionE
     }
   });
 
+  useEffect(() => {
+    reset({
+      productId: (session as any).productId ?? (session as any).product_id ?? '',
+      title: session.title,
+      goal: session.goal,
+      startDate: session.startDate.split('T')[0],
+      endDate: session.endDate.split('T')[0],
+      useAutoVotes: session.useAutoVotes || false,
+      votesPerUser: session.votesPerUser
+    });
+  }, [session, reset]);
+
+  const initialProductName =
+    (session as any).productName ?? (session as any).product_name ?? productName ?? '';
+  const initialProductId =
+    (session as any).productId ?? (session as any).product_id ?? '';
+
+  useEffect(() => {
+    if (!products.length) return;
+    if (initialProductId) return;
+    if (!initialProductName) return;
+
+    const matchedProduct = products.find(
+      (product) => product.name.toLowerCase() === initialProductName.toLowerCase()
+    );
+
+    if (matchedProduct) {
+      setValue('productId', matchedProduct.id, { shouldDirty: false, shouldTouch: false });
+    }
+  }, [products, initialProductId, initialProductName, setValue]);
+
   const useAutoVotes = watch('useAutoVotes');
   const effectiveVotesPerUser = useAutoVotes 
     ? Math.max(1, Math.floor(featureCount / 2))
@@ -537,6 +1100,39 @@ function SessionEditForm({ session, featureCount, onSubmit, onCancel }: SessionE
 
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
+      <Controller
+        control={control}
+        name="productId"
+        render={({ field }) => {
+          const selectedProduct =
+            products.find((product) => product.id === field.value) ?? null;
+
+          const lookupName = field.value ? productLookup[field.value] ?? null : null;
+          const fallbackProductName = !selectedProduct
+            ? lookupName ?? (initialProductName ? initialProductName : null)
+            : null;
+
+          return (
+            <div className="mb-4">
+              <ProductPicker
+                products={products}
+                value={field.value}
+                onChange={field.onChange}
+                fallbackName={fallbackProductName}
+                isLoading={isLoadingProducts}
+                error={productError}
+                disabled={isLoadingProducts || products.length === 0}
+                helperText={
+                  !isLoadingProducts && products.length === 0 && !productError
+                    ? 'No products found yet. Create products from the session creation modal.'
+                    : undefined
+                }
+              />
+            </div>
+          );
+        }}
+      />
+
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-1">Session Title</label>
         <input
@@ -578,12 +1174,12 @@ function SessionEditForm({ session, featureCount, onSubmit, onCancel }: SessionE
         </div>
       </div>
 
-      <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+      <div className="mb-4 bg-[#1E5461]/5 border border-[#1E5461]/20 rounded-lg p-4">
         <div className="flex items-start">
           <input
             type="checkbox"
             {...register('useAutoVotes')}
-            className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
+            className="mt-1 h-4 w-4 text-[#399E5A] border-gray-300 rounded accent-[#399E5A]"
           />
           <div className="ml-3">
             <label className="text-sm font-medium text-gray-700">
@@ -612,13 +1208,26 @@ function SessionEditForm({ session, featureCount, onSubmit, onCancel }: SessionE
         )}
       </div>
 
-      <div className="flex justify-end space-x-2 mt-6">
-        <Button variant="secondary" type="button" onClick={onCancel}>
-          Cancel
+      <div className="mt-6 flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <Button
+          variant="danger"
+          type="button"
+          onClick={() => onRequestDeleteSession()}
+          disabled={isDeletingSession}
+          className="flex items-center gap-2"
+        >
+          <Trash2 className="h-4 w-4" />
+          {isDeletingSession ? 'Deleting...' : 'Delete Session'}
         </Button>
-        <Button variant="primary" type="submit">
-          Save Changes
-        </Button>
+
+        <div className="flex w-full justify-end gap-2 sm:w-auto">
+          <Button variant="secondary" type="button" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit">
+            Save Changes
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -634,17 +1243,17 @@ export function AdminDashboard({
   onUpdateFeature, 
   onDeleteFeature,
   onShowResults,
+  onRequestDeleteSession,
+  isDeletingSession,
   showAddForm,
   setShowAddForm,
   editingFeature,
   setEditingFeature,
   onLogout,
+  onShowVoterView,
   votingSession,
   azureDevOpsConfig,
   onUpdateAzureDevOpsConfig,
-  showAzureDevOpsForm,
-  setShowAzureDevOpsForm,
-  onFetchAzureDevOpsFeatures,
   onPreviewAzureDevOpsFeatures,
   onDisconnectAzureDevOps,
   isFetchingAzureDevOps,
@@ -657,18 +1266,164 @@ export function AdminDashboard({
   showPreviewModal,
   setShowPreviewModal,
   onConfirmSync,
-  hasImportedFeatures,
-  setHasImportedFeatures,
-  onShowVoterView,
   onUpdateVotingSession,
-  onFetchStatesForType
+  onFetchStatesForType,
+  onFetchAreaPathsForTypeAndState,
+  onFetchTagsForTypeStateAndAreaPath,
+  onFetchTypesAndStatesForAreaPath,
+  onFetchTypesAndStatesForTags,
+  onFetchTypesAndAreaPathsForStates,
+  suggestedFeatures,
+  otherSessions,
+  onPromoteSuggestion,
+  onMoveSuggestion,
+  onEditSuggestion,
+  onDeleteSuggestion,
+  adminPerspective = 'session',
+  projectOptions
 }: AdminDashboardProps) {
   const navigate = useNavigate();
-  const { currentUser } = useSession();
+  const { currentUser, currentSession } = useSession();
+  
+  const [selectedProject, setSelectedProject] = useState(() => {
+    if (azureDevOpsConfig.project) return azureDevOpsConfig.project;
+    return projectOptions[0] ?? '';
+  });
+  const [filtersResetToken, setFiltersResetToken] = useState(0);
+  
+  useEffect(() => {
+    if (azureDevOpsConfig.project) {
+      setSelectedProject(azureDevOpsConfig.project);
+    } else if (projectOptions.length > 0) {
+      setSelectedProject(projectOptions[0]);
+    } else {
+      setSelectedProject('');
+    }
+  }, [azureDevOpsConfig.project, projectOptions]);
   
   // State declarations
   const [showSessionEditForm, setShowSessionEditForm] = useState(false);
   const [showEndEarlyModal, setShowEndEarlyModal] = useState(false);
+  const [showReopenModal, setShowReopenModal] = useState(false);
+  const [suggestionToPromote, setSuggestionToPromote] = useState<FeatureSuggestion | null>(null);
+  const [isPromotingSuggestion, setIsPromotingSuggestion] = useState(false);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
+  const [suggestionToMove, setSuggestionToMove] = useState<FeatureSuggestion | null>(null);
+  const [targetSessionId, setTargetSessionId] = useState<string>('');
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [isMovingSuggestion, setIsMovingSuggestion] = useState(false);
+  const [suggestionToEdit, setSuggestionToEdit] = useState<FeatureSuggestion | null>(null);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    summary: '',
+    whatWouldItDo: '',
+    howWouldItWork: ''
+  });
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isSavingSuggestion, setIsSavingSuggestion] = useState(false);
+  const [suggestionToDelete, setSuggestionToDelete] = useState<FeatureSuggestion | null>(null);
+  const [isDeletingSuggestion, setIsDeletingSuggestion] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [statusNotes, setStatusNotes] = useState<SessionStatusNote[]>([]);
+  const [showAllStatusNotes, setShowAllStatusNotes] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
+  const productLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((product) => {
+      if (product.id && product.name) {
+        map[product.id] = product.name;
+      }
+    });
+    return map;
+  }, [products]);
+  const productColorLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((product) => {
+      if (product.id && product.color_hex) {
+        map[product.id] = product.color_hex;
+      }
+    });
+    return map;
+  }, [products]);
+  const productName = useMemo(
+    () =>
+      getDisplayProductName(
+        {
+          ...votingSession,
+          product_id:
+            (votingSession as any).product_id ??
+            (currentSession as any)?.product_id ??
+            (votingSession as any).productId ??
+            null,
+          product_name:
+            (votingSession as any).product_name ??
+            (currentSession as any)?.product_name ??
+            (votingSession as any).productName ??
+            null
+        },
+        productLookup
+      ),
+    [votingSession, currentSession, productLookup]
+  );
+  const productColorHex = useMemo(() => {
+    const productId =
+      (votingSession as any).product_id ?? (votingSession as any).productId ?? null;
+    if (!productId) return null;
+    return productColorLookup[productId] ?? null;
+  }, [votingSession, productColorLookup]);
+  const productColors = useMemo(
+    () => getProductColor(productName, productColorHex),
+    [productName, productColorHex]
+  );
+
+  useEffect(() => {
+    const loadProducts = async () => {
+      const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId ?? null;
+      if (!tenantId) {
+        setProducts([]);
+        setProductError(null);
+        return;
+      }
+
+      setIsLoadingProducts(true);
+      setProductError(null);
+      try {
+        const results = await db.getProductsForTenant(tenantId);
+        setProducts(results);
+      } catch (error) {
+        console.error('Error loading products for admin dashboard:', error);
+        if (db.isProductsTableMissingError?.(error)) {
+          setProductError('Products are not configured yet. Please create the `products` table in Supabase.');
+        } else {
+          setProductError('Unable to load products. Please try again.');
+        }
+        setProducts([]);
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+
+    loadProducts();
+  }, [currentUser?.tenant_id, currentUser?.tenantId]);
+  
+  const handleProjectChange = useCallback((project: string) => {
+    const normalizedProject = project?.trim();
+    if (!normalizedProject) {
+      return;
+    }
+
+    setSelectedProject(normalizedProject);
+    if (normalizedProject !== (azureDevOpsConfig.project || '')) {
+      const updatedConfig: AzureDevOpsConfig = {
+        ...azureDevOpsConfig,
+        project: normalizedProject
+      };
+      onUpdateAzureDevOpsConfig(updatedConfig);
+    }
+    setFiltersResetToken((prev) => prev + 1);
+  }, [azureDevOpsConfig, onUpdateAzureDevOpsConfig]);
   
   // Form hooks for End Early modal
   const { register: registerEndEarly, handleSubmit: handleSubmitEndEarly, reset: resetEndEarly } = useForm({
@@ -677,9 +1432,19 @@ export function AdminDashboard({
       details: ''
     }
   });
-  
-  const daysRemaining = getDaysRemaining(votingSession.endDate);
-  const deadlineColor = getDeadlineColor(daysRemaining);
+
+  const {
+    control: reopenControl,
+    handleSubmit: handleSubmitReopen,
+    reset: resetReopen,
+    register: registerReopen,
+    formState: { errors: reopenErrors }
+  } = useForm({
+    defaultValues: {
+      reason: '',
+      details: ''
+    }
+  });
   
   const votingStatus = votingSession.isActive 
     ? <span className="text-[#1E5461] font-medium">Active</span>
@@ -687,15 +1452,169 @@ export function AdminDashboard({
       ? <span className="text-[#591D0F] font-medium">Closed</span>
       : <span className="text-[#C89212] font-medium">Upcoming</span>;
 
+  const statusNotesDisplay = useMemo(() => {
+    const buildUiNote = (note: SessionStatusNote) => {
+      const isReopen = note.type === 'reopen';
+      const createdAt = note.createdAt || null;
+      const actorName = note.actorName || 'Admin';
+      const dateLabel = createdAt ? ` ${formatDate(createdAt)}` : '';
+
+      return {
+        id: note.id,
+        type: note.type,
+        reason: note.reason,
+        details: note.details ?? null,
+        title: isReopen 
+          ? `Reopened${dateLabel} by ${actorName}`
+          : `Ended early${dateLabel} by ${actorName}`,
+        description: `${note.reason}${note.details ? ': ' + note.details : ''}`,
+        iconBgClass: isReopen ? 'bg-[#1E5461]/10' : 'bg-[#C89212]/10',
+        iconBorderClass: isReopen ? 'border-[#1E5461]/20' : 'border-[#C89212]/20',
+        iconColorClass: isReopen ? 'text-[#1E5461]' : 'text-[#C89212]',
+        textColorClass: isReopen ? 'text-[#1E5461]' : 'text-[#6A4234]'
+      };
+    };
+
+    if (statusNotes.length > 0) {
+      return statusNotes.map((note) => buildUiNote(note));
+    }
+
+    const fallbackNotes: SessionStatusNote[] = [];
+
+    if (votingSession.reopenReason) {
+      fallbackNotes.push({
+        id: 'fallback-reopen',
+        sessionId: currentSession?.id || '',
+        type: 'reopen',
+        reason: votingSession.reopenReason,
+        details: votingSession.reopenDetails ?? null,
+        actorName: votingSession.reopenedBy || 'Admin',
+        actorId: null,
+        createdAt: votingSession.reopenedAt || votingSession.endDate
+      });
+    }
+
+    if (votingSession.endedEarlyReason) {
+      fallbackNotes.push({
+        id: 'fallback-ended-early',
+        sessionId: currentSession?.id || '',
+        type: 'ended-early',
+        reason: votingSession.endedEarlyReason,
+        details: votingSession.endedEarlyDetails ?? null,
+        actorName: votingSession.endedEarlyBy || 'Admin',
+        actorId: null,
+        createdAt: votingSession.originalEndDate || votingSession.endDate
+      });
+    }
+
+    return fallbackNotes.map((note) => buildUiNote(note));
+  }, [
+    statusNotes,
+    votingSession.reopenReason,
+    votingSession.reopenDetails,
+    votingSession.reopenedAt,
+    votingSession.reopenedBy,
+    votingSession.endedEarlyReason,
+    votingSession.endedEarlyDetails,
+    votingSession.originalEndDate,
+    votingSession.endDate,
+    votingSession.endedEarlyBy,
+    currentSession?.id
+  ]);
+
+  useEffect(() => {
+    if (statusNotesDisplay.length <= 2) {
+      setShowAllStatusNotes(false);
+    }
+  }, [statusNotesDisplay.length]);
+
+  const loadStatusNotes = useCallback(async () => {
+    if (!currentSession?.id) {
+      setStatusNotes([]);
+      return;
+    }
+
+    try {
+      const notes = await db.getSessionStatusNotes(currentSession.id);
+      setStatusNotes(notes);
+    } catch (error) {
+      console.error('Error loading session status notes:', error);
+    }
+  }, [currentSession?.id]);
+
+  useEffect(() => {
+    loadStatusNotes();
+  }, [loadStatusNotes]);
+
+  const logStatusNote = useCallback(async (note: {
+    type: 'reopen' | 'ended-early';
+    reason: string;
+    details?: string | null;
+    actorName?: string | null;
+    actorId?: string | null;
+  }) => {
+    if (!currentSession?.id) {
+      return;
+    }
+
+    try {
+      const created = await db.addSessionStatusNote({
+        session_id: currentSession.id,
+        type: note.type,
+        reason: note.reason,
+        details: note.details ?? null,
+        actor_id: note.actorId ?? null,
+        actor_name: note.actorName || 'Admin'
+      });
+
+      setStatusNotes((prev) => {
+        const existingIndex = prev.findIndex((entry) => entry.id === created.id);
+        if (existingIndex !== -1) {
+          const updated = [...prev];
+          updated[existingIndex] = created;
+          return updated;
+        }
+        return [created, ...prev];
+      });
+    } catch (error) {
+      console.error('Error logging session status note:', error);
+    }
+  }, [currentSession?.id]);
+
+  useEffect(() => {
+    if (suggestionToEdit) {
+      setEditForm({
+        title: suggestionToEdit.title,
+        summary: suggestionToEdit.summary ?? '',
+        whatWouldItDo: suggestionToEdit.whatWouldItDo ?? '',
+        howWouldItWork: suggestionToEdit.howWouldItWork ?? ''
+      });
+      setEditError(null);
+    }
+  }, [suggestionToEdit]);
+
+  useEffect(() => {
+    if (suggestionToMove && otherSessions.length > 0) {
+      setTargetSessionId(otherSessions[0].id);
+    } else {
+      setTargetSessionId('');
+    }
+    setMoveError(null);
+  }, [suggestionToMove, otherSessions]);
+
   const handleSessionUpdate = (data: any) => {
+    const selectedProduct = products.find(product => product.id === data.productId) || null;
     const updatedSession: VotingSession = {
+      ...votingSession,
       title: data.title,
       goal: data.goal,
       votesPerUser: data.useAutoVotes ? Math.max(1, Math.floor(features.length / 2)) : Number(data.votesPerUser),
       useAutoVotes: data.useAutoVotes,
       startDate: new Date(data.startDate).toISOString(),
       endDate: new Date(data.endDate + 'T23:59:59').toISOString(),
-      isActive: votingSession.isActive
+      isActive: votingSession.isActive,
+      product_id: selectedProduct?.id ?? null,
+      product_name: selectedProduct?.name ?? null
     };
     
     onUpdateVotingSession(updatedSession);
@@ -711,29 +1630,53 @@ export function AdminDashboard({
       isActive: false,
       endedEarlyBy: currentUser?.name || 'Admin',
       endedEarlyReason: data.reason,
-      endedEarlyDetails: data.details || undefined
+      endedEarlyDetails: data.details?.trim() ? data.details.trim() : null,
+      reopenReason: null,
+      reopenDetails: null,
+      reopenedBy: null,
+      reopenedAt: null
     };
     onUpdateVotingSession(updatedSession);
+    void logStatusNote({
+      type: 'ended-early',
+      reason: data.reason,
+      details: data.details?.trim() ? data.details.trim() : null,
+      actorName: currentUser?.name || 'Admin',
+      actorId: currentUser?.id ?? null
+    });
     setShowEndEarlyModal(false);
     resetEndEarly();
   };
 
-  const handleReopenSession = () => {
+  const handleSubmitReopenSession = (data: { reason: string; details?: string }) => {
     const newEndDate = new Date();
     newEndDate.setDate(newEndDate.getDate() + 7);
     const updatedSession = {
       ...votingSession,
       endDate: newEndDate.toISOString(),
       isActive: true,
-      originalEndDate: undefined,
-      endedEarlyBy: undefined,
-      endedEarlyReason: undefined,
-      endedEarlyDetails: undefined
+      originalEndDate: null,
+      endedEarlyBy: null,
+      endedEarlyReason: null,
+      endedEarlyDetails: null,
+      reopenReason: data.reason,
+      reopenDetails: data.details?.trim() ? data.details.trim() : null,
+      reopenedBy: currentUser?.name || 'Admin',
+      reopenedAt: new Date().toISOString()
     };
     onUpdateVotingSession(updatedSession);
+    void logStatusNote({
+      type: 'reopen',
+      reason: data.reason,
+      details: data.details?.trim() ? data.details.trim() : null,
+      actorName: currentUser?.name || 'Admin',
+      actorId: currentUser?.id ?? null
+    });
+    setShowReopenModal(false);
+    resetReopen();
   };
 
-  const handleConnect = (org: string, project: string) => {
+  const handleConnect = async (org: string, project: string) => {
     const updatedConfig = {
       ...azureDevOpsConfig,
       organization: org,
@@ -742,6 +1685,93 @@ export function AdminDashboard({
     onUpdateAzureDevOpsConfig(updatedConfig);
     onInitiateOAuth();
   };
+
+  const openEditSuggestion = (suggestion: FeatureSuggestion) => {
+    setSuggestionToEdit(suggestion);
+  };
+
+  const handleSaveSuggestionEdit = async () => {
+    if (!suggestionToEdit) return;
+    const trimmedTitle = editForm.title.trim();
+    if (!trimmedTitle) {
+      setEditError('Title is required.');
+      return;
+    }
+
+    setIsSavingSuggestion(true);
+    setEditError(null);
+    try {
+      await onEditSuggestion(suggestionToEdit.id, {
+        title: trimmedTitle,
+        summary: editForm.summary.trim() ? editForm.summary.trim() : null,
+        whatWouldItDo: editForm.whatWouldItDo.trim() ? editForm.whatWouldItDo.trim() : null,
+        howWouldItWork: editForm.howWouldItWork.trim() ? editForm.howWouldItWork.trim() : null
+      });
+      setSuggestionToEdit(null);
+    } catch (error) {
+      console.error('Error updating suggestion:', error);
+      setEditError('Failed to update the suggestion. Please try again.');
+    } finally {
+      setIsSavingSuggestion(false);
+    }
+  };
+
+  const handleConfirmMoveSuggestion = async () => {
+    if (!suggestionToMove) return;
+    if (!targetSessionId) {
+      setMoveError('Please select a session.');
+      return;
+    }
+
+    setIsMovingSuggestion(true);
+    setMoveError(null);
+    try {
+      await onMoveSuggestion(suggestionToMove.id, targetSessionId);
+      setSuggestionToMove(null);
+    } catch (error) {
+      console.error('Error moving suggestion:', error);
+      setMoveError('Failed to move the suggestion. Please try again.');
+    } finally {
+      setIsMovingSuggestion(false);
+    }
+  };
+
+  const handleConfirmPromoteSuggestion = async () => {
+    if (!suggestionToPromote) return;
+
+    setIsPromotingSuggestion(true);
+    setPromoteError(null);
+    try {
+      await onPromoteSuggestion(suggestionToPromote.id);
+      setSuggestionToPromote(null);
+    } catch (error) {
+      console.error('Error promoting suggestion:', error);
+      setPromoteError('Failed to move the suggestion into the current session.');
+    } finally {
+      setIsPromotingSuggestion(false);
+    }
+  };
+
+  const handleConfirmDeleteSuggestion = async () => {
+    if (!suggestionToDelete) return;
+
+    setIsDeletingSuggestion(true);
+    setDeleteError(null);
+    try {
+      await onDeleteSuggestion(suggestionToDelete.id);
+      setSuggestionToDelete(null);
+    } catch (error) {
+      console.error('Error deleting suggestion:', error);
+      setDeleteError('Failed to delete the suggestion. Please try again.');
+    } finally {
+      setIsDeletingSuggestion(false);
+    }
+  };
+
+  const handleDeleteSessionRequest = useCallback(() => {
+    setShowSessionEditForm(false);
+    onRequestDeleteSession();
+  }, [onRequestDeleteSession]);
 
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
@@ -764,30 +1794,40 @@ export function AdminDashboard({
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}
           />
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Admin Dashboard</h1>
+          <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">Admin Dashboard</h1>
         </div>
         
         <div className="flex space-x-2">
           <button 
             onClick={onShowVoterView} 
-            className="flex items-center px-4 py-2 bg-[#5A7C8C] text-white rounded-lg hover:bg-[#4A6C7C] transition-colors"
+            className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
           >
             <Vote className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Voter View</span>
+            <span className="hidden md:inline">Vote!</span>
           </button>
           <button 
-            onClick={() => navigate('/users?filter=stakeholder')} 
-            className="flex items-center px-4 py-2 bg-[#2d4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
+            onClick={() => navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder')} 
+            className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
+          >
+            {adminPerspective === 'system' ? (
+              <Shield className="mr-2 h-4 w-4" />
+            ) : (
+              <Users className="mr-2 h-4 w-4" />
+            )}
+            <span className="hidden md:inline">
+              {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
+            </span>
+            <span className="md:hidden">
+              {adminPerspective === 'system' ? 'Users' : 'Stakeholders'}
+            </span>
+          </button>
+          <button 
+            onClick={() => navigate('/sessions')} 
+            className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
           >
             <Users className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Stakeholders</span>
-          </button>
-          <button 
-            onClick={() => navigate('/users?filter=session-admin')} 
-            className="flex items-center px-4 py-2 bg-[#2d4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
-          >
-            <Shield className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Session Admins</span>
+            <span className="hidden md:inline">All Sessions</span>
+            <span className="md:hidden">Sessions</span>
           </button>
           <button 
             onClick={onLogout} 
@@ -800,9 +1840,22 @@ export function AdminDashboard({
       </div>
       
       {/* Session Info (with Edit button) */}
-      <div className="relative z-10 bg-white rounded-lg shadow-md p-4 mb-6">
+      <div className="relative bg-white rounded-lg shadow-md p-4 mb-6">
+        <div
+          className="absolute -top-4 left-6 px-4 py-1 rounded-t-xl rounded-b-none text-sm font-semibold shadow"
+          style={{
+            backgroundColor: productColors.background,
+            color: productColors.text,
+            border: `1px solid ${productColors.border}`
+          }}
+        >
+          {productName}
+        </div>
+        <div className="pt-4">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-[#2d4660]">Current Session</h2>
+          <h2 className="text-xl font-semibold text-[#2D4660]">
+            Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
+          </h2>
           <div className="flex space-x-2">
             <Button 
               variant="gold"
@@ -822,18 +1875,20 @@ export function AdminDashboard({
             </Button>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          <div>
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Session Title</h3>
-            <p className="text-[#2d4660] font-medium">{votingSession.title}</p>
-          </div>
+        {isLoadingProducts && (
+          <p className="text-xs text-gray-500 mb-4">Loading products…</p>
+        )}
+        {productError && (
+          <p className="text-xs text-[#591D0F] mb-4">{productError}</p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-1">Voting Period</h3>
-            <p className={`text-[#2d4660] font-medium ${votingSession.originalEndDate ? 'line-through text-gray-400' : ''}`}>
+            <p className={`text-[#2D4660] font-medium ${votingSession.originalEndDate ? 'line-through text-gray-400' : ''}`}>
               {formatDate(votingSession.startDate)} - {formatDate(votingSession.originalEndDate || votingSession.endDate)}
             </p>
             {votingSession.originalEndDate && votingSession.endedEarlyBy && (
-              <div className="flex items-center mt-1 text-xs text-red-600">
+              <div className="flex items-center mt-1 text-xs text-[#591D0F]">
                 <span>Ended Early by {votingSession.endedEarlyBy}</span>
                 {votingSession.endedEarlyReason && (
                   <div className="group relative ml-1">
@@ -852,7 +1907,7 @@ export function AdminDashboard({
           </div>
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-1">Votes Per User</h3>
-            <p className="text-[#2d4660] font-medium">
+            <p className="text-[#2D4660] font-medium">
               {votingSession.useAutoVotes 
                 ? `${Math.max(1, Math.floor(features.length / 2))} (Auto: ${features.length} features ÷ 2)`
                 : votingSession.votesPerUser
@@ -873,7 +1928,8 @@ export function AdminDashboard({
                     if (votingSession.isActive) {
                       setShowEndEarlyModal(true);
                     } else {
-                      handleReopenSession();
+                      resetReopen();
+                      setShowReopenModal(true);
                     }
                   }}
                   className="text-xs px-2 py-1 ml-2"
@@ -885,72 +1941,181 @@ export function AdminDashboard({
           </div>
         </div>
         <div className="pt-3 border-t border-gray-200">
-          <h3 className="text-sm font-medium text-gray-700 mb-1">Goal</h3>
-          <p className="text-[#2d4660]">{votingSession.goal}</p>
+          <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
+            <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
+            <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
+            <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
+            <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
+
+            <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+              <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
+                <div className="relative">
+                  <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
+                    <Trophy className="h-8 w-8 md:h-10 md:w-10" />
+                  </div>
+                  <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
+                  <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
+                  <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
+                    {votingSession.goal}
+                  </h3>
+                </div>
+              </div>
+
+              <div className="md:w-80 lg:w-96 rounded-xl border border-white/70 bg-white/80 backdrop-blur-sm shadow-inner p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-[#2D4660]">Status Notes</h3>
+                  {statusNotesDisplay.length > 2 && (
+                    <span className="inline-flex items-center justify-between text-xs text-[#1E5461] w-[90px]">
+                      <span className="flex items-center justify-center w-4 h-4 border border-current rounded">
+                        {showAllStatusNotes ? (
+                          <Minus className="h-2.5 w-2.5" />
+                        ) : (
+                          <Plus className="h-2.5 w-2.5" />
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAllStatusNotes((prev) => !prev)}
+                        className="ml-1 hover:text-[#173B65] transition-colors text-left flex-1"
+                      >
+                        {showAllStatusNotes ? 'Show Less' : 'Show More'}
+                      </button>
+                    </span>
+                  )}
+                </div>
+
+                {statusNotesDisplay.length > 0 ? (
+                  <>
+                    <div className="space-y-3">
+                      {statusNotesDisplay
+                        .slice(0, showAllStatusNotes ? statusNotesDisplay.length : 2)
+                        .map((note) => {
+                          const IconComponent = note.type === 'reopen' ? RefreshCw : AlertCircle;
+                          return (
+                            <div
+                              key={note.id}
+                              className={`flex items-start gap-3 text-sm ${note.textColorClass}`}
+                            >
+                              <div
+                                className={`mt-0.5 flex items-center justify-center w-8 h-8 ${note.iconBgClass} ${note.iconBorderClass} border rounded-lg`}
+                              >
+                                <IconComponent className={`h-3.5 w-3.5 ${note.iconColorClass}`} />
+                              </div>
+                              <div>
+                                <p className="font-semibold text-gray-800">{note.title}</p>
+                                <p className="text-xs text-gray-600 leading-relaxed">{note.description}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    {statusNotesDisplay.length > 2 && !showAllStatusNotes && (
+                      <p className="text-xs text-gray-500 mt-3">Showing newest notes. Select "Show More" to view all updates.</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">No status updates yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
         </div>
       </div>
 
       {/* Azure DevOps Integration */}
-      <div className="relative z-10 bg-white rounded-lg shadow-md p-4 mb-6">
+      <div className="relative bg-white rounded-lg shadow-md p-4 mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center">
-            <Cloud className="h-5 w-5 text-[#2d4660] mr-2" />
-            <h2 className="text-xl font-semibold text-[#2d4660]">Azure DevOps Integration</h2>
+            <img
+              src={AZURE_DEVOPS_ICON}
+              alt="Azure DevOps logo"
+              className="h-5 w-5 mr-2"
+            />
+            <h2 className="text-xl font-semibold text-[#2D4660]">Azure DevOps Integration</h2>
           </div>
         </div>
 
         {!azureDevOpsConfig.enabled ? (
-          showAzureDevOpsForm ? (
-            <ConnectionForm
-              config={azureDevOpsConfig}
-              onConnect={handleConnect}
-              onCancel={() => setShowAzureDevOpsForm(false)}
-              isFetching={isFetchingAzureDevOps}
-              error={azureFetchError}
+          <div className="bg-gray-50 rounded-lg p-6 text-center border border-dashed border-gray-300">
+            <img
+              src={AZURE_DEVOPS_ICON}
+              alt="Azure DevOps logo"
+              className="h-10 w-10 mx-auto mb-3 opacity-80"
             />
-          ) : (
-            <div className="bg-gray-50 rounded-lg p-6 text-center border border-dashed border-gray-300">
-              <Cloud className="h-10 w-10 text-gray-400 mx-auto mb-3" />
-              <h3 className="text-lg font-medium text-gray-700 mb-2">Not Connected</h3>
-              <p className="text-gray-600 mb-4">
-                Connect to Azure DevOps to import work items as features for voting.
+            <h3 className="text-lg font-medium text-gray-700 mb-2">Not Connected</h3>
+            <p className="text-gray-600 mb-4">
+              Connect to Azure DevOps to import work items as features for voting.
+            </p>
+            <Button 
+              variant="primary"
+              onClick={() => handleConnect('newmill', selectedProject || projectOptions[0] || 'Product')}
+              className="inline-flex items-center"
+              disabled={isFetchingAzureDevOps}
+            >
+              {isFetchingAzureDevOps ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Settings className="h-4 w-4 mr-2" />
+                  Connect to Azure DevOps
+                </>
+              )}
+            </Button>
+            {azureFetchError && (
+              <p className="mt-3 text-sm text-[#591D0F]">
+                {azureFetchError}
               </p>
-              <Button 
-                variant="primary"
-                onClick={() => setShowAzureDevOpsForm(true)}
-                className="inline-flex items-center"
-              >
-                <Settings className="h-4 w-4 mr-2" />
-                Connect to Azure DevOps
-              </Button>
-            </div>
-          )
+            )}
+          </div>
         ) : (
           <div className="space-y-4">
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4">
                   <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
-                  <div>
-                    <p className="text-sm font-medium text-green-900">
-                      Connected to Azure DevOps
-                    </p>
-                    <p className="text-sm text-green-700 mt-1">
-                      <span className="font-medium">Organization:</span> {azureDevOpsConfig.organization} 
-                      <span className="mx-2">•</span>
-                      <span className="font-medium">Project:</span> {azureDevOpsConfig.project}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-x-2 text-sm text-green-700">
+                      <span className="font-medium text-green-900">Connected to Azure DevOps</span>
+                      <span className="hidden sm:inline mx-1 text-green-500">•</span>
+                      <span>
+                        <span className="font-medium">Organization:</span> {azureDevOpsConfig.organization}
+                      </span>
+                      <span className="hidden sm:inline mx-1 text-green-500">•</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Project:</span>
+                        <div className="min-w-[150px]">
+                          <SingleSelectDropdown
+                            options={projectOptions}
+                            value={selectedProject}
+                            onChange={handleProjectChange}
+                            variant="green"
+                          />
+                        </div>
+                      </div>
                       {azureDevOpsConfig.lastSyncTime && (
                         <>
-                          <span className="mx-2">•</span>
-                          <span className="font-medium">Last Sync:</span> {formatDate(azureDevOpsConfig.lastSyncTime)}
+                          <span className="hidden sm:inline mx-1 text-green-500">•</span>
+                          <span>
+                            <span className="font-medium">Last Sync:</span> {formatDate(azureDevOpsConfig.lastSyncTime)}
+                          </span>
                         </>
                       )}
-                    </p>
+                    </div>
+                    <span className="text-xs text-green-700">
+                      Switching projects will clear the filters below.
+                    </span>
                   </div>
                 </div>
                 <button
                   onClick={onDisconnectAzureDevOps}
-                  className="text-sm text-red-600 hover:text-red-800 font-medium flex items-center"
+                  className="text-sm text-[#591D0F] hover:text-[#6A4234] font-medium flex items-center"
                 >
                   <X className="h-4 w-4 mr-1" />
                   Disconnect
@@ -966,16 +2131,165 @@ export function AdminDashboard({
               availableStates={availableStates}
               availableAreaPaths={availableAreaPaths}
               availableTags={availableTags}
+              previewFeatures={previewFeatures}
+              showPreviewModal={showPreviewModal}
               onFetchStatesForType={onFetchStatesForType}
+              onFetchAreaPathsForTypeAndState={onFetchAreaPathsForTypeAndState}
+              onFetchTagsForTypeStateAndAreaPath={onFetchTagsForTypeStateAndAreaPath}
+              onFetchTypesAndStatesForAreaPath={onFetchTypesAndStatesForAreaPath}
+              onFetchTypesAndStatesForTags={onFetchTypesAndStatesForTags}
+              onFetchTypesAndAreaPathsForStates={onFetchTypesAndAreaPathsForStates}
+              resetSignal={filtersResetToken}
             />
           </div>
         )}
       </div>
 
+      {/* Suggested Features */}
+      <div className="relative bg-white rounded-lg shadow-md p-4 mb-6">
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-[#2D4660]">Suggested Features</h2>
+            <p className="text-sm text-gray-600">Ideas submitted from the voting experience for future consideration.</p>
+          </div>
+          <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#1E5461]/10 text-[#1E5461] text-sm font-medium">
+            {suggestedFeatures.length} {suggestedFeatures.length === 1 ? 'suggestion' : 'suggestions'}
+          </span>
+        </div>
+
+        {suggestedFeatures.length === 0 ? (
+          <div className="bg-gray-50 border border-dashed border-gray-200 rounded-lg p-6 text-center text-gray-500 text-sm">
+            No feature suggestions have been submitted yet. Encourage voters to use the "Suggest a Feature" button in the voting experience.
+          </div>
+        ) : (
+          <div className="space-y-4 max-h-[360px] overflow-y-auto pr-1">
+            {suggestedFeatures.map((suggestion) => {
+              const submitter = suggestion.requester_name || suggestion.requester_email || 'Anonymous';
+              return (
+                <div
+                  key={suggestion.id}
+                  className="border border-gray-200 rounded-lg p-4 hover:border-[#1E5461]/40 transition-colors"
+                >
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="md:flex-1">
+                        <h3 className="text-lg font-semibold text-[#2D4660]">{suggestion.title}</h3>
+                        <p className="text-xs text-gray-500 mt-[14px]">
+                          Submitted by <span className="font-medium text-[#1E5461]">{submitter}</span>
+                          {suggestion.requester_email && (
+                            <>
+                              {' '}
+                              (<a
+                                href={`mailto:${suggestion.requester_email}`}
+                                className="text-[#1E5461] hover:underline"
+                              >
+                                {suggestion.requester_email}
+                              </a>)
+                            </>
+                          )} on {formatDate(suggestion.created_at)}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2 self-start md:min-w-[360px]">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            variant="primary"
+                            onClick={() => {
+                              setPromoteError(null);
+                              setSuggestionToPromote(suggestion);
+                            }}
+                            className="text-xs px-3 py-1 flex items-center"
+                          >
+                            <ArrowRight className="h-3.5 w-3.5 mr-2" />
+                            Move to Current Session
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => {
+                              if (otherSessions.length > 0) {
+                                setSuggestionToMove(suggestion);
+                              }
+                            }}
+                            disabled={otherSessions.length === 0}
+                            className="text-xs px-3 py-1 flex items-center"
+                          >
+                            <Calendar className="h-3.5 w-3.5 mr-2" />
+                            Move to Future Session
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => openEditSuggestion(suggestion)}
+                            className="text-xs px-3 py-1 flex items-center"
+                          >
+                            <Edit className="h-3.5 w-3.5 mr-2" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setSuggestionToDelete(suggestion);
+                            }}
+                            className="text-xs px-3 py-1 flex items-center"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            Delete
+                          </Button>
+                        </div>
+                        {otherSessions.length === 0 && (
+                          <p className="text-xs text-gray-500 text-right">
+                            No upcoming sessions are available yet. Create a future session to enable this action.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 max-h-48 overflow-y-auto">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertCircle className="h-4 w-4 text-[#2D4660]" />
+                          <p className="text-sm font-semibold text-[#2D4660]">Problem it solves</p>
+                        </div>
+                        <p className="text-sm text-gray-700 whitespace-pre-line">
+                          {suggestion.summary && suggestion.summary.length > 0
+                            ? suggestion.summary
+                            : 'No summary provided.'}
+                        </p>
+                      </div>
+                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 max-h-48 overflow-y-auto">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Lightbulb className="h-4 w-4 text-[#2D4660]" />
+                          <p className="text-sm font-semibold text-[#2D4660]">What would it do?</p>
+                        </div>
+                        <p className="text-sm text-gray-700 whitespace-pre-line">
+                          {suggestion.whatWouldItDo && suggestion.whatWouldItDo.length > 0
+                            ? suggestion.whatWouldItDo
+                            : 'No details provided.'}
+                        </p>
+                      </div>
+                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 max-h-48 overflow-y-auto">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Workflow className="h-4 w-4 text-[#2D4660]" />
+                          <p className="text-sm font-semibold text-[#2D4660]">How would it work?</p>
+                        </div>
+                        <p className="text-sm text-gray-700 whitespace-pre-line">
+                          {suggestion.howWouldItWork && suggestion.howWouldItWork.length > 0
+                            ? suggestion.howWouldItWork
+                            : 'No implementation details provided.'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Feature Management */}
-      <div className="relative z-10 bg-white rounded-lg shadow-md p-4 mb-6">
+      <div className="relative bg-white rounded-lg shadow-md p-4 mb-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-[#2d4660]">Feature Management</h2>
+          <h2 className="text-xl font-semibold text-[#2D4660]">Feature Management</h2>
           <Button 
             variant="gold"
             onClick={() => setShowAddForm(true)}
@@ -1023,14 +2337,18 @@ export function AdminDashboard({
                   </td>
                   <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
                     {feature.state && (
-                      <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                      <span className="px-2 py-1 text-xs font-medium bg-[#1E5461]/10 text-[#1E5461] rounded">
                         {feature.state}
                       </span>
                     )}
                   </td>
-                  <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-600">
-                    <div className="max-w-xs truncate">
-                      {feature.areaPath || '-'}
+                  <td className="hidden lg:table-cell px-4 py-4 text-sm">
+                    <div className="text-gray-600">
+                      {feature.areaPath && typeof feature.areaPath === 'string' && feature.areaPath.trim() !== '' ? (
+                        <div className="max-w-xs break-words">{feature.areaPath}</div>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </div>
                   </td>
                   <td className="hidden xl:table-cell px-4 py-4 text-sm">
@@ -1055,14 +2373,14 @@ export function AdminDashboard({
                   <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button 
                       onClick={() => setEditingFeature(feature)}
-                      className="text-[#2d4660] hover:text-[#C89212] inline-block cursor-pointer"
+                      className="text-[#2D4660] hover:text-[#C89212] inline-block cursor-pointer"
                       title="Edit Feature"
                     >
                       <Edit className="h-5 w-5" />
                     </button>
                     <button 
                       onClick={() => onDeleteFeature(feature.id)}
-                      className="text-[#2d4660] hover:text-[#591D0F] inline-block cursor-pointer"
+                      className="text-[#2D4660] hover:text-[#591D0F] inline-block cursor-pointer"
                       title="Delete Feature"
                     >
                       <Trash2 className="h-5 w-5" />
@@ -1076,6 +2394,238 @@ export function AdminDashboard({
       </div>
 
       {/* Modal Dialogs */}
+      <Modal
+        isOpen={suggestionToPromote !== null}
+        onClose={() => {
+          if (!isPromotingSuggestion) {
+            setSuggestionToPromote(null);
+            setPromoteError(null);
+          }
+        }}
+        title="Move Suggestion to Current Session"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">
+            Move <span className="font-semibold text-[#2D4660]">{suggestionToPromote?.title}</span> into the current session so it can be managed and voted on.
+          </p>
+          {promoteError && (
+            <div className="bg-[#591D0F]/5 border border-[#591D0F]/20 text-[#591D0F] text-sm rounded-md px-3 py-2">
+              {promoteError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!isPromotingSuggestion) {
+                  setSuggestionToPromote(null);
+                  setPromoteError(null);
+                }
+              }}
+              disabled={isPromotingSuggestion}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirmPromoteSuggestion}
+              disabled={isPromotingSuggestion}
+            >
+              {isPromotingSuggestion ? 'Moving...' : 'Move to Current Session'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={suggestionToMove !== null}
+        onClose={() => {
+          if (!isMovingSuggestion) {
+            setSuggestionToMove(null);
+            setMoveError(null);
+          }
+        }}
+        title="Move to Future Session"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">
+            Choose the upcoming session where you would like to queue <span className="font-semibold text-[#2D4660]">{suggestionToMove?.title}</span>.
+          </p>
+          {otherSessions.length > 0 ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Destination Session
+              </label>
+              <select
+                value={targetSessionId}
+                onChange={(e) => setTargetSessionId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                disabled={isMovingSuggestion}
+              >
+                {otherSessions.map(session => (
+                  <option key={session.id} value={session.id}>
+                    {session.title} (Starts {formatDate(session.startDate)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="bg-[#1E5461]/5 border border-[#1E5461]/20 text-[#1E5461] text-sm rounded-md px-3 py-2">
+              No future sessions are available yet. Create a new session to enable this action.
+            </div>
+          )}
+          {moveError && (
+            <div className="bg-[#591D0F]/5 border border-[#591D0F]/20 text-[#591D0F] text-sm rounded-md px-3 py-2">
+              {moveError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!isMovingSuggestion) {
+                  setSuggestionToMove(null);
+                  setMoveError(null);
+                }
+              }}
+              disabled={isMovingSuggestion}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirmMoveSuggestion}
+              disabled={isMovingSuggestion || otherSessions.length === 0}
+            >
+              {isMovingSuggestion ? 'Moving...' : 'Move to Session'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={suggestionToEdit !== null}
+        onClose={() => {
+          if (!isSavingSuggestion) {
+            setSuggestionToEdit(null);
+            setEditError(null);
+          }
+        }}
+        title="Edit Suggested Feature"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input
+              type="text"
+              value={editForm.title}
+              onChange={(e) => setEditForm(prev => ({ ...prev, title: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              disabled={isSavingSuggestion}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Problem it solves</label>
+            <textarea
+              value={editForm.summary}
+              onChange={(e) => setEditForm(prev => ({ ...prev, summary: e.target.value }))}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              disabled={isSavingSuggestion}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">What would it do?</label>
+            <textarea
+              value={editForm.whatWouldItDo}
+              onChange={(e) => setEditForm(prev => ({ ...prev, whatWouldItDo: e.target.value }))}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              disabled={isSavingSuggestion}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">How would it work?</label>
+            <textarea
+              value={editForm.howWouldItWork}
+              onChange={(e) => setEditForm(prev => ({ ...prev, howWouldItWork: e.target.value }))}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              disabled={isSavingSuggestion}
+            />
+          </div>
+          {editError && (
+            <div className="bg-[#591D0F]/5 border border-[#591D0F]/20 text-[#591D0F] text-sm rounded-md px-3 py-2">
+              {editError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!isSavingSuggestion) {
+                  setSuggestionToEdit(null);
+                  setEditError(null);
+                }
+              }}
+              disabled={isSavingSuggestion}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleSaveSuggestionEdit}
+              disabled={isSavingSuggestion}
+            >
+              {isSavingSuggestion ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={suggestionToDelete !== null}
+        onClose={() => {
+          if (!isDeletingSuggestion) {
+            setSuggestionToDelete(null);
+            setDeleteError(null);
+          }
+        }}
+        title="Delete Suggested Feature"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">
+            Are you sure you want to delete <span className="font-semibold text-[#591D0F]">{suggestionToDelete?.title}</span>? This action cannot be undone.
+          </p>
+          {deleteError && (
+            <div className="bg-[#591D0F]/5 border border-[#591D0F]/20 text-[#591D0F] text-sm rounded-md px-3 py-2">
+              {deleteError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!isDeletingSuggestion) {
+                  setSuggestionToDelete(null);
+                  setDeleteError(null);
+                }
+              }}
+              disabled={isDeletingSuggestion}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleConfirmDeleteSuggestion}
+              disabled={isDeletingSuggestion}
+            >
+              {isDeletingSuggestion ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         isOpen={showAddForm}
         onClose={() => setShowAddForm(false)}
@@ -1117,6 +2667,12 @@ export function AdminDashboard({
           featureCount={features.length}
           onSubmit={handleSessionUpdate}
           onCancel={() => setShowSessionEditForm(false)}
+          onRequestDeleteSession={handleDeleteSessionRequest}
+          isDeletingSession={isDeletingSession}
+          productName={productName}
+          products={products}
+          isLoadingProducts={isLoadingProducts}
+          productError={productError}
         />
       </Modal>
 
@@ -1127,80 +2683,97 @@ export function AdminDashboard({
         maxWidth="max-w-4xl"
       >
         <div className="space-y-4">
-          <p className="text-gray-600">
-            Review the features that will be synced from Azure DevOps. Choose an action:
-          </p>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-            <p className="text-blue-800"><strong>Add Features:</strong> Merge with existing features (updates matching Azure DevOps IDs)</p>
-            <p className="text-blue-800 mt-1"><strong>Replace All:</strong> Delete all existing features and add only these Azure DevOps features</p>
-          </div>
-          
           {previewFeatures && previewFeatures.length > 0 ? (
             <>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-blue-800 font-medium">
-                  Found {previewFeatures.length} work item{previewFeatures.length !== 1 ? 's' : ''} to sync
+              <div className="bg-[#1E5461]/5 border border-[#1E5461]/20 rounded-lg p-4">
+                <p className="text-[#1E5461] font-medium">
+                  Review the work items below. If they look correct, add them to your voting session.
                 </p>
               </div>
               
-              <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-lg">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Epic</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Area Path</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {previewFeatures.map((feature) => (
-                      <tr key={feature.id}>
-                        <td className="px-4 py-3 text-sm">
+              <div className="max-h-96 overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {previewFeatures.map((feature) => (
+                    <div key={feature.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                      {/* Title at top */}
+                      <div className="mb-3">
+                        <h4 className="text-base font-semibold text-gray-900">
+                          {feature.title}
+                        </h4>
+                      </div>
+                      
+                      {/* Epic - above description (only for non-Feature types) */}
+                      {feature.workItemType !== 'Feature' && feature.epic && (
+                        <div className="mb-3">
+                          <p className="text-xs text-gray-500 mb-1">Epic</p>
+                          <EpicTag name={feature.epic} />
+                        </div>
+                      )}
+                      
+                      {/* Description */}
+                      {feature.description && feature.description.trim() !== '' ? (
+                        <div className="mb-3">
+                          <p className="text-xs text-gray-500 mb-1">Description</p>
+                          <p className="text-xs text-gray-700 line-clamp-3">{feature.description}</p>
+                        </div>
+                      ) : null}
+                      
+                    {feature.state && (
+                      <div className="mb-3">
+                        <p className="text-xs text-gray-500 mb-1">State</p>
+                        <span className="px-2 py-1 text-xs font-medium bg-[#1E5461]/10 text-[#1E5461] rounded">
+                          {feature.state}
+                        </span>
+                      </div>
+                    )}
+
+                      {/* Epic - above Work Item Type if Feature */}
+                      {feature.workItemType === 'Feature' && feature.epic && (
+                        <div className="mb-3">
+                          <p className="text-xs text-gray-500 mb-1">Epic</p>
+                          <EpicTag name={feature.epic} />
+                        </div>
+                      )}
+                      
+                      {/* Work Item Type with Azure DevOps ID */}
+                      <div className="mb-3">
+                        <p className="text-xs text-gray-500 mb-1">Work Item Type</p>
+                        <div className="flex items-center gap-2">
+                          {feature.workItemType && (
+                            <span className="px-2 py-1 text-xs font-medium bg-[#492434]/10 text-[#492434] rounded">
+                              {feature.workItemType}
+                            </span>
+                          )}
                           {feature.azureDevOpsId && (
                             <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
                           )}
-                        </td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{feature.title}</td>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.epic && <EpicTag name={feature.epic} />}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.state && (
-                            <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
-                              {feature.state}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">
-                          <div className="max-w-xs truncate">
-                            {feature.areaPath || '-'}
+                        </div>
+                      </div>
+                      
+                      {/* Area Path - Full width at bottom */}
+                      {feature.areaPath && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Area Path</p>
+                          <p className="text-xs text-gray-700 break-words">{feature.areaPath}</p>
+                        </div>
+                      )}
+                      
+                      {/* Tags - Compact display if available */}
+                      {feature.tags && feature.tags.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-100">
+                          <p className="text-xs text-gray-500 mb-1">Tags</p>
+                          <div className="flex flex-wrap gap-1">
+                            {feature.tags.map((tag, idx) => (
+                              <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+                                {tag}
+                              </span>
+                            ))}
                           </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {feature.tags && feature.tags.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {feature.tags.slice(0, 2).map((tag, idx) => (
-                                <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
-                                  {tag}
-                                </span>
-                              ))}
-                              {feature.tags.length > 2 && (
-                                <span className="px-2 py-0.5 text-xs text-gray-500">
-                                  +{feature.tags.length - 2}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
               
               <div className="flex justify-end space-x-2 pt-4 border-t">
@@ -1243,6 +2816,76 @@ export function AdminDashboard({
         </div>
       </Modal>
 
+      {/* Reopen Session Modal */}
+      <Modal
+        isOpen={showReopenModal}
+        onClose={() => {
+          setShowReopenModal(false);
+          resetReopen();
+        }}
+        title="Reopen Session"
+      >
+        <form onSubmit={handleSubmitReopen(handleSubmitReopenSession)} className="space-y-4">
+          <p className="text-gray-600">
+            Capture a brief note so other admins understand why this session is being reopened.
+          </p>
+
+          <Controller
+            control={reopenControl}
+            name="reason"
+            rules={{ required: 'Please select a reason' }}
+            render={({ field }) => (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason *
+                </label>
+                <SingleSelectDropdown
+                  options={REOPEN_REASON_OPTIONS}
+                  value={field.value}
+                  onChange={field.onChange}
+                  placeholder="Select a reason..."
+                />
+                {reopenErrors.reason && (
+                  <p className="mt-1 text-sm text-[#591D0F]">{reopenErrors.reason.message}</p>
+                )}
+              </div>
+            )}
+          />
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Additional Details (Optional)
+            </label>
+            <textarea
+              {...registerReopen('details')}
+              rows={3}
+              placeholder="Add any context you'd like to share with other admins..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+            />
+          </div>
+
+          <div className="bg-[#1E5461]/5 border border-[#1E5461]/20 rounded-lg p-3 text-sm text-[#1E5461]">
+            This information will appear in the Current Session summary so every admin sees why voting resumed.
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-4">
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                setShowReopenModal(false);
+                resetReopen();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit">
+              Save &amp; Reopen
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
       {/* End Early Modal */}
       <Modal
         isOpen={showEndEarlyModal}
@@ -1263,7 +2906,7 @@ export function AdminDashboard({
             </label>
             <select
               {...registerEndEarly('reason', { required: 'Please select a reason' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2d4660] focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
             >
               <option value="">Select a reason...</option>
               <option value="Sufficient Responses">Sufficient responses received</option>
@@ -1284,11 +2927,11 @@ export function AdminDashboard({
               {...registerEndEarly('details')}
               rows={3}
               placeholder="Add any additional context or notes..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2d4660] focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
             />
           </div>
 
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+          <div className="bg-[#C89212]/5 border border-[#C89212]/20 rounded-lg p-3 text-sm text-[#6A4234]">
             <p className="font-medium mb-1">Note:</p>
             <p>Ending the session will close voting immediately. This action will be logged and visible to all admins.</p>
           </div>

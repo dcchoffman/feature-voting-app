@@ -4,8 +4,10 @@
 // Location: src/contexts/SessionContext.tsx
 // ============================================
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import * as db from '../services/databaseService';
+import { isFallbackSystemAdmin } from '../utils/systemAdmins';
 import type { VotingSession, User, SessionContextType } from '../types';
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -20,6 +22,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isStakeholder, setIsStakeholder] = useState(false);
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [roleCheckFailed, setRoleCheckFailed] = useState(false);
 
@@ -78,26 +81,87 @@ export function SessionProvider({ children }: SessionProviderProps) {
     updateUserRoles();
   }, [currentSession, currentUser, roleCheckFailed]);
 
+  useEffect(() => {
+    const checkSystemAdminStatus = async () => {
+      if (!currentUser) {
+        setIsSystemAdmin(false);
+        return;
+      }
+
+      const fallbackStatus = isFallbackSystemAdmin(currentUser.email);
+      if (fallbackStatus) {
+        setIsSystemAdmin(true);
+        return;
+      }
+
+      try {
+        const status = await db.isUserSystemAdmin(currentUser.id);
+        setIsSystemAdmin(status);
+      } catch (error) {
+        console.error('Error checking system admin status:', error);
+        setIsSystemAdmin(false);
+      }
+    };
+
+    checkSystemAdminStatus();
+  }, [currentUser]);
+
   const refreshSessions = useCallback(async (user?: User) => {
     const userToUse = user || currentUser;
     if (!userToUse) {
       setSessions([]);
+      setCurrentSession(prev => {
+        if (prev) {
+          try {
+            localStorage.removeItem('voting_system_current_session');
+          } catch {}
+        }
+        return null;
+      });
       return;
     }
 
     try {
-      const userSessions = await db.getSessionsForUser(userToUse.id);
+      const fallbackStatus = isFallbackSystemAdmin(userToUse.email);
+      const userSessions = fallbackStatus
+        ? await db.getAllSessions()
+        : await db.getSessionsForUser(userToUse.id);
+
       setSessions(userSessions);
-      
-      // If current session is not in the list, clear it
-      if (currentSession && !userSessions.find(s => s.id === currentSession.id)) {
-        setCurrentSession(null);
-      }
+
+      setCurrentSession(prev => {
+        if (!prev) {
+          return prev;
+        }
+
+        const matchingSession = userSessions.find(s => s.id === prev.id);
+
+        if (!matchingSession) {
+          try {
+            localStorage.removeItem('voting_system_current_session');
+          } catch {}
+          return null;
+        }
+
+        if (matchingSession.id !== prev.id) {
+          // This should never happen, but keep the previous value.
+          return prev;
+        }
+
+        if (matchingSession !== prev) {
+          try {
+            localStorage.setItem('voting_system_current_session', matchingSession.id);
+          } catch {}
+          return matchingSession;
+        }
+
+        return prev;
+      });
     } catch (error) {
       console.error('Error loading sessions:', error);
       setSessions([]);
     }
-  }, [currentUser, currentSession]);
+  }, [currentUser]);
 
   const handleSetCurrentUser = useCallback(async (user: User | null) => {
     setCurrentUser(user);
@@ -112,6 +176,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       localStorage.removeItem('voting_system_user');
       setSessions([]);
       setCurrentSession(null);
+      setIsSystemAdmin(false);
     }
   }, [refreshSessions]);
 
@@ -150,6 +215,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
     currentUser,
     isAdmin,
     isStakeholder,
+    isSystemAdmin,
     setCurrentSession: handleSetCurrentSession,
     refreshSessions,
     setCurrentUser: handleSetCurrentUser,

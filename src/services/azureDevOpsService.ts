@@ -4,11 +4,44 @@
 
 import type { AzureDevOpsConfig, AzureDevOpsWorkItem, Feature } from '../types/azure';
 
+export const WORK_ITEM_TYPES = [
+  'Bug',
+  'Change Request',
+  'Data Correction',
+  'Epic',
+  'Feature',
+  'Group',
+  'Issue',
+  'Other',
+  'Spike',
+  'Task',
+  'Test Case',
+  'User Story'
+];
+
+// Helper function to get the correct redirect URI based on environment
+function getRedirectUri(): string {
+  const origin = window.location.origin;
+  const pathname = window.location.pathname;
+  
+  // Extract the base path (everything before /admin or /voter)
+  const basePath = pathname.includes('/admin') 
+    ? pathname.substring(0, pathname.indexOf('/admin'))
+    : pathname.includes('/voter')
+    ? pathname.substring(0, pathname.indexOf('/voter'))
+    : pathname;
+  
+  // Construct the full redirect URI
+  return `${origin}${basePath}/admin`;
+}
+
 // Azure AD Configuration
 export const AZURE_AD_CONFIG = {
   clientId: 'a6283b6c-2210-4d6c-bade-651acfdb6703',
   tenantId: '3bb4e039-9a0f-4671-9733-a9ae03d39395',
-  redirectUri: 'http://localhost:5173/feature-voting-app/admin',
+  get redirectUri(): string {
+    return getRedirectUri();
+  },
   scopes: [
     'https://app.vssps.visualstudio.com/user_impersonation',
     'offline_access'
@@ -169,13 +202,18 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
 
 // Add to azureDevOpsService.ts
 
-export async function fetchStates(config: AzureDevOpsConfig): Promise<string[]> {
+export async function fetchStates(config: AzureDevOpsConfig, workItemType?: string): Promise<string[]> {
   if (!config.accessToken || !config.organization || !config.project) {
     throw new Error('Missing required configuration');
   }
 
-  // Get the work item type states
-  const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitemtypes/${config.workItemType}?api-version=7.1`;
+  const targetWorkItemType = workItemType || config.workItemType;
+  if (!targetWorkItemType) {
+    throw new Error('Missing work item type for state fetch');
+  }
+
+  const encodedType = encodeURIComponent(targetWorkItemType);
+  const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitemtypes/${encodedType}?api-version=7.1`;
 
   const response = await fetch(url, {
     headers: {
@@ -189,14 +227,31 @@ export async function fetchStates(config: AzureDevOpsConfig): Promise<string[]> 
   }
 
   const data = await response.json();
-  
-  // Extract state names
+
   if (data.states && Array.isArray(data.states)) {
     return data.states.map((state: any) => state.name);
   }
 
-  // Fallback to common states if API doesn't return them
-  return ['New', 'Active', 'Resolved', 'Closed', 'Removed'];
+  return [];
+}
+
+export async function fetchAllStates(config: AzureDevOpsConfig): Promise<string[]> {
+  const statesSet = new Set<string>();
+
+  for (const workItemType of WORK_ITEM_TYPES) {
+    try {
+      const states = await fetchStates({ ...config, workItemType }, workItemType);
+      states.forEach(state => {
+        if (state) {
+          statesSet.add(state);
+        }
+      });
+    } catch (error) {
+      console.warn(`Failed to fetch states for type ${workItemType}:`, error);
+    }
+  }
+
+  return Array.from(statesSet).sort((a, b) => a.localeCompare(b));
 }
 
 export async function fetchAreaPaths(config: AzureDevOpsConfig): Promise<string[]> {
@@ -236,16 +291,33 @@ export async function fetchAreaPaths(config: AzureDevOpsConfig): Promise<string[
   return extractPaths(data);
 }
 
-export async function fetchTags(config: AzureDevOpsConfig): Promise<string[]> {
+export async function fetchAreaPathsForTypeAndStates(
+  config: AzureDevOpsConfig,
+  workItemType?: string,
+  states: string[] = []
+): Promise<string[]> {
   if (!config.accessToken || !config.organization || !config.project) {
     throw new Error('Missing required configuration');
   }
 
+  // If no specific work item type provided, fall back to full area path list
+  if (!workItemType) {
+    return fetchAreaPaths(config);
+  }
+
   try {
-    // Simplified query - just get recent work items
-    const wiqlQuery = {
-      query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`
-    };
+    const conditions: string[] = [`[System.WorkItemType] = '${workItemType}'`];
+
+    if (states && states.length > 0) {
+      if (states.length === 1) {
+        conditions.push(`[System.State] = '${states[0]}'`);
+      } else {
+        const statesList = states.map(state => `'${state}'`).join(', ');
+        conditions.push(`[System.State] IN (${statesList})`);
+      }
+    }
+
+    const wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(' AND ')} ORDER BY [System.ChangedDate] DESC`;
 
     const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.1`;
 
@@ -255,12 +327,407 @@ export async function fetchTags(config: AzureDevOpsConfig): Promise<string[]> {
         'Authorization': `Bearer ${config.accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(wiqlQuery)
+      body: JSON.stringify({ query: wiqlQuery })
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to fetch area paths by type/state, returning empty list');
+      return [];
+    }
+
+    const data = await response.json();
+
+    if (!data.workItems || data.workItems.length === 0) {
+      return [];
+    }
+
+    const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.AreaPath&api-version=7.1`;
+
+    const batchResponse = await fetch(batchUrl, {
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!batchResponse.ok) {
+      console.warn('Failed to fetch work item area paths for filtered request');
+      return [];
+    }
+
+    const workItems = await batchResponse.json();
+    const areaPathsSet = new Set<string>();
+
+    if (workItems.value && Array.isArray(workItems.value)) {
+      workItems.value.forEach((item: any) => {
+        const areaPath = item.fields?.['System.AreaPath'];
+        if (areaPath) {
+          areaPathsSet.add(areaPath);
+        }
+      });
+    }
+
+    return Array.from(areaPathsSet).sort();
+  } catch (error) {
+    console.error('Error fetching area paths for type/state:', error);
+    return [];
+  }
+}
+
+export async function fetchTypesAndAreaPathsForStates(
+  config: AzureDevOpsConfig,
+  states: string[]
+): Promise<{ types: string[]; areaPaths: string[]; tags: string[] }> {
+  if (!config.accessToken || !config.organization || !config.project) {
+    throw new Error('Missing required configuration');
+  }
+
+  if (!states || states.length === 0) {
+    return { types: [], areaPaths: [], tags: [] };
+  }
+
+  try {
+    const stateCondition = states.length === 1
+      ? `[System.State] = '${states[0]}'`
+      : `[System.State] IN (${states.map(state => `'${state}'`).join(', ')})`;
+
+    const wiqlQuery = `SELECT [System.Id], [System.WorkItemType], [System.AreaPath] FROM WorkItems WHERE ${stateCondition} ORDER BY [System.ChangedDate] DESC`;
+
+    const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.1`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: wiqlQuery })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch work items by state: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!data.workItems || data.workItems.length === 0) {
+      return { types: [], areaPaths: [], tags: [] };
+    }
+
+    const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
+    if (ids.length === 0) {
+      return { types: [], areaPaths: [], tags: [] };
+    }
+
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.AreaPath,System.Tags&api-version=7.1`;
+
+    const batchResponse = await fetch(batchUrl, {
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!batchResponse.ok) {
+      console.warn('Failed to fetch work item details for states filter');
+      return { types: [], areaPaths: [], tags: [] };
+    }
+
+    const workItems = await batchResponse.json();
+    const typesSet = new Set<string>();
+    const areaPathsSet = new Set<string>();
+    const tagsSet = new Set<string>();
+
+    if (workItems.value && Array.isArray(workItems.value)) {
+      workItems.value.forEach((item: any) => {
+        const type = item.fields?.['System.WorkItemType'];
+        const areaPath = item.fields?.['System.AreaPath'];
+        const tags = item.fields?.['System.Tags'];
+        if (type) {
+          typesSet.add(type);
+        }
+        if (areaPath) {
+          areaPathsSet.add(areaPath);
+        }
+        if (tags) {
+          tags.split(';').map((t: string) => t.trim()).forEach((tag: string) => {
+            if (tag) {
+              tagsSet.add(tag);
+            }
+          });
+        }
+      });
+    }
+
+    return {
+      types: Array.from(typesSet).sort((a, b) => a.localeCompare(b)),
+      areaPaths: Array.from(areaPathsSet).sort((a, b) => a.localeCompare(b)),
+      tags: Array.from(tagsSet).sort((a, b) => a.localeCompare(b))
+    };
+  } catch (error) {
+    console.error('Error fetching types and area paths for states:', error);
+    return { types: [], areaPaths: [], tags: [] };
+  }
+}
+
+export async function fetchProjects(config: AzureDevOpsConfig): Promise<string[]> {
+  if (!config.accessToken || !config.organization) {
+    throw new Error('Missing required configuration');
+  }
+
+  const url = `https://dev.azure.com/${config.organization}/_apis/projects?stateFilter=All&api-version=7.1`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch projects: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  if (!data?.value || !Array.isArray(data.value)) {
+    return [];
+  }
+
+  return data.value
+    .map((project: any) => project?.name)
+    .filter((name: string | undefined) => typeof name === 'string' && name.trim().length > 0)
+    .map((name: string) => name.trim())
+    .sort((a: string, b: string) => a.localeCompare(b));
+}
+
+/**
+ * Fetch work item types and states for a given area path
+ */
+export async function fetchTypesAndStatesForAreaPath(
+  config: AzureDevOpsConfig,
+  areaPaths: string[]
+): Promise<{ types: string[]; states: string[] }> {
+  if (!config.accessToken || !config.organization || !config.project) {
+    throw new Error('Missing required configuration');
+  }
+
+  try {
+    // Build WIQL query to find work items in the specified area paths
+    const areaPathConditions = areaPaths.map(path => `[System.AreaPath] UNDER '${path}'`).join(' OR ');
+    const wiqlQuery = `SELECT [System.Id], [System.WorkItemType], [System.State] FROM WorkItems WHERE (${areaPathConditions}) ORDER BY [System.ChangedDate] DESC`;
+    
+    const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.1`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: wiqlQuery })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch work items: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data.workItems || data.workItems.length === 0) {
+      return { types: [], states: [] };
+    }
+
+    // Fetch work item details to get types and states (limit to 200 items)
+    const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.State&api-version=7.1`;
+
+    const batchResponse = await fetch(batchUrl, {
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!batchResponse.ok) {
+      console.warn('Failed to fetch work item details');
+      return { types: [], states: [] };
+    }
+
+    const workItems = await batchResponse.json();
+    
+    // Extract unique types and states
+    const typesSet = new Set<string>();
+    const statesSet = new Set<string>();
+    
+    if (workItems.value && Array.isArray(workItems.value)) {
+      workItems.value.forEach((item: any) => {
+        if (item.fields) {
+          if (item.fields['System.WorkItemType']) {
+            typesSet.add(item.fields['System.WorkItemType']);
+          }
+          if (item.fields['System.State']) {
+            statesSet.add(item.fields['System.State']);
+          }
+        }
+      });
+    }
+
+    return {
+      types: Array.from(typesSet).sort(),
+      states: Array.from(statesSet).sort()
+    };
+  } catch (error) {
+    console.error('Error fetching types and states for area path:', error);
+    return { types: [], states: [] };
+  }
+}
+
+/**
+ * Fetch work item types and states for given tags
+ */
+export async function fetchTypesAndStatesForTags(
+  config: AzureDevOpsConfig,
+  tags: string[]
+): Promise<{ types: string[]; states: string[]; areaPaths: string[] }> {
+  if (!config.accessToken || !config.organization || !config.project) {
+    throw new Error('Missing required configuration');
+  }
+
+  try {
+    // Build WIQL query to find work items with the specified tags
+    const tagConditions = tags.map(tag => `[System.Tags] CONTAINS '${tag}'`).join(' OR ');
+    const wiqlQuery = `SELECT [System.Id], [System.WorkItemType], [System.State] FROM WorkItems WHERE (${tagConditions}) ORDER BY [System.ChangedDate] DESC`;
+    
+    const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.1`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: wiqlQuery })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch work items: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data.workItems || data.workItems.length === 0) {
+      return { types: [], states: [], areaPaths: [] };
+    }
+
+    // Fetch work item details to get types, states, and area paths (limit to 200 items)
+    const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.State,System.AreaPath&api-version=7.1`;
+
+    const batchResponse = await fetch(batchUrl, {
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!batchResponse.ok) {
+      console.warn('Failed to fetch work item details');
+      return { types: [], states: [], areaPaths: [] };
+    }
+
+    const workItems = await batchResponse.json();
+    
+    // Extract unique types, states, and area paths
+    const typesSet = new Set<string>();
+    const statesSet = new Set<string>();
+    const areaPathsSet = new Set<string>();
+    
+    if (workItems.value && Array.isArray(workItems.value)) {
+      workItems.value.forEach((item: any) => {
+        if (item.fields) {
+          if (item.fields['System.WorkItemType']) {
+            typesSet.add(item.fields['System.WorkItemType']);
+          }
+          if (item.fields['System.State']) {
+            statesSet.add(item.fields['System.State']);
+          }
+          if (item.fields['System.AreaPath']) {
+            areaPathsSet.add(item.fields['System.AreaPath']);
+          }
+        }
+      });
+    }
+
+    return {
+      types: Array.from(typesSet).sort(),
+      states: Array.from(statesSet).sort(),
+      areaPaths: Array.from(areaPathsSet).sort()
+    };
+  } catch (error) {
+    console.error('Error fetching types and states for tags:', error);
+    return { types: [], states: [], areaPaths: [] };
+  }
+}
+
+/**
+ * Fetch tags filtered by work item type, states, and area paths
+ */
+export async function fetchTagsForTypeStateAndAreaPath(
+  config: AzureDevOpsConfig,
+  workItemType: string,
+  states: string[],
+  areaPaths: string[]
+): Promise<string[]> {
+  if (!config.accessToken || !config.organization || !config.project) {
+    throw new Error('Missing required configuration');
+  }
+
+  try {
+    // Build WIQL query with filters
+    const conditions: string[] = [];
+    
+    // Work item type filter
+    conditions.push(`[System.WorkItemType] = '${workItemType}'`);
+    
+    // States filter
+    if (states && states.length > 0) {
+      if (states.length === 1) {
+        conditions.push(`[System.State] = '${states[0]}'`);
+      } else {
+        const statesList = states.map(s => `'${s}'`).join(', ');
+        conditions.push(`[System.State] IN (${statesList})`);
+      }
+    }
+    
+    // Area paths filter
+    if (areaPaths && areaPaths.length > 0) {
+      if (areaPaths.length === 1) {
+        conditions.push(`[System.AreaPath] UNDER '${areaPaths[0]}'`);
+      } else {
+        const areaPathFilters = areaPaths.map(path => `[System.AreaPath] UNDER '${path}'`);
+        conditions.push(`(${areaPathFilters.join(' OR ')})`);
+      }
+    }
+    
+    const wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(' AND ')} ORDER BY [System.ChangedDate] DESC`;
+    
+    const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.1`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: wiqlQuery })
     });
 
     if (!response.ok) {
       console.warn('Failed to fetch tags, returning empty array');
-      return [];  // Return empty array instead of throwing
+      return [];
     }
 
     const data = await response.json();
@@ -304,8 +771,126 @@ export async function fetchTags(config: AzureDevOpsConfig): Promise<string[]> {
     return Array.from(tagsSet).sort();
   } catch (error) {
     console.warn('Error fetching tags, returning empty array:', error);
-    return [];  // Return empty array instead of throwing
+    return [];
   }
+}
+
+export async function fetchTags(config: AzureDevOpsConfig): Promise<string[]> {
+  if (!config.accessToken || !config.organization || !config.project) {
+    throw new Error('Missing required configuration');
+  }
+
+  const allTagsSet = new Set<string>();
+
+  try {
+    const tagNames: string[] = [];
+    let continuationToken: string | null = null;
+
+    do {
+      let requestUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/tags?api-version=7.1`;
+      if (continuationToken) {
+        requestUrl += `&continuationToken=${encodeURIComponent(continuationToken)}`;
+      }
+
+      const response = await fetch(requestUrl, {
+        headers: {
+          'Authorization': `Bearer ${config.accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        console.warn('Failed to fetch tags page, aborting remaining pages');
+        break;
+      }
+
+      const data = await response.json();
+      if (data.value && Array.isArray(data.value)) {
+        data.value.forEach((tag: any) => {
+          if (tag && tag.name) {
+            tagNames.push(tag.name);
+          }
+        });
+      }
+
+      continuationToken = response.headers.get('x-ms-continuationtoken');
+    } while (continuationToken);
+
+    tagNames.forEach(tag => allTagsSet.add(tag));
+  } catch (error) {
+    console.warn('Error fetching tags, returning empty array:', error);
+  }
+
+  try {
+    const wiqlTags = await fetchTagsViaWiql(config);
+    wiqlTags.forEach(tag => allTagsSet.add(tag));
+  } catch (error) {
+    console.warn('Error fetching tags via WIQL fallback:', error);
+  }
+
+  return Array.from(allTagsSet).sort((a, b) => a.localeCompare(b));
+}
+
+async function fetchTagsViaWiql(config: AzureDevOpsConfig): Promise<string[]> {
+  const wiqlQuery = {
+    query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC`
+  };
+
+  const url = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/wiql?api-version=7.1`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${config.accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(wiqlQuery)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch tags via WIQL: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (!data.workItems || data.workItems.length === 0) {
+    return [];
+  }
+
+  const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.Tags&api-version=7.1`;
+
+  const batchResponse = await fetch(batchUrl, {
+    headers: {
+      'Authorization': `Bearer ${config.accessToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!batchResponse.ok) {
+    throw new Error(`Failed to fetch work item details for tags via WIQL fallback: ${batchResponse.status}`);
+  }
+
+  const workItems = await batchResponse.json();
+  const tagsSet = new Set<string>();
+
+  if (workItems.value && Array.isArray(workItems.value)) {
+    workItems.value.forEach((item: any) => {
+      if (item.fields && item.fields['System.Tags']) {
+        const tags = item.fields['System.Tags'].split(';').map((t: string) => t.trim());
+        tags.forEach(tag => {
+          if (tag) {
+            tagsSet.add(tag);
+          }
+        });
+      }
+    });
+  }
+
+  return Array.from(tagsSet);
 }
 
 /**
@@ -409,9 +994,17 @@ export async function fetchAzureDevOpsWorkItems(
   
   try {
     // Step 1: Query for work item IDs using WIQL
-    const wiqlQuery = query 
-      ? `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = '${workItemType}' AND ${query}`
-      : `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = '${workItemType}' AND [System.State] = 'Active'`;
+    // Note: The 'query' parameter already includes work item type filter if it was built from filters
+    // If query is provided, use it as-is (it already contains all filters including work item type)
+    // If no query, use workItemType from config as fallback
+    let wiqlQuery: string;
+    if (query) {
+      // Query already contains work item type filter, so use it directly
+      wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE ${query}`;
+    } else {
+      // No query provided, use workItemType from config as fallback
+      wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = '${workItemType}' AND [System.State] = 'Active'`;
+    }
     
     const wiqlUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/wiql?api-version=7.0`;
     
@@ -435,8 +1028,7 @@ export async function fetchAzureDevOpsWorkItems(
       return [];
     }
     
-    // Step 2: Get full work item details
-    const idsString = workItemIds.slice(0, 200).join(',');
+    // Step 2: Get full work item details (batch API doesn't support $expand=relations)
     const fields = [
       'System.Id',
       'System.Title',
@@ -448,23 +1040,171 @@ export async function fetchAzureDevOpsWorkItems(
       'System.AreaPath',
       'System.IterationPath'
     ].join(',');
-    
-    const workItemsUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${idsString}&fields=${fields}&api-version=7.0`;
-    
-    const workItemsResponse = await fetch(workItemsUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
+
+    const detailBatchSize = 200;
+    const allWorkItems: any[] = [];
+
+    for (let i = 0; i < workItemIds.length; i += detailBatchSize) {
+      const idsSlice = workItemIds.slice(i, i + detailBatchSize);
+      const idsString = idsSlice.join(',');
+      const workItemsUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${idsString}&fields=${fields}&api-version=7.0`;
+
+      const workItemsResponse = await fetch(workItemsUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (!workItemsResponse.ok) {
+        throw new Error(`Failed to fetch work items: ${workItemsResponse.status} ${workItemsResponse.statusText}`);
       }
-    });
-    
-    if (!workItemsResponse.ok) {
-      throw new Error(`Failed to fetch work items: ${workItemsResponse.status} ${workItemsResponse.statusText}`);
+
+      const workItemsData = await workItemsResponse.json();
+      if (workItemsData.value && Array.isArray(workItemsData.value)) {
+        allWorkItems.push(...workItemsData.value);
+      }
+    }
+
+    if (allWorkItems.length === 0) {
+      return [];
     }
     
-    const workItemsData = await workItemsResponse.json();
+    // Step 3: Fetch relations for each work item to find Epic parents
+    // Map to store work item ID -> parent ID
+    const workItemToParentMap = new Map<number, number>();
+    const epicTitlesMap = new Map<number, string>();
+    const parentTitlesMap = new Map<number, string>();
     
-    // Step 3: Transform the response
-    return workItemsData.value.map((item: any) => ({
+    // Fetch relations in batches of 10
+    const batchSize = 10;
+    for (let i = 0; i < allWorkItems.length; i += batchSize) {
+      const batch = allWorkItems.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(async (item: any) => {
+        try {
+          // Fetch relations for this work item
+          const relationsUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/${item.id}?$expand=relations&api-version=7.0`;
+          const relationsResponse = await fetch(relationsUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+          
+          if (relationsResponse.ok) {
+            const relationsData = await relationsResponse.json();
+            
+            // Find parent relationship (Hierarchy-Forward)
+            if (relationsData.relations) {
+              for (const relation of relationsData.relations) {
+                if (relation.rel === 'System.LinkTypes.Hierarchy-Forward') {
+                  // Extract parent ID from URL (e.g., .../workitems/12345)
+                  const match = relation.url.match(/\/work[iI]tems\/(\d+)(?:\?|$|\/)/i);
+                  if (match) {
+                    const parentId = parseInt(match[1], 10);
+                    workItemToParentMap.set(item.id, parentId);
+                    console.log(`Work item ${item.id} has parent ${parentId}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching relations for work item ${item.id}:`, error);
+        }
+      }));
+    }
+    
+    // Step 4: Fetch parent work items to check if they are Epics
+    const parentIds = Array.from(new Set(workItemToParentMap.values()));
+    if (parentIds.length > 0) {
+      const parentIdsString = parentIds.slice(0, 200).join(',');
+      const parentFields = ['System.Id', 'System.Title', 'System.WorkItemType'].join(',');
+      const parentUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${parentIdsString}&fields=${parentFields}&api-version=7.0`;
+      
+      try {
+        const parentResponse = await fetch(parentUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        });
+        
+        if (parentResponse.ok) {
+          const parentData = await parentResponse.json();
+          for (const parent of parentData.value) {
+            parentTitlesMap.set(parent.id, parent.fields['System.Title'] || '');
+            if (parent.fields['System.WorkItemType'] === 'Epic') {
+              epicTitlesMap.set(parent.id, parent.fields['System.Title'] || '');
+              console.log(`Found Epic ${parent.id}: ${parent.fields['System.Title']}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching parent work items:', error);
+      }
+    }
+    
+    // Step 5: Transform the response and add Epic information
+    return allWorkItems.map((item: any) => {
+      // Find Epic for this work item
+      let epicTitle: string | null = null;
+      
+      // Strategy 1: Check parent Epic relationship
+      const parentId = workItemToParentMap.get(item.id);
+      if (parentId) {
+        epicTitle = epicTitlesMap.get(parentId) || null;
+        if (epicTitle) {
+          console.log(`Work item ${item.id} has Epic from parent ${parentId}: ${epicTitle}`);
+        } else {
+          const parentTitle = parentTitlesMap.get(parentId);
+          console.log(`Work item ${item.id} has parent ${parentId} (${parentTitle}) but it's not an Epic type`);
+        }
+      }
+      
+      // Strategy 2: Check for Epic fields in the work item itself (if not found via parent)
+      if (!epicTitle && item.fields) {
+        const allFields = Object.keys(item.fields);
+        const possibleEpicFields = [
+          'System.Epic', 
+          'Epic', 
+          'Microsoft.VSTS.Common.Epic',
+          'Custom.Epic',
+          'EpicLink',
+          'EpicName',
+          ...allFields.filter(f => f.toLowerCase().includes('epic') && !['System.Epic', 'Epic', 'Microsoft.VSTS.Common.Epic', 'Custom.Epic', 'EpicLink', 'EpicName'].includes(f))
+        ];
+        
+        for (const fieldName of possibleEpicFields) {
+          const epicFieldValue = item.fields[fieldName];
+          if (epicFieldValue !== undefined && epicFieldValue !== null) {
+            if (typeof epicFieldValue === 'string' && epicFieldValue.trim() !== '') {
+              const epicId = parseInt(epicFieldValue.trim());
+              if (!isNaN(epicId) && epicId > 0) {
+                epicTitle = epicTitlesMap.get(epicId) || null;
+                if (epicTitle) {
+                  console.log(`Work item ${item.id} has Epic ID ${epicId} from field ${fieldName}: ${epicTitle}`);
+                  break;
+                }
+              } else {
+                epicTitle = epicFieldValue.trim();
+                console.log(`Work item ${item.id} has Epic name from field ${fieldName}: ${epicTitle}`);
+                break;
+              }
+            } else if (typeof epicFieldValue === 'number') {
+              epicTitle = epicTitlesMap.get(epicFieldValue) || null;
+              if (epicTitle) {
+                console.log(`Work item ${item.id} has Epic ID ${epicFieldValue} from field ${fieldName}: ${epicTitle}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      if (!epicTitle) {
+        console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic found`);
+      }
+      
+      return {
       id: item.id,
       fields: {
         'System.Title': item.fields['System.Title'],
@@ -474,10 +1214,12 @@ export async function fetchAzureDevOpsWorkItems(
         'System.State': item.fields['System.State'],
         'Microsoft.VSTS.Common.Priority': item.fields['Microsoft.VSTS.Common.Priority'],
         'System.AreaPath': item.fields['System.AreaPath'],
-        'System.IterationPath': item.fields['System.IterationPath']
+          'System.IterationPath': item.fields['System.IterationPath'],
+          'Epic': epicTitle || undefined
       },
       url: `https://dev.azure.com/${organization}/${project}/_workitems/edit/${item.id}`
-    }));
+      };
+    });
     
   } catch (error) {
     console.error('Error fetching from Azure DevOps:', error);
@@ -490,34 +1232,56 @@ export async function fetchAzureDevOpsWorkItems(
  */
 export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Feature[] {
   return workItems.map(item => {
-    // Extract epic from tags or area path
-    let epic = "Uncategorized";
+    // Use Epic from fields if available (fetched from relations)
+    let epic: string | undefined = undefined;
+    const epicField = item.fields['Epic'];
+    const workItemType = item.fields['System.WorkItemType'];
     
-    if (item.fields['System.Tags']) {
-      const tags = item.fields['System.Tags'].split(';').map(t => t.trim());
-      if (tags.length > 0) {
-        epic = tags[0];
+    // Only use epic if it's actually set and not the same as the work item type
+    if (epicField && typeof epicField === 'string' && epicField.trim() !== '') {
+      const trimmedEpic = epicField.trim();
+      // Make sure it's not the work item type or just "Epic"
+      if (trimmedEpic !== workItemType && trimmedEpic !== 'Epic' && trimmedEpic.toLowerCase() !== 'epic') {
+        epic = trimmedEpic;
+        console.log(`Work item ${item.id} converted - Epic: "${epic}"`);
+      } else {
+        console.warn(`Work item ${item.id} has epic field "${trimmedEpic}" which matches work item type "${workItemType}" - ignoring`);
       }
-    } else if (item.fields['System.AreaPath']) {
-      const areaPath = item.fields['System.AreaPath'];
-      const parts = areaPath.split('\\');
-      if (parts.length > 1) {
-        epic = parts[parts.length - 1];
-      }
+    }
+    
+    // Debug log if epic is missing
+    if (!epic && workItemType !== 'Epic') {
+      console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic assigned`);
+    }
+    
+    // Clean description - strip HTML tags
+    const description = item.fields['System.Description'] || '';
+    const cleanDescription = description.replace(/<[^>]*>/g, '').trim();
+    
+    // IMPORTANT: Always use System.Title for the work item title, NEVER use Epic name
+    // The Epic name goes in the 'epic' field, not the 'title' field
+    const workItemTitle = item.fields['System.Title'] || 'Untitled';
+    
+    // Validate that title is not accidentally the Epic name
+    if (epic && workItemTitle === epic) {
+      console.warn(`Work item ${item.id}: Title "${workItemTitle}" matches Epic name "${epic}" - this may indicate a data issue`);
     }
     
     return {
       id: `ado-${item.id}`,
-      title: item.fields['System.Title'] || 'Untitled',
-      description: item.fields['System.Description'] || '',
-      epic: item.fields['System.AreaPath'] || null,
-      state: item.fields['System.State'] || null,
-      areaPath: item.fields['System.AreaPath'] || null,
+      title: workItemTitle,
+      description: cleanDescription,
+      votes: 0,
+      voters: [] as any[],
+      epic: epic || undefined,
+      state: item.fields['System.State'] || undefined,
+      areaPath: item.fields['System.AreaPath'] || undefined,
       tags: item.fields['System.Tags']
         ? item.fields['System.Tags'].split(';').map((t: string) => t.trim()).filter((t: string) => t)
         : [],
       azureDevOpsId: item.id.toString(),
-      azureDevOpsUrl: item.url
+      azureDevOpsUrl: item.url,
+      workItemType: workItemType || undefined
     };
   });
 }

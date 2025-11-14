@@ -1,0 +1,60 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "a6283b6c-2210-4d6c-bade-651acfdb6703",
+  "packageName": "com.newmillennium.featurevoting",
+  "developer": {
+    "name": "New Millennium Building Systems",
+    "websiteUrl": "https://dcchoffman.github.io/feature-voting-app",
+    "privacyUrl": "https://dcchoffman.github.io/feature-voting-app/privacy",
+    "termsOfUseUrl": "https://dcchoffman.github.io/feature-voting-app/terms"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "Feature Voting",
+    "full": "Feature Voting System"
+  },
+  "description": {
+    "short": "Vote on features and prioritize development",
+    "full": "A comprehensive feature voting system that allows stakeholders to vote on and prioritize features for development. Admins can manage voting sessions, track results, and make data-driven decisions."
+  },
+  "accentColor": "#2D4660",
+  "configurableTabs": [
+    {
+      "configurationUrl": "https://dcchoffman.github.io/feature-voting-app/?inTeams=true",
+      "canUpdateConfiguration": true,
+      "scopes": [
+        "team",
+        "groupchat"
+      ]
+    }
+  ],
+  "staticTabs": [
+    {
+      "entityId": "featurevoting",
+      "name": "Feature Voting",
+      "contentUrl": "https://dcchoffman.github.io/feature-voting-app/?inTeams=true",
+      "websiteUrl": "https://dcchoffman.github.io/feature-voting-app",
+      "scopes": [
+        "personal"
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "dcchoffman.github.io",
+    "login.microsoftonline.com",
+    "*.login.microsoftonline.com"
+  ],
+  "webApplicationInfo": {
+    "id": "a6283b6c-2210-4d6c-bade-651acfdb6703",
+    "resource": "api://dcchoffman.github.io/a6283b6c-2210-4d6c-bade-651acfdb6703"
+  }
+}

@@ -26,6 +26,7 @@ export interface AzureDevOpsWorkItem {
     'Microsoft.VSTS.Common.Priority'?: number;
     'System.AreaPath'?: string;
     'System.IterationPath'?: string;
+    'Epic'?: string;
   };
   url: string;
 }
@@ -42,6 +43,7 @@ export interface Feature {
   tags?: string[];
   azureDevOpsId?: string;
   azureDevOpsUrl?: string;
+  workItemType?: string;
 }
 
 export interface VoterInfo {
@@ -51,10 +53,38 @@ export interface VoterInfo {
   voteCount: number;
 }
 
+export interface FeatureSuggestion {
+  id: string;
+  session_id: string;
+  title: string;
+  summary: string | null;
+  whatWouldItDo: string | null;
+  howWouldItWork: string | null;
+  status: 'pending' | 'future';
+  requester_id: string | null;
+  requester_name: string | null;
+  requester_email: string | null;
+  created_at: string;
+}
+
 export interface VotingSession {
-  // ... existing fields
-  originalEndDate?: string;  // Store original end date when ended early
-  endedEarlyBy?: string;     // Name of admin who ended early
-  endedEarlyReason?: string; // Reason selected from dropdown
-  endedEarlyDetails?: string; // Optional additional details
+  title: string;
+  goal: string;
+  votesPerUser: number;
+  useAutoVotes: boolean;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  productId?: string | null;
+  productName?: string | null;
+  product_id?: string | null;
+  product_name?: string | null;
+  originalEndDate?: string | null;  // Store original end date when ended early
+  endedEarlyBy?: string | null;     // Name of admin who ended early
+  endedEarlyReason?: string | null; // Reason selected from dropdown
+  endedEarlyDetails?: string | null; // Optional additional details
+  reopenReason?: string | null;     // Reason provided when session was reopened
+  reopenDetails?: string | null;    // Additional context for reopening
+  reopenedBy?: string | null;       // Name of admin who reopened the session
+  reopenedAt?: string | null;       // Timestamp captured when session was reopened
 }

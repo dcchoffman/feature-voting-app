@@ -82,6 +82,7 @@ export default function UsersManagementScreen() {
     sessionAdmin: false,
     stakeholder: false
   });
+  const [pageTitle, setPageTitle] = useState('User Management');
 
   const handleLogout = async () => {
     try {
@@ -141,6 +142,20 @@ export default function UsersManagementScreen() {
       console.error('Error loading sessions:', error);
     }
   };
+
+  // Update title when query string and session context change
+  useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    if (filterParam === 'session-admin') {
+      setPageTitle('Session Admin Management');
+      setFilterRole('session-admin');
+    } else if (filterParam === 'stakeholder') {
+      setPageTitle('Stakeholder Management');
+      setFilterRole('stakeholder');
+    } else {
+      setPageTitle('User Management');
+    }
+  }, [searchParams]);
 
   const loadUsers = async (sessions: VotingSession[]) => {
     setIsLoading(true);
@@ -386,6 +401,21 @@ export default function UsersManagementScreen() {
   const filterUsers = () => {
     let filtered = [...users];
 
+    // Restrict visibility based on current view mode
+    if (viewMode === 'session-admin' && allSessions.length > 0) {
+      const managedSessionIds = new Set(allSessions.map((session) => session.id));
+      filtered = filtered.filter((user) => {
+        if (user.id === currentUser?.id) {
+          return true;
+        }
+
+        const adminMatch = user.adminInSessions?.some((session) => session && managedSessionIds.has(session.id));
+        const stakeholderMatch = user.stakeholderInSessions?.some((session) => session && managedSessionIds.has(session.id));
+
+        return !!adminMatch || !!stakeholderMatch;
+      });
+    }
+
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -450,9 +480,18 @@ export default function UsersManagementScreen() {
     }
   }, [searchParams]);
 
+  // Ensure session-admin mode never exposes system-admin filter
+  useEffect(() => {
+    if (viewMode === 'session-admin') {
+      if (filterRole === 'all' || filterRole === 'system-admin') {
+        setFilterRole('session-admin');
+      }
+    }
+  }, [viewMode, filterRole]);
+
   useEffect(() => {
     filterUsers();
-  }, [users, searchQuery, filterRole]);
+  }, [users, searchQuery, filterRole, viewMode, allSessions, currentUser]);
 
   const loadUserSessionMemberships = async (userId: string) => {
     try {
@@ -891,7 +930,7 @@ export default function UsersManagementScreen() {
       );
     } else if (user.roles.sessionAdminCount > 0) {
       return (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-[#173B65] text-white">
           <Shield className="h-3 w-3 mr-1" />
           Session Admin ({user.roles.sessionAdminCount})
         </span>
@@ -990,7 +1029,7 @@ export default function UsersManagementScreen() {
             >
               <ChevronLeft className="h-6 w-6" />
             </button>
-            <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">User Management</h1>
+            <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
           </div>
           
           <div ref={mobileMenuRef} className="relative z-40 flex-shrink-0 ml-2">
@@ -999,10 +1038,10 @@ export default function UsersManagementScreen() {
               {(isSystemAdmin || isSessionAdmin) && (
                 <button
                   onClick={openAddUserModal}
-                  className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
                 >
                   <Users className="h-4 w-4 mr-2" />
-                  Add User
+                  {viewMode === 'session-admin' ? 'Add Stakeholder' : 'Add User'}
                 </button>
               )}
               <button
@@ -1042,7 +1081,7 @@ export default function UsersManagementScreen() {
                     className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
                   >
                     <Users className="h-5 w-5 mr-3 text-green-600" />
-                    <span className="text-base">Add User</span>
+                    <span className="text-base">{viewMode === 'session-admin' ? 'Add Stakeholder' : 'Add User'}</span>
                   </button>
                 )}
                   <button
@@ -1090,12 +1129,12 @@ export default function UsersManagementScreen() {
 
             {/* Role Filter */}
             <select
-              value={filterRole}
+              value={filterRole === 'system-admin' && viewMode === 'session-admin' ? 'session-admin' : filterRole}
               onChange={(e) => setFilterRole(e.target.value as any)}
               className="px-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base"
             >
-              <option value="all">All Roles</option>
-              <option value="system-admin">System Admin</option>
+              {viewMode !== 'session-admin' && <option value="all">All Roles</option>}
+              {viewMode !== 'session-admin' && <option value="system-admin">System Admin</option>}
               <option value="session-admin">Session Admin</option>
               <option value="stakeholder">Stakeholder</option>
               <option value="none">No Role</option>
@@ -1216,7 +1255,7 @@ export default function UsersManagementScreen() {
                                   {canAddToMoreSessions(user, 'session-admin') && (
                                     <button
                                       onClick={() => openRoleModal(user, 'session-admin')}
-                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-blue-50 text-blue-700 border-t border-gray-200"
+                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-[#E8EDF2] text-[#2D4660] border-t border-gray-200"
                                     >
                                       <Shield className="h-5 w-5 mr-3 flex-shrink-0" />
                                       <div>
@@ -1294,7 +1333,7 @@ export default function UsersManagementScreen() {
                             ? `Admin in: ${user.adminInSessions.map(s => s.title || s.name || 'Unnamed Session').join(', ')}` 
                             : 'Loading session details...'}
                         >
-                          <Shield className="h-4 w-4 mr-2 text-blue-500 flex-shrink-0" />
+                          <Shield className="h-4 w-4 mr-2 text-[#2D4660] flex-shrink-0" />
                           <span className="text-gray-700">{user.roles.sessionAdminCount} as Admin</span>
                         </div>
                       )}
@@ -1412,7 +1451,7 @@ export default function UsersManagementScreen() {
                           {user.adminInSessions && user.adminInSessions.length > 0 && (
                             <div>
                               <div className="flex items-center text-sm font-medium text-gray-700 mb-1.5">
-                                <Shield className="h-4 w-4 mr-1.5 text-blue-600" />
+                                <Shield className="h-4 w-4 mr-1.5 text-[#173B65]" />
                                 Admin in {user.adminInSessions.length} session{user.adminInSessions.length !== 1 ? 's' : ''}:
                               </div>
                               <div className="space-y-1.5 ml-5">
@@ -1567,7 +1606,7 @@ export default function UsersManagementScreen() {
                                       {canAddToMoreSessions(user, 'session-admin') && (
                                         <button
                                           onClick={() => openRoleModal(user, 'session-admin')}
-                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-blue-50 text-blue-700 border-t border-gray-200"
+                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-[#E8EDF2] text-[#2D4660] border-t border-gray-200"
                                         >
                                           <Shield className="h-4 w-4 mr-3" />
                                           <div>
@@ -1643,7 +1682,7 @@ export default function UsersManagementScreen() {
                 <span className="text-gray-600">System Admins: <strong>{users.filter(u => u.roles.isSystemAdmin).length}</strong></span>
               </div>
               <div className="flex items-center">
-                <Shield className="h-4 w-4 mr-2 text-blue-500" />
+                <Shield className="h-4 w-4 mr-2 text-[#2D4660]" />
                 <span className="text-gray-600">Session Admins: <strong>{users.filter(u => u.roles.sessionAdminCount > 0).length}</strong></span>
               </div>
               <div className="flex items-center">
@@ -1672,7 +1711,7 @@ export default function UsersManagementScreen() {
               </div>
             </div>
             <div className="flex items-center">
-              <Shield className="h-5 w-5 mr-2 text-blue-500 flex-shrink-0" />
+              <Shield className="h-5 w-5 mr-2 text-[#2D4660] flex-shrink-0" />
               <div>
                 <div className="text-xs text-gray-500">Session Admins</div>
                 <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.sessionAdminCount > 0).length}</div>
@@ -1911,7 +1950,7 @@ export default function UsersManagementScreen() {
                   )}
                   {userToDelete.roles.sessionAdminCount > 0 && (
                     <div className="flex items-center text-sm">
-                      <Shield className="h-4 w-4 mr-2 text-blue-500" />
+                      <Shield className="h-4 w-4 mr-2 text-[#2D4660]" />
                       <span className="text-gray-700">Session Admin in {userToDelete.roles.sessionAdminCount} session{userToDelete.roles.sessionAdminCount !== 1 ? 's' : ''}</span>
                     </div>
                   )}
@@ -1940,7 +1979,7 @@ export default function UsersManagementScreen() {
                     {userToDelete.adminInSessions && userToDelete.adminInSessions.length > 0 && (
                       <div className="mb-3">
                         <div className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center">
-                          <Shield className="h-3.5 w-3.5 mr-1.5 text-blue-600" />
+                          <Shield className="h-3.5 w-3.5 mr-1.5 text-[#173B65]" />
                           Admin Sessions ({userToDelete.adminInSessions.length})
                         </div>
                         <div className="space-y-1 ml-5">
@@ -2045,7 +2084,7 @@ export default function UsersManagementScreen() {
                 </div>
                 <div className="ml-4 flex-1">
                   <h2 className="text-xl font-bold text-gray-900 mb-1">
-                    Add New User
+                    {viewMode === 'session-admin' ? 'Add New Stakeholder' : 'Add New User'}
                   </h2>
                   <p className="text-sm text-gray-600">
                     {viewMode === 'session-admin' 
@@ -2074,7 +2113,7 @@ export default function UsersManagementScreen() {
                     type="text"
                     value={newUserData.name}
                     onChange={(e) => setNewUserData({ ...newUserData, name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
                     placeholder="John Doe"
                   />
                 </div>
@@ -2088,7 +2127,7 @@ export default function UsersManagementScreen() {
                     type="email"
                     value={newUserData.email}
                     onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
                     placeholder="john.doe@newmill.com"
                   />
                 </div>
@@ -2103,7 +2142,7 @@ export default function UsersManagementScreen() {
                       type="text"
                       value={newUserData.password}
                       onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono text-sm"
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent font-mono text-sm"
                       placeholder="Auto-generated password"
                     />
                     <button
@@ -2165,10 +2204,10 @@ export default function UsersManagementScreen() {
                       className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
                     >
                       <div className="flex items-center">
-                        <Shield className="h-4 w-4 mr-2 text-blue-500" />
+                        <Shield className="h-4 w-4 mr-2 text-[#2D4660]" />
                         <span className="text-sm font-medium text-gray-700">Session Admin</span>
                         {newUserData.sessionAdminIds.length > 0 && (
-                          <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
+                          <span className="ml-2 px-2 py-0.5 bg-[#E8EDF2] text-[#173B65] text-xs rounded-full">
                             {newUserData.sessionAdminIds.length}
                           </span>
                         )}
@@ -2196,7 +2235,7 @@ export default function UsersManagementScreen() {
                                   type="checkbox"
                                   checked={newUserData.sessionAdminIds.includes(session.id)}
                                   onChange={() => toggleSessionAdmin(session.id)}
-                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                  className="w-4 h-4 text-[#173B65] border-gray-300 rounded focus:ring-[#2D4660]"
                                 />
                                 <span className="ml-3 text-sm text-gray-700">
                                   {session.title || session.name || 'Unnamed Session'}
@@ -2240,7 +2279,7 @@ export default function UsersManagementScreen() {
                                 type="checkbox"
                                 checked={newUserData.stakeholderSessionIds.includes(session.id)}
                                 onChange={() => toggleStakeholder(session.id)}
-                                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-[#2D4660]"
                               />
                               <span className="ml-3 text-sm text-gray-700">
                                 {session.title || session.name || 'Unnamed Session'}
@@ -2291,7 +2330,7 @@ export default function UsersManagementScreen() {
                                   type="checkbox"
                                   checked={newUserData.stakeholderSessionIds.includes(session.id)}
                                   onChange={() => toggleStakeholder(session.id)}
-                                  className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                                  className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-[#2D4660]"
                                 />
                                 <span className="ml-3 text-sm text-gray-700">
                                   {session.title || session.name || 'Unnamed Session'}
@@ -2318,7 +2357,7 @@ export default function UsersManagementScreen() {
                 <button
                   onClick={handleAddUser}
                   disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim()}
-                  className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  className="flex-1 px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   {isAddingUser ? (
                     <>

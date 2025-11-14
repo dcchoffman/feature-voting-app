@@ -12,6 +12,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  tenant_id?: string | null;
+  tenantId?: string | null;
   created_at?: string;
 }
 
@@ -31,7 +33,17 @@ export interface VotingSession {
   created_by?: string; // user_id of creator
   access_type: 'public' | 'invite-only';
   session_code: string; // Unique code for sharing
+  product_id?: string | null;
+  product_name?: string | null;
   created_at?: string;
+  original_end_date?: string | null;
+  ended_early_by?: string | null;
+  ended_early_reason?: string | null;
+  ended_early_details?: string | null;
+  reopen_reason?: string | null;
+  reopen_details?: string | null;
+  reopened_by?: string | null;
+  reopened_at?: string | null;
 }
 
 export interface SessionAdmin {
@@ -51,6 +63,29 @@ export interface SessionStakeholder {
   has_voted: boolean;
   voted_at?: string;
   created_at?: string;
+}
+
+export interface SessionContextType {
+  currentSession: VotingSession | null;
+  sessions: VotingSession[];
+  currentUser: User | null;
+  isAdmin: boolean;
+  isStakeholder: boolean;
+  isSystemAdmin: boolean;
+  setCurrentSession: (session: VotingSession | null) => void;
+  refreshSessions: (user?: User) => Promise<void>;
+  setCurrentUser: (user: User | null) => Promise<void>;
+}
+
+export interface SessionStatusNote {
+  id: string;
+  sessionId: string;
+  type: 'reopen' | 'ended-early';
+  reason: string;
+  details?: string | null;
+  actorName: string;
+  actorId?: string | null;
+  createdAt: string;
 }
 
 // ============================================
@@ -115,3 +150,30 @@ export interface AzureDevOpsConfig {
   states?: string[];
   areaPath?: string;
   tags?: string[];
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  tenant_id?: string | null;
+  color_hex?: string | null;
+  created_at?: string;
+}
+
+export type DbVotingSession = VotingSession;
+
+export interface DbFeature {
+  id: string;
+  session_id: string;
+  title: string;
+  description: string | null;
+  epic: string | null;
+  state: string | null;
+  area_path: string | null;
+  tags: string[] | null;
+  azure_devops_id: string | null;
+  azure_devops_url: string | null;
+  created_at?: string;
+}
+
+export type DbSessionStakeholder = SessionStakeholder;

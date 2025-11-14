@@ -5,11 +5,52 @@
 // ============================================
 
 import { supabase } from '../supabaseClient';
-import type { 
-  DbVotingSession, DbFeature, DbVote, DbAzureDevOpsConfig,
-  DbUser, DbSessionAdmin, DbSessionStakeholder,
-  User, VotingSession, SessionAdmin, SessionStakeholder
+
+const FEATURE_SUGGESTION_STATE = '__FEATURE_SUGGESTION__';
+const FEATURE_SUGGESTION_TAG = '__feature_suggestion__';
+const FEATURE_SUGGESTION_FUTURE_TAG = '__feature_future_session__';
+
+function mapRowToSuggestion(row: any): FeatureSuggestion {
+  let payload: any = {};
+
+  if (row?.description) {
+    try {
+      payload = JSON.parse(row.description);
+    } catch (error) {
+      console.warn('[databaseService] Unable to parse suggestion payload', error);
+      payload = {};
+    }
+  }
+
+  const tags: string[] = Array.isArray(row?.tags) ? row.tags : [];
+  const status: 'pending' | 'future' = tags.includes(FEATURE_SUGGESTION_FUTURE_TAG) ? 'future' : 'pending';
+
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    title: row.title,
+    summary: payload.summary ?? null,
+    whatWouldItDo: payload.whatWouldItDo ?? null,
+    howWouldItWork: payload.howWouldItWork ?? null,
+    status,
+    requester_id: payload.requesterId ?? null,
+    requester_name: payload.requesterName ?? null,
+    requester_email: payload.requesterEmail ?? null,
+    created_at: row.created_at
+  };
+}
+import type {
+  DbVotingSession,
+  DbFeature,
+  DbSessionStakeholder,
+  User,
+  VotingSession,
+  SessionAdmin,
+  SessionStakeholder,
+  SessionStatusNote,
+  Product
 } from '../types';
+import type { FeatureSuggestion } from '../types/azure';
 
 // ============================================
 // USERS
@@ -30,10 +71,18 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   return data;
 }
 
-export async function createUser(user: { email: string; name: string }): Promise<User> {
+export async function createUser(user: { email: string; name: string; tenant_id?: string }): Promise<User> {
+  // Default tenant ID for New Millennium Building Systems
+  // TODO: Replace with actual tenant management when multi-tenant support is added
+  const DEFAULT_TENANT_ID = '5e5482eb-82f0-4e76-8a6b-c6d74b01cd3a';
+  
   const { data, error } = await supabase
     .from('users')
-    .insert([user])
+    .insert([{
+      email: user.email,
+      name: user.name,
+      tenant_id: user.tenant_id || DEFAULT_TENANT_ID
+    }])
     .select()
     .single();
   
@@ -100,23 +149,213 @@ export async function getUserRoleInfo(userId: string): Promise<UserRoleInfo> {
 }
 
 // ============================================
+// PRODUCTS
+// ============================================
+
+const PRODUCTS_TABLE_MISSING_CODE = 'PRODUCTS_TABLE_MISSING';
+
+export function isProductsTableMissingError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as any).code === PRODUCTS_TABLE_MISSING_CODE;
+}
+
+export async function getProducts(): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (error) {
+    if ((error as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    throw error;
+  }
+  return data || [];
+}
+
+async function insertProduct(payload: Record<string, any>) {
+  return supabase
+    .from('products')
+    .insert([payload])
+    .select()
+    .single();
+}
+
+export async function createProduct(name: string, tenantId?: string, colorHex?: string | null): Promise<Product> {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error('Product name is required');
+  }
+
+  const basePayload = tenantId
+    ? { name: trimmedName, tenant_id: tenantId }
+    : { name: trimmedName };
+  const payloadWithColor = {
+    ...basePayload,
+    color_hex: colorHex ?? null
+  };
+
+  let { data, error } = await insertProduct(payloadWithColor);
+
+  if (error) {
+    if ((error as any)?.code === 'PGRST204') {
+      const fallbackPayload = { ...basePayload };
+      const result = await insertProduct(fallbackPayload);
+      if (result.error) throw result.error;
+      return result.data as Product;
+    }
+    if ((error as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    if ((error as any)?.code === '23505') {
+      const { data: existing, error: fetchError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('name', trimmedName)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (existing) return existing as Product;
+    }
+
+    throw error;
+  }
+
+  return data as Product;
+}
+
+export async function getProductsForTenant(tenantId: string): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('name', { ascending: true });
+
+  if (error) {
+    if ((error as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    throw error;
+  }
+  return data || [];
+}
+
+export async function createProductForTenant(tenantId: string, name: string, colorHex?: string | null): Promise<Product> {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error('Product name is required');
+  }
+
+  const payloadWithColor = {
+    name: trimmedName,
+    tenant_id: tenantId,
+    color_hex: colorHex ?? null
+  };
+
+  let { data, error } = await insertProduct(payloadWithColor);
+
+  if (error) {
+    if ((error as any)?.code === 'PGRST204') {
+      const fallbackPayload = {
+        name: trimmedName,
+        tenant_id: tenantId
+      };
+      const result = await insertProduct(fallbackPayload);
+      if (result.error) throw result.error;
+      return result.data as Product;
+    }
+    if ((error as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    if ((error as any)?.code === '23505') {
+      const { data: existing, error: fetchError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('name', trimmedName)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (existing) return existing as Product;
+    }
+
+    throw error;
+  }
+
+  return data as Product;
+}
+
+export async function deleteProduct(productId: string): Promise<void> {
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', productId);
+
+  if (error) {
+    if ((error as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    throw error;
+  }
+}
+
+// ============================================
 // VOTING SESSIONS
 // ============================================
+
+type SessionRow = VotingSession & {
+  product?: {
+    name?: string | null;
+  } | null;
+};
+
+const SESSION_SELECT = '*, product:products(name)';
+
+function normalizeSessionRow(row: SessionRow | null): VotingSession {
+  if (!row) {
+    throw new Error('Unexpected empty session row');
+  }
+
+  const { product, ...rest } = row;
+  const productName = rest.product_name ?? product?.name ?? null;
+
+  return {
+    ...rest,
+    product_name: productName
+  };
+}
+
+function normalizeSessionRows(rows: SessionRow[] | null | undefined): VotingSession[] {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+  return rows.map((row) => normalizeSessionRow(row));
+}
 
 export async function getAllSessions(): Promise<VotingSession[]> {
   const { data, error } = await supabase
     .from('voting_sessions')
-    .select('*')
+    .select(SESSION_SELECT)
     .order('created_at', { ascending: false });
   
   if (error) throw error;
-  return data || [];
+  return normalizeSessionRows(data as SessionRow[]);
 }
 
 export async function getSessionById(id: string): Promise<VotingSession | null> {
   const { data, error } = await supabase
     .from('voting_sessions')
-    .select('*')
+    .select(SESSION_SELECT)
     .eq('id', id)
     .single();
   
@@ -125,13 +364,13 @@ export async function getSessionById(id: string): Promise<VotingSession | null> 
     throw error;
   }
   
-  return data;
+  return data ? normalizeSessionRow(data as SessionRow) : null;
 }
 
 export async function getSessionByCode(code: string): Promise<VotingSession | null> {
   const { data, error } = await supabase
     .from('voting_sessions')
-    .select('*')
+    .select(SESSION_SELECT)
     .eq('session_code', code)
     .single();
   
@@ -140,7 +379,7 @@ export async function getSessionByCode(code: string): Promise<VotingSession | nu
     throw error;
   }
   
-  return data;
+  return data ? normalizeSessionRow(data as SessionRow) : null;
 }
 
 export async function getSessionsForUser(userId: string): Promise<VotingSession[]> {
@@ -186,24 +425,58 @@ export async function getSessionsForUser(userId: string): Promise<VotingSession[
   // Get all sessions
   const { data: sessions, error: sessionsError } = await supabase
     .from('voting_sessions')
-    .select('*')
+    .select(SESSION_SELECT)
     .in('id', allSessionIds)
     .order('created_at', { ascending: false });
   
   if (sessionsError) throw sessionsError;
   
-  return sessions || [];
+  return normalizeSessionRows(sessions as SessionRow[]);
 }
 
 export async function createSession(session: Omit<DbVotingSession, 'id' | 'created_at'>): Promise<VotingSession> {
-  const { data, error } = await supabase
-    .from('voting_sessions')
-    .insert([session])
-    .select()
-    .single();
-  
-  if (error) throw error;
-  return data;
+  const insertSession = (payload: typeof session) =>
+    supabase.from('voting_sessions').insert([payload]).select().single();
+
+  let { data, error } = await insertSession(session);
+
+  if (!error) {
+    return data as VotingSession;
+  }
+
+  if ((error as any)?.code !== 'PGRST204') {
+    throw error;
+  }
+
+  console.warn("Supabase 'voting_sessions' table is missing one or more columns. Retrying insert with reduced payload.");
+  const sanitizedSession: Record<string, any> = { ...session };
+
+  const removeFields = (fields: Array<'product_name' | 'productName' | 'product_id' | 'productId'>) => {
+    fields.forEach((field) => {
+      if (field in sanitizedSession) {
+        delete sanitizedSession[field];
+      }
+    });
+  };
+
+  // First retry without product_name/productName (keep product_id if available)
+  removeFields(['product_name', 'productName']);
+  let retry = await insertSession(sanitizedSession as typeof session);
+  if (!retry.error) {
+    return retry.data as VotingSession;
+  }
+
+  if ((retry.error as any)?.code !== 'PGRST204') {
+    throw retry.error;
+  }
+
+  // Final retry without product_id/productId as well
+  removeFields(['product_id', 'productId']);
+  retry = await insertSession(sanitizedSession as typeof session);
+  if (retry.error) {
+    throw retry.error;
+  }
+  return retry.data as VotingSession;
 }
 
 export async function updateSession(id: string, updates: Partial<DbVotingSession>): Promise<VotingSession> {
@@ -224,6 +497,16 @@ export async function deleteSession(id: string): Promise<void> {
     .delete()
     .eq('id', id);
   
+  if (error) throw error;
+}
+
+export async function deleteVotesForFeature(sessionId: string, featureId: string): Promise<void> {
+  const { error } = await supabase
+    .from('votes')
+    .delete()
+    .eq('session_id', sessionId)
+    .eq('feature_id', featureId);
+
   if (error) throw error;
 }
 
@@ -333,7 +616,13 @@ export async function addSessionStakeholder(stakeholder: Omit<DbSessionStakehold
 
 // Convenience: ensure a stakeholder row exists for email (user account not required)
 export async function addSessionStakeholderByEmail(sessionId: string, email: string, name: string): Promise<SessionStakeholder> {
-  return addSessionStakeholder({ session_id: sessionId, user_email: email, user_name: name });
+  return addSessionStakeholder({
+    session_id: sessionId,
+    user_email: email,
+    user_name: name,
+    votes_allocated: 0,
+    has_voted: false
+  });
 }
 
 // Helper: Build a mailto link for inviting a user to a session
@@ -403,6 +692,32 @@ export async function isUserSessionStakeholder(sessionId: string, email: string)
   }
 }
 
+export async function isUserStakeholder(sessionId: string, email: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('session_stakeholders')
+    .select('id')
+    .eq('session_id', sessionId)
+    .eq('user_email', email.toLowerCase())
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error checking stakeholder status:', error);
+    return false;
+  }
+
+  return !!data;
+}
+
+export async function removeStakeholder(sessionId: string, email: string): Promise<void> {
+  const { error } = await supabase
+    .from('session_stakeholders')
+    .delete()
+    .eq('session_id', sessionId)
+    .eq('user_email', email.toLowerCase());
+
+  if (error) throw error;
+}
+
 // ============================================
 // FEATURES (Session-scoped)
 // ============================================
@@ -415,7 +730,11 @@ export async function getFeatures(sessionId: string) {
     .order('created_at', { ascending: false });
   
   if (error) throw error;
-  return data || [];
+  return (data || []).filter(feature => {
+    const isSuggestionState = feature.state === FEATURE_SUGGESTION_STATE;
+    const hasSuggestionTag = Array.isArray(feature.tags) && feature.tags.includes(FEATURE_SUGGESTION_TAG);
+    return !isSuggestionState && !hasSuggestionTag;
+  });
 }
 
 export async function createFeature(feature: {
@@ -488,6 +807,84 @@ export async function deleteFeature(id: string) {
     .eq('id', id);
   
   if (error) throw error;
+}
+
+// ============================================
+// SESSION STATUS NOTES
+// ============================================
+
+function mapRowToStatusNote(row: any): SessionStatusNote {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    type: row.type,
+    reason: row.reason,
+    details: row.details ?? null,
+    actorName: row.actor_name ?? 'Admin',
+    actorId: row.actor_id ?? null,
+    createdAt: row.created_at
+  };
+}
+
+export async function getSessionStatusNotes(sessionId: string): Promise<SessionStatusNote[]> {
+  try {
+    const { data, error } = await supabase
+      .from('session_status_notes')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map(mapRowToStatusNote);
+  } catch (error: any) {
+    if (error?.code === '42P01') {
+      console.warn('[databaseService] session_status_notes table not found; status notes will not persist.', error);
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function addSessionStatusNote(note: {
+  session_id: string;
+  type: 'reopen' | 'ended-early';
+  reason: string;
+  details?: string | null;
+  actor_id?: string | null;
+  actor_name: string;
+}): Promise<SessionStatusNote> {
+  try {
+    const { data, error } = await supabase
+      .from('session_status_notes')
+      .insert([{
+        session_id: note.session_id,
+        type: note.type,
+        reason: note.reason,
+        details: note.details ?? null,
+        actor_id: note.actor_id ?? null,
+        actor_name: note.actor_name
+      }])
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return mapRowToStatusNote(data);
+  } catch (error: any) {
+    if (error?.code === '42P01') {
+      console.warn('[databaseService] session_status_notes table not found; status notes will not persist.', error);
+      return {
+        id: `temp-${Date.now()}`,
+        sessionId: note.session_id,
+        type: note.type,
+        reason: note.reason,
+        details: note.details ?? null,
+        actorName: note.actor_name,
+        actorId: note.actor_id ?? null,
+        createdAt: new Date().toISOString()
+      };
+    }
+    throw error;
+  }
 }
 
 // ============================================
@@ -647,11 +1044,11 @@ export async function saveAzureDevOpsConfig(sessionId: string, config: {
     }
 
     // If no existing row, try upsert on session_id (avoids 409s when supported by constraint)
-    const { data: upserted, error: upsertError } = await supabase
-      .from('azure_devops_config')
-      .upsert([dbConfig], { onConflict: 'session_id' })
-      .select()
-      .single();
+        const { data: upserted, error: upsertError } = await supabase
+        .from('azure_devops_config')
+        .upsert([dbConfig])  // ✅ Auto-detects unique constraint
+        .select()
+        .single();
 
     if (!upsertError) return upserted;
 
@@ -696,6 +1093,10 @@ export async function updateVotingSession(updates: Partial<DbVotingSession>) {
   return updateSession(session.id, updates);
 }
 
+export async function updateVotingSessionById(id: string, updates: Partial<DbVotingSession>) {
+  return updateSession(id, updates);
+}
+
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
@@ -736,6 +1137,178 @@ export async function createInfoRequest(request: {
 
   if (error) throw error;
   return data;
+}
+
+export async function createFeatureSuggestion(suggestion: {
+  session_id: string;
+  title: string;
+  description?: string | null;
+  requester_id?: string | null;
+  requester_name?: string | null;
+  requester_email?: string | null;
+  whatWouldItDo?: string | null;
+  howWouldItWork?: string | null;
+}): Promise<FeatureSuggestion> {
+  const payload = {
+    summary: suggestion.description ?? null,
+    whatWouldItDo: suggestion.whatWouldItDo ?? null,
+    howWouldItWork: suggestion.howWouldItWork ?? null,
+    requesterId: suggestion.requester_id ?? null,
+    requesterName: suggestion.requester_name ?? null,
+    requesterEmail: suggestion.requester_email ?? null
+  };
+
+  const { data, error } = await supabase
+    .from('features')
+    .insert([{
+      session_id: suggestion.session_id,
+      title: suggestion.title,
+      description: JSON.stringify(payload),
+      epic: null,
+      state: FEATURE_SUGGESTION_STATE,
+      area_path: null,
+      tags: [FEATURE_SUGGESTION_TAG],
+      azure_devops_id: null,
+      azure_devops_url: null
+    }])
+    .select('id, session_id, title, description, created_at')
+    .single();
+
+  if (error) throw error;
+  return mapRowToSuggestion(data);
+}
+
+export async function updateFeatureSuggestion(id: string, updates: {
+  title?: string;
+  summary?: string | null;
+  whatWouldItDo?: string | null;
+  howWouldItWork?: string | null;
+  requester_name?: string | null;
+  requester_email?: string | null;
+}): Promise<FeatureSuggestion> {
+  const { data: existing, error: fetchError } = await supabase
+    .from('features')
+    .select('id, title, description, session_id, created_at')
+    .eq('id', id)
+    .eq('state', FEATURE_SUGGESTION_STATE)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  let payload: any = {};
+  if (existing?.description) {
+    try {
+      payload = JSON.parse(existing.description);
+    } catch (error) {
+      console.warn('[databaseService] Unable to parse suggestion payload during update', error);
+    }
+  }
+
+  const nextPayload = {
+    summary: updates.summary ?? payload.summary ?? null,
+    whatWouldItDo: updates.whatWouldItDo ?? payload.whatWouldItDo ?? null,
+    howWouldItWork: updates.howWouldItWork ?? payload.howWouldItWork ?? null,
+    requesterId: payload.requesterId ?? null,
+    requesterName: updates.requester_name ?? payload.requesterName ?? null,
+    requesterEmail: updates.requester_email ?? payload.requesterEmail ?? null
+  };
+
+  const { data, error } = await supabase
+    .from('features')
+    .update({
+      title: updates.title ?? existing.title,
+      description: JSON.stringify(nextPayload)
+    })
+    .eq('id', id)
+    .eq('state', FEATURE_SUGGESTION_STATE)
+    .select('id, session_id, title, description, created_at')
+    .single();
+
+  if (error) throw error;
+  return mapRowToSuggestion(data);
+}
+
+export async function deleteFeatureSuggestion(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('features')
+    .delete()
+    .eq('id', id)
+    .eq('state', FEATURE_SUGGESTION_STATE);
+
+  if (error) throw error;
+}
+
+export async function moveFeatureSuggestionToSession(id: string, targetSessionId: string): Promise<FeatureSuggestion> {
+  const { data, error } = await supabase
+    .from('features')
+    .update({ session_id: targetSessionId })
+    .eq('id', id)
+    .eq('state', FEATURE_SUGGESTION_STATE)
+    .select('id, session_id, title, description, created_at')
+    .single();
+
+  if (error) throw error;
+  return mapRowToSuggestion(data);
+}
+
+export async function promoteSuggestionToFeature(id: string): Promise<DbFeature> {
+  const { data: existing, error: fetchError } = await supabase
+    .from('features')
+    .select('*')
+    .eq('id', id)
+    .eq('state', FEATURE_SUGGESTION_STATE)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  let payload: any = {};
+  if (existing?.description) {
+    try {
+      payload = JSON.parse(existing.description);
+    } catch (error) {
+      console.warn('[databaseService] Unable to parse suggestion payload during promotion', error);
+    }
+  }
+
+  const descriptionSections: string[] = [];
+  if (payload.summary) descriptionSections.push(payload.summary);
+  if (payload.whatWouldItDo) {
+    descriptionSections.push(`What would it do?\n${payload.whatWouldItDo}`);
+  }
+  if (payload.howWouldItWork) {
+    descriptionSections.push(`How would it work?\n${payload.howWouldItWork}`);
+  }
+
+  const updatedTags = Array.isArray(existing.tags)
+    ? (existing.tags as string[]).filter(tag => tag !== FEATURE_SUGGESTION_TAG)
+    : [];
+
+  const { data, error: updateError } = await supabase
+    .from('features')
+    .update({
+      description: descriptionSections.join('\n\n') || existing.title,
+      state: null,
+      tags: updatedTags
+    })
+    .eq('id', id)
+    .eq('state', FEATURE_SUGGESTION_STATE)
+    .select('*')
+    .single();
+
+  if (updateError) throw updateError;
+  return data as DbFeature;
+}
+
+export async function getFeatureSuggestions(sessionId: string): Promise<FeatureSuggestion[]> {
+  const { data, error } = await supabase
+    .from('features')
+    .select('id, session_id, title, description, created_at, state, tags')
+    .eq('session_id', sessionId)
+    .eq('state', FEATURE_SUGGESTION_STATE)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(mapRowToSuggestion);
 }
 
 export async function getInfoRequests(sessionId: string) {

@@ -4,12 +4,13 @@
 // Location: src/screens/CreateSessionScreen.tsx
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
 import { supabase } from '../supabaseClient';
 import { ChevronLeft, Calendar, Users, Vote, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
+import type { Product } from '../types';
 
 export default function CreateSessionScreen() {
   const { currentUser, setCurrentSession, refreshSessions, setCurrentUser } = useSession();
@@ -44,6 +45,51 @@ export default function CreateSessionScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sessionCreated, setSessionCreated] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [newProductName, setNewProductName] = useState('');
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadProducts = async () => {
+      if (!currentUser) {
+        setProducts([]);
+        setSelectedProductId('');
+        return;
+      }
+
+      const tenantId = currentUser.tenant_id ?? currentUser.tenantId ?? null;
+      if (!tenantId) {
+        setProducts([]);
+        setSelectedProductId('');
+        setProductError('No tenant assigned. Products cannot be loaded.');
+        return;
+      }
+
+      setIsLoadingProducts(true);
+      setProductError(null);
+      try {
+        const results = await db.getProductsForTenant(tenantId);
+        setProducts(results);
+        setSelectedProductId(results[0]?.id ?? '');
+      } catch (error) {
+        console.error('Error loading products for create session:', error);
+        if (db.isProductsTableMissingError?.(error)) {
+          setProductError('Products are not configured yet. Please create the `products` table in Supabase.');
+        } else {
+          setProductError('Unable to load products. You can still create a session without a product tag.');
+        }
+        setProducts([]);
+        setSelectedProductId('');
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+
+    loadProducts();
+  }, [currentUser]);
 
   const generateSessionCode = (): string => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -81,6 +127,10 @@ export default function CreateSessionScreen() {
     if (end <= start) {
       newErrors.endDate = 'End date must be after start date';
     }
+
+    if (!productError && products.length > 0 && !selectedProductId) {
+      newErrors.product = 'Please select a product for this session';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -97,6 +147,8 @@ export default function CreateSessionScreen() {
       // Generate unique session code
       const code = generateSessionCode();
       
+      const selectedProduct = products.find(p => p.id === selectedProductId) || null;
+
       // Create the session
       const newSession = await db.createSession({
         title: formData.title,
@@ -106,7 +158,9 @@ export default function CreateSessionScreen() {
         start_date: formData.startDate,
         end_date: formData.endDate,
         is_active: true,
-        session_code: code
+        session_code: code,
+        product_id: selectedProduct?.id ?? null,
+        product_name: selectedProduct?.name ?? null
       });
       
       // Add current user as admin
@@ -129,6 +183,38 @@ export default function CreateSessionScreen() {
       setErrors({ submit: 'Failed to create session. Please try again.' });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateProduct = async () => {
+    if (!currentUser) return;
+    const tenantId = currentUser.tenant_id ?? currentUser.tenantId ?? null;
+    if (!tenantId) {
+      setProductError('Cannot create products because no tenant is associated with your account.');
+      return;
+    }
+
+    const trimmedName = newProductName.trim();
+    if (!trimmedName) {
+      setProductError('Product name is required.');
+      return;
+    }
+
+    setIsCreatingProduct(true);
+    setProductError(null);
+    try {
+      const created = await db.createProductForTenant(tenantId, trimmedName);
+      setProducts(prev => {
+        const next = [...prev, created].sort((a, b) => a.name.localeCompare(b.name));
+        return next;
+      });
+      setSelectedProductId(created.id);
+      setNewProductName('');
+    } catch (error) {
+      console.error('Error creating product:', error);
+      setProductError(error instanceof Error ? error.message : 'Unable to create product. Please try again.');
+    } finally {
+      setIsCreatingProduct(false);
     }
   };
 
@@ -259,6 +345,82 @@ export default function CreateSessionScreen() {
             )}
           </div>
 
+          {/* Product Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Product *
+            </label>
+            {isLoadingProducts ? (
+              <p className="text-sm text-gray-500">Loading products...</p>
+            ) : products.length > 0 ? (
+              <select
+                value={selectedProductId}
+                onChange={(e) => {
+                  setSelectedProductId(e.target.value);
+                  if (errors.product) {
+                    setErrors(prev => {
+                      const next = { ...prev };
+                      delete next.product;
+                      return next;
+                    });
+                  }
+                }}
+                className={`w-full px-4 py-2 border rounded-md focus:ring-2 focus:ring-[#2d4660] focus:border-transparent ${
+                  errors.product ? 'border-red-500' : 'border-gray-300'
+                }`}
+              >
+                <option value="">Select a product</option>
+                {products.map(product => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-sm text-gray-500">
+                {productError ?? 'No products found. Add a product below to associate this session.'}
+              </p>
+            )}
+            {errors.product && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {errors.product}
+              </p>
+            )}
+            {productError && products.length > 0 && (
+              <p className="mt-1 text-sm text-red-600">{productError}</p>
+            )}
+
+          <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Add a new product
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={newProductName}
+                  onChange={(e) => {
+                    setNewProductName(e.target.value);
+                    if (productError) setProductError(null);
+                  }}
+                  placeholder="e.g., Catalyst Cloud"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#2d4660] focus:border-transparent"
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateProduct}
+                  disabled={isCreatingProduct}
+                  className="px-4 py-2 bg-[#2d4660] text-white rounded-md hover:bg-[#1d3a53] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isCreatingProduct ? 'Adding...' : 'Add Product'}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                New products become available immediately for all session admins in your tenant.
+              </p>
+            </div>
+          </div>
+
           {/* Votes Per User */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -272,7 +434,7 @@ export default function CreateSessionScreen() {
                 id="useAutoVotes"
                 checked={formData.useAutoVotes}
                 onChange={(e) => setFormData(prev => ({ ...prev, useAutoVotes: e.target.checked }))}
-                className="h-4 w-4 text-[#2d4660] focus:ring-[#2d4660] border-gray-300 rounded cursor-pointer"
+                className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-[#3A9B5C] focus:outline-none focus:ring-0"
               />
               <label htmlFor="useAutoVotes" className="ml-2 text-sm text-gray-700 cursor-pointer">
                 Auto-calculate votes (half of feature count, minimum 1)

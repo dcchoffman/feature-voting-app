@@ -57,6 +57,7 @@ export default function SessionSelectionScreen() {
   const sessionTitleInputRef = useRef<HTMLInputElement>(null);
   const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(new Set());
   const [pendingProductName, setPendingProductName] = useState<string | null>(null);
+  const [hoveredPlusButton, setHoveredPlusButton] = useState<string | null>(null);
 
   useEffect(() => {
     const loadModalProducts = async () => {
@@ -1304,6 +1305,45 @@ export default function SessionSelectionScreen() {
                               </div>
                             )}
                             
+                            {/* Create Session Button - Circle + button on far right, vertically centered */}
+                            {hasAdminAccess && viewMode !== 'stakeholder' && (
+                              <div
+                                className="absolute z-20"
+                                style={{
+                                  right: '-20px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)'
+                                }}
+                              >
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Pre-select the product for this group
+                                    const productId = sessions[0]?.product_id;
+                                    const productName = getDisplayProductName(sessions[0], productLookup);
+                                    if (productId) {
+                                      setSelectedProductId(productId);
+                                    }
+                                    // Store product name for lookup if product_id doesn't match
+                                    if (productName && productName !== 'No Product') {
+                                      setPendingProductName(productName);
+                                    }
+                                    setShowCreateSessionModal(true);
+                                  }}
+                                  onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
+                                  onMouseLeave={() => setHoveredPlusButton(null)}
+                                  className="flex items-center justify-center w-10 h-10 rounded-full shadow-md"
+                                  style={{
+                                    backgroundColor: productColors.background || '#C89212',
+                                    color: productColors.text || '#FFFFFF'
+                                  }}
+                                  title={`Create new session for ${productName}`}
+                                >
+                                  <Plus className="h-5 w-5" />
+                                </button>
+                              </div>
+                            )}
+                            
                             {/* Sessions Grid */}
                             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                               {sessionsToShow.map((session) => {
@@ -1451,6 +1491,8 @@ export default function SessionSelectionScreen() {
                           const sessionProductName = getDisplayProductName(session, productLookup);
                           const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
                           const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
+                          // Check if this is a single-session product (has product, not in sessionsWithoutProducts)
+                          const isSingleSessionProduct = singleSessionProducts.includes(session);
 
                           return (
                             <div
@@ -1479,6 +1521,53 @@ export default function SessionSelectionScreen() {
                                 <BadgeCheck className="h-4 w-4 flex-shrink-0" />
                                 <span className="overflow-hidden text-ellipsis">{sessionProductName}</span>
                               </div>
+                              
+                              {/* Create Session Button - Circle + button on far right, vertically centered (only for single-session products) */}
+                              {isSingleSessionProduct && hasAdminAccess && viewMode !== 'stakeholder' && (
+                                <div
+                                  className="absolute z-20"
+                                  style={{
+                                    right: '-20px',
+                                    top: '50%',
+                                    transform: 'translateY(-50%)'
+                                  }}
+                                >
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      // Pre-select the product for this session
+                                      const productId = session.product_id;
+                                      const productName = getDisplayProductName(session, productLookup);
+                                      if (productId) {
+                                        setSelectedProductId(productId);
+                                      }
+                                      // Store product name for lookup if product_id doesn't match
+                                      if (productName && productName !== 'No Product') {
+                                        setPendingProductName(productName);
+                                      }
+                                      setShowCreateSessionModal(true);
+                                    }}
+                                    className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
+                                    style={{
+                                      backgroundColor: sessionProductColors.background || '#C89212',
+                                      color: sessionProductColors.text || '#FFFFFF'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      // Darken the color on hover
+                                      const currentBg = sessionProductColors.background || '#C89212';
+                                      e.currentTarget.style.backgroundColor = currentBg;
+                                      e.currentTarget.style.filter = 'brightness(0.8)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = sessionProductColors.background || '#C89212';
+                                      e.currentTarget.style.filter = 'brightness(1)';
+                                    }}
+                                    title={`Create new session for ${sessionProductName}`}
+                                  >
+                                    <Plus className="h-5 w-5" />
+                                  </button>
+                                </div>
+                              )}
                               <div className="p-6 flex flex-col h-full">
                                 {/* Voting Status Badge */}
                                 <div className="flex justify-end items-start mb-4">
@@ -1841,6 +1930,45 @@ export default function SessionSelectionScreen() {
                                   </div>
                                 )}
                                 
+                                {/* Create Session Button - Circle + button on far right, vertically centered */}
+                                {(isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
+                                  <div
+                                    className="absolute z-20"
+                                    style={{
+                                      right: '-20px',
+                                      top: '50%',
+                                      transform: 'translateY(-50%)'
+                                    }}
+                                  >
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        // Pre-select the product for this group
+                                        const productId = sessions[0]?.product_id;
+                                        const productName = getDisplayProductName(sessions[0], productLookup);
+                                        if (productId) {
+                                          setSelectedProductId(productId);
+                                        }
+                                        // Store product name for lookup if product_id doesn't match
+                                        if (productName && productName !== 'No Product') {
+                                          setPendingProductName(productName);
+                                        }
+                                        setShowCreateSessionModal(true);
+                                      }}
+                                      onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
+                                      onMouseLeave={() => setHoveredPlusButton(null)}
+                                      className="flex items-center justify-center w-10 h-10 rounded-full shadow-md"
+                                      style={{
+                                        backgroundColor: productColors.background || '#C89212',
+                                        color: productColors.text || '#FFFFFF'
+                                      }}
+                                      title={`Create new session for ${productName}`}
+                                    >
+                                      <Plus className="h-5 w-5" />
+                                    </button>
+                                  </div>
+                                )}
+                                
                                 {/* Sessions Grid */}
                                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                                   {sessionsToShow.map((session) => {
@@ -1865,48 +1993,48 @@ export default function SessionSelectionScreen() {
                                   })}
                                   {/* Create Session Button - Only show when there are exactly 2 sessions in the group (desktop only) */}
                                   {sessions.length === 2 && (
-                                    <div className="hidden lg:block relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow mt-6 border" style={{ borderColor: productColors.border || '#E5E7EB', borderWidth: '1px' }}>
-                                      <div className="p-6 flex flex-col h-full items-center justify-center min-h-[200px]">
-                                        <button
-                                          onClick={() => {
-                                            // Pre-select the product for this group
-                                            const productId = sessions[0]?.product_id;
-                                            const productName = getDisplayProductName(sessions[0], productLookup);
-                                            if (productId) {
-                                              setSelectedProductId(productId);
-                                            }
-                                            // Store product name for lookup if product_id doesn't match
-                                            if (productName && productName !== 'No Product') {
-                                              setPendingProductName(productName);
-                                            }
-                                            setShowCreateSessionModal(true);
-                                          }}
-                                          className="group relative flex items-center justify-center w-48 h-48 bg-white text-[#C89212] rounded-lg font-semibold overflow-hidden transition-all duration-300"
-                                          style={{
-                                            background: 'white'
-                                          }}
-                                          onMouseEnter={(e) => {
-                                            e.currentTarget.style.background = 'radial-gradient(circle at center, rgba(200, 146, 18, 0.15) 0%, rgba(200, 146, 18, 0.05) 30%, white 60%)';
-                                          }}
-                                          onMouseLeave={(e) => {
-                                            e.currentTarget.style.background = 'white';
-                                          }}
-                                        >
-                                          {/* Sparkle effects */}
-                                          <Star className="absolute top-2 left-4 w-3 h-3 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '0ms', animationDuration: '1.5s' }} />
-                                          <Sparkles className="absolute top-6 right-6 w-5 h-5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '200ms', animationDuration: '1.5s' }} />
-                                          <Star className="absolute bottom-8 left-8 w-4 h-4 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '400ms', animationDuration: '1.5s' }} />
-                                          <Sparkles className="absolute bottom-4 right-4 w-3.5 h-3.5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '600ms', animationDuration: '1.5s' }} />
-                                          <Star className="absolute top-1/2 left-2 w-5 h-5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '800ms', animationDuration: '1.5s' }} />
-                                          <Sparkles className="absolute top-1/2 right-2 w-3 h-3 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '1000ms', animationDuration: '1.5s' }} />
-                                          <Star className="absolute top-4 left-1/2 w-4.5 h-4.5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '300ms', animationDuration: '1.5s' }} />
-                                          <Sparkles className="absolute bottom-2 left-1/2 w-3.5 h-3.5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '700ms', animationDuration: '1.5s' }} />
-                                          
-                                          <div className="relative z-10 flex flex-col items-center gap-2">
-                                            <Plus className="h-8 w-8" />
-                                            <span className="text-sm">Create a Session</span>
-                                          </div>
-                                        </button>
+                                    <div 
+                                      className="hidden lg:block relative z-10 overflow-hidden shadow-md rounded-lg mt-6 border" 
+                                      style={{ 
+                                        borderColor: productColors.border || '#E5E7EB', 
+                                        borderWidth: '1px',
+                                        backgroundColor: 'rgba(255, 255, 255, 0.7)'
+                                      }}
+                                    >
+                                      <div className="p-6 flex flex-col h-full items-center justify-center min-h-[200px] relative rounded-lg" style={{ backgroundColor: 'transparent' }}>
+                                        {/* Sparkle effects - fade in when + button is hovered, disappear immediately on leave */}
+                                        <Star 
+                                          className={`absolute top-4 left-4 w-3 h-3 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '0ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Sparkles 
+                                          className={`absolute top-6 right-6 w-5 h-5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '200ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Star 
+                                          className={`absolute bottom-8 left-8 w-4 h-4 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '400ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Sparkles 
+                                          className={`absolute bottom-4 right-4 w-3.5 h-3.5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '600ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Star 
+                                          className={`absolute top-1/2 left-2 w-5 h-5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '800ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Sparkles 
+                                          className={`absolute top-1/2 right-2 w-3 h-3 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '1000ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Star 
+                                          className={`absolute top-4 left-1/2 w-4.5 h-4.5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '300ms', animationDuration: '1.5s' }} 
+                                        />
+                                        <Sparkles 
+                                          className={`absolute bottom-2 left-1/2 w-3.5 h-3.5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
+                                          style={{ color: productColors.background || '#C89212', animationDelay: '700ms', animationDuration: '1.5s' }} 
+                                        />
                                       </div>
                                     </div>
                                   )}
@@ -1949,6 +2077,8 @@ export default function SessionSelectionScreen() {
                               const sessionProductName = getDisplayProductName(session, productLookup);
                               const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
                               const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
+                              // Check if this is a single-session product (has product, not in sessionsWithoutProducts)
+                              const isSingleSessionProduct = singleSessionProducts.includes(session);
 
                               return (
                                 <div
@@ -1957,6 +2087,52 @@ export default function SessionSelectionScreen() {
                                   style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
                                   onClick={() => handleSelectSession(session)}
                                 >
+                                  {/* Create Session Button - Circle + button on far right, vertically centered (only for single-session products) */}
+                                  {isSingleSessionProduct && (isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
+                                    <div
+                                      className="absolute z-20"
+                                      style={{
+                                        right: '-20px',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)'
+                                      }}
+                                    >
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          // Pre-select the product for this session
+                                          const productId = session.product_id;
+                                          const productName = getDisplayProductName(session, productLookup);
+                                          if (productId) {
+                                            setSelectedProductId(productId);
+                                          }
+                                          // Store product name for lookup if product_id doesn't match
+                                          if (productName && productName !== 'No Product') {
+                                            setPendingProductName(productName);
+                                          }
+                                          setShowCreateSessionModal(true);
+                                        }}
+                                        className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
+                                        style={{
+                                          backgroundColor: sessionProductColors.background || '#C89212',
+                                          color: sessionProductColors.text || '#FFFFFF'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          // Darken the color on hover
+                                          const currentBg = sessionProductColors.background || '#C89212';
+                                          e.currentTarget.style.backgroundColor = currentBg;
+                                          e.currentTarget.style.filter = 'brightness(0.8)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.backgroundColor = sessionProductColors.background || '#C89212';
+                                          e.currentTarget.style.filter = 'brightness(1)';
+                                        }}
+                                        title={`Create new session for ${sessionProductName}`}
+                                      >
+                                        <Plus className="h-5 w-5" />
+                                      </button>
+                                    </div>
+                                  )}
                                   {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed)}
                                 </div>
                               );

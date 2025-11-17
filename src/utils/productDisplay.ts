@@ -42,17 +42,23 @@ export function getDisplayProductName(
   session: SessionLike,
   productLookup?: Record<string, string>
 ): string {
+  // PRIORITY 1: Use product_id to lookup from products table (single source of truth)
+  const productId = session.product_id ?? session.productId ?? null;
+  if (productId && productLookup) {
+    const lookupName = normalizeName(productLookup[productId]);
+    if (lookupName) {
+      return lookupName;
+    }
+  }
+
+  // PRIORITY 2: Fallback to product_name only if product_id lookup fails
+  // This is for backward compatibility during migration
   const explicitName = normalizeName(session.product_name ?? session.productName);
   if (explicitName) {
     return explicitName;
   }
 
-  const productId = session.product_id ?? session.productId ?? null;
-  const lookupName = productId ? normalizeName(productLookup?.[productId]) : null;
-  if (lookupName) {
-    return lookupName;
-  }
-
+  // PRIORITY 3: Generate fallback name if no product information available
   const seed = productId || session.id || session.title || 'default-product';
   return generateFallbackName(seed);
 }

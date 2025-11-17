@@ -175,37 +175,19 @@ export async function getProducts(): Promise<Product[]> {
   return data || [];
 }
 
-async function insertProduct(payload: Record<string, any>) {
-  return supabase
-    .from('products')
-    .insert([payload])
-    .select()
-    .single();
-}
-
-export async function createProduct(name: string, tenantId?: string, colorHex?: string | null): Promise<Product> {
+export async function createProduct(name: string, tenantId?: string): Promise<Product> {
   const trimmedName = name.trim();
   if (!trimmedName) {
     throw new Error('Product name is required');
   }
 
-  const basePayload = tenantId
-    ? { name: trimmedName, tenant_id: tenantId }
-    : { name: trimmedName };
-  const payloadWithColor = {
-    ...basePayload,
-    color_hex: colorHex ?? null
-  };
-
-  let { data, error } = await insertProduct(payloadWithColor);
+  const { data, error } = await supabase
+    .from('products')
+    .insert([tenantId ? { name: trimmedName, tenant_id: tenantId } : { name: trimmedName }])
+    .select()
+    .single();
 
   if (error) {
-    if ((error as any)?.code === 'PGRST204') {
-      const fallbackPayload = { ...basePayload };
-      const result = await insertProduct(fallbackPayload);
-      if (result.error) throw result.error;
-      return result.data as Product;
-    }
     if ((error as any)?.code === 'PGRST205') {
       const tableMissingError = new Error('Products table is missing');
       (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
@@ -246,30 +228,61 @@ export async function getProductsForTenant(tenantId: string): Promise<Product[]>
   return data || [];
 }
 
-export async function createProductForTenant(tenantId: string, name: string, colorHex?: string | null): Promise<Product> {
+export async function updateProduct(productId: string, updates: { name?: string; color_hex?: string | null }): Promise<Product> {
+  if (!productId) {
+    throw new Error('Product ID is required');
+  }
+
+  const updateData: { name?: string; color_hex?: string | null } = {};
+  
+  if (updates.name !== undefined) {
+    const trimmedName = updates.name.trim();
+    if (!trimmedName) {
+      throw new Error('Product name cannot be empty');
+    }
+    updateData.name = trimmedName;
+  }
+  
+  if (updates.color_hex !== undefined) {
+    updateData.color_hex = updates.color_hex;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    throw new Error('No updates provided');
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .update(updateData)
+    .eq('id', productId)
+    .select()
+    .single();
+
+  if (error) {
+    if ((error as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    throw error;
+  }
+
+  return data as Product;
+}
+
+export async function createProductForTenant(tenantId: string, name: string, colorHex?: string): Promise<Product> {
   const trimmedName = name.trim();
   if (!trimmedName) {
     throw new Error('Product name is required');
   }
 
-  const payloadWithColor = {
-    name: trimmedName,
-    tenant_id: tenantId,
-    color_hex: colorHex ?? null
-  };
-
-  let { data, error } = await insertProduct(payloadWithColor);
+  const { data, error } = await supabase
+    .from('products')
+    .insert([{ name: trimmedName, tenant_id: tenantId, color_hex: colorHex || null }])
+    .select()
+    .single();
 
   if (error) {
-    if ((error as any)?.code === 'PGRST204') {
-      const fallbackPayload = {
-        name: trimmedName,
-        tenant_id: tenantId
-      };
-      const result = await insertProduct(fallbackPayload);
-      if (result.error) throw result.error;
-      return result.data as Product;
-    }
     if ((error as any)?.code === 'PGRST205') {
       const tableMissingError = new Error('Products table is missing');
       (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
@@ -435,48 +448,14 @@ export async function getSessionsForUser(userId: string): Promise<VotingSession[
 }
 
 export async function createSession(session: Omit<DbVotingSession, 'id' | 'created_at'>): Promise<VotingSession> {
-  const insertSession = (payload: typeof session) =>
-    supabase.from('voting_sessions').insert([payload]).select().single();
-
-  let { data, error } = await insertSession(session);
-
-  if (!error) {
-    return data as VotingSession;
-  }
-
-  if ((error as any)?.code !== 'PGRST204') {
-    throw error;
-  }
-
-  console.warn("Supabase 'voting_sessions' table is missing one or more columns. Retrying insert with reduced payload.");
-  const sanitizedSession: Record<string, any> = { ...session };
-
-  const removeFields = (fields: Array<'product_name' | 'productName' | 'product_id' | 'productId'>) => {
-    fields.forEach((field) => {
-      if (field in sanitizedSession) {
-        delete sanitizedSession[field];
-      }
-    });
-  };
-
-  // First retry without product_name/productName (keep product_id if available)
-  removeFields(['product_name', 'productName']);
-  let retry = await insertSession(sanitizedSession as typeof session);
-  if (!retry.error) {
-    return retry.data as VotingSession;
-  }
-
-  if ((retry.error as any)?.code !== 'PGRST204') {
-    throw retry.error;
-  }
-
-  // Final retry without product_id/productId as well
-  removeFields(['product_id', 'productId']);
-  retry = await insertSession(sanitizedSession as typeof session);
-  if (retry.error) {
-    throw retry.error;
-  }
-  return retry.data as VotingSession;
+  const { data, error } = await supabase
+    .from('voting_sessions')
+    .insert([session])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
 }
 
 export async function updateSession(id: string, updates: Partial<DbVotingSession>): Promise<VotingSession> {

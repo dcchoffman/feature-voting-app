@@ -1148,6 +1148,14 @@ function Footer({
     });
   }
 
+  // Ensure buttons are in the correct order: Stakeholder (if present), Session Admin, System Admin (rightmost)
+  const buttonOrder: Array<'stakeholder' | 'session-admin' | 'system-admin'> = ['stakeholder', 'session-admin', 'system-admin'];
+  roleButtons.sort((a, b) => {
+    const aIndex = buttonOrder.indexOf(a.key);
+    const bIndex = buttonOrder.indexOf(b.key);
+    return aIndex - bIndex;
+  });
+
   const hasToggle = showRoleToggle && roleButtons.length > 0;
   
   return (
@@ -3480,7 +3488,6 @@ const handleDeleteSession = useCallback(async () => {
     
     // Clear local state
     setCurrentSession(null as any);
-    setCurrentUser(null);
     
     // Clear localStorage
     try {
@@ -3499,7 +3506,7 @@ const handleDeleteSession = useCallback(async () => {
     setIsDeletingSession(false);
     setConfirmState(prev => ({ ...prev, showDeleteSession: false }));
   }
-}, [currentSession, navigate, setCurrentSession, setCurrentUser, refreshSessions]);
+}, [currentSession, navigate, setCurrentSession, refreshSessions]);
 
   
   const handleResetAllVotes = useCallback(async () => {
@@ -3603,6 +3610,10 @@ const handleDeleteSession = useCallback(async () => {
   }, [currentUser, currentSession, pendingUsedVotes, pendingVotes, votingSession.isActive, effectiveVotesPerUser]);
 
   const handleUpdateVotingSession = useCallback(async (updatedSession: VotingSession) => {
+    console.log('handleUpdateVotingSession called with:', updatedSession);
+    console.log('updatedSession.productId:', (updatedSession as any).productId);
+    console.log('updatedSession.product_id:', updatedSession.product_id);
+    
     const baseUpdates: Record<string, any> = {
       title: updatedSession.title,
       goal: updatedSession.goal,
@@ -3611,9 +3622,11 @@ const handleDeleteSession = useCallback(async () => {
       end_date: updatedSession.endDate,
       is_active: updatedSession.isActive,
       use_auto_votes: updatedSession.useAutoVotes,
-      product_id: updatedSession.productId ?? updatedSession.product_id ?? null,
-      product_name: updatedSession.productName ?? updatedSession.product_name ?? null
+      product_id: updatedSession.product_id ?? null,
+      product_name: null // Products table is single source of truth - don't store product_name
     };
+    
+    console.log('baseUpdates.product_id:', baseUpdates.product_id);
 
     const metadataUpdates: Record<string, string | null> = {};
 
@@ -3636,17 +3649,25 @@ const handleDeleteSession = useCallback(async () => {
     assignField(updatedSession.reopenedAt, 'reopened_at');
 
     const fullUpdates = { ...baseUpdates, ...metadataUpdates };
+    
+    console.log('Full updates being sent to database:', fullUpdates);
+    console.log('product_id in fullUpdates:', fullUpdates.product_id);
 
     const runUpdate = async (updates: Record<string, any>) => {
+      console.log('runUpdate called with updates:', updates);
+      console.log('product_id in updates:', updates.product_id);
       if (currentSession?.id) {
+        console.log('Updating session by ID:', currentSession.id);
         await db.updateVotingSessionById(currentSession.id, updates);
       } else {
+        console.log('Updating session without ID');
         await db.updateVotingSession(updates);
       }
     };
 
     try {
       await runUpdate(fullUpdates);
+      console.log('Database update completed successfully');
 
       setVotingSession(updatedSession);
 
@@ -3661,15 +3682,10 @@ const handleDeleteSession = useCallback(async () => {
           end_date: baseUpdates.end_date ?? currentSession.end_date,
           is_active: baseUpdates.is_active ?? currentSession.is_active,
           product_id:
-            (baseUpdates.product_id !== undefined
+            baseUpdates.product_id !== undefined
               ? baseUpdates.product_id ?? null
-              : updatedSession.productId ?? currentSession.product_id) ??
-            null,
-          product_name:
-            (baseUpdates.product_name !== undefined
-              ? baseUpdates.product_name ?? null
-              : updatedSession.productName ?? currentSession.product_name) ??
-            null,
+              : updatedSession.product_id ?? currentSession.product_id ?? null,
+          product_name: null, // Products table is single source of truth - don't store product_name
           original_end_date:
             metadataUpdates.original_end_date ?? currentSession.original_end_date ?? null,
           ended_early_by:
@@ -3740,10 +3756,7 @@ const handleDeleteSession = useCallback(async () => {
                 sanitizedBaseUpdates.product_id !== undefined
                   ? sanitizedBaseUpdates.product_id ?? null
                   : updatedSession.productId ?? currentSession.product_id ?? null,
-              product_name:
-                sanitizedBaseUpdates.product_name !== undefined
-                  ? sanitizedBaseUpdates.product_name ?? null
-                  : updatedSession.productName ?? currentSession.product_name ?? null,
+              product_name: null, // Products table is single source of truth - don't store product_name
               original_end_date:
                 updatedSession.originalEndDate ?? currentSession.original_end_date ?? null,
               ended_early_by:

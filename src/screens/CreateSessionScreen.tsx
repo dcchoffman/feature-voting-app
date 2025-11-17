@@ -160,7 +160,7 @@ export default function CreateSessionScreen() {
         is_active: true,
         session_code: code,
         product_id: selectedProduct?.id ?? null,
-        product_name: selectedProduct?.name ?? null
+        product_name: null // Products table is single source of truth - don't store product_name
       });
       
       // Add current user as admin

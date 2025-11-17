@@ -41,7 +41,8 @@ import {
   EpicTag, 
   AzureDevOpsBadge, 
   ImageWithFallback, 
-  FeatureForm
+  FeatureForm,
+  Footer
  } from '../screens/FeatureVoting';
 import ProductPicker from '../components/ProductPicker';
 
@@ -1008,6 +1009,8 @@ interface SessionEditFormProps {
   products: Product[];
   isLoadingProducts: boolean;
   productError: string | null;
+  onRequestDeleteProduct?: (product: Product) => void;
+  onProductColorUpdated?: () => void;
 }
 
 interface SessionEditFormValues {
@@ -1030,8 +1033,17 @@ function SessionEditForm({
   productName,
   products,
   isLoadingProducts,
-  productError
+  productError,
+  onRequestDeleteProduct,
+  onProductColorUpdated
 }: SessionEditFormProps) {
+  const [editingProductColor, setEditingProductColor] = useState<string | null>(null);
+  const [showColorPickerModal, setShowColorPickerModal] = useState(false);
+  const [tempColor, setTempColor] = useState<string>('#2D4660');
+  const [pendingColorUpdate, setPendingColorUpdate] = useState<string | null>(null);
+  const [isUpdatingColor, setIsUpdatingColor] = useState(false);
+  const colorInputRef = useRef<HTMLInputElement>(null);
+
   const productLookup = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach((product) => {
@@ -1081,7 +1093,14 @@ function SessionEditForm({
 
   useEffect(() => {
     if (!products.length) return;
-    if (initialProductId) return;
+    // If we have an initialProductId and products are loaded, make sure the form has it set
+    if (initialProductId) {
+      const exists = products.some((product) => product.id === initialProductId);
+      if (exists) {
+        setValue('productId', initialProductId, { shouldDirty: false, shouldTouch: false });
+      }
+      return;
+    }
     if (!initialProductName) return;
 
     const matchedProduct = products.find(
@@ -1094,40 +1113,166 @@ function SessionEditForm({
   }, [products, initialProductId, initialProductName, setValue]);
 
   const useAutoVotes = watch('useAutoVotes');
+  const selectedProductId = watch('productId');
+  
+  // Create a modified products array that includes the pending color update for display
+  // This must be after selectedProductId is defined
+  const displayProducts = useMemo(() => {
+    if (!pendingColorUpdate || !selectedProductId) {
+      return products;
+    }
+    return products.map(product => 
+      product.id === selectedProductId
+        ? { ...product, color_hex: pendingColorUpdate }
+        : product
+    );
+  }, [products, pendingColorUpdate, selectedProductId]);
+  useEffect(() => {
+    if (!selectedProductId) return;
+    const exists = products.some((product) => product.id === selectedProductId);
+    if (!exists) {
+      setValue('productId', '', { shouldDirty: true, shouldTouch: true });
+    }
+  }, [selectedProductId, products, setValue]);
+
+  // Initialize and reset color editing when product changes or products load
+  useEffect(() => {
+    if (selectedProductId && products.length > 0) {
+      const selectedProduct = products.find((product) => product.id === selectedProductId);
+      if (selectedProduct) {
+        const productColor = selectedProduct.color_hex ?? null;
+        setEditingProductColor(productColor);
+        setTempColor(productColor || '#2D4660');
+        setPendingColorUpdate(null); // Clear pending update when product changes
+        setShowColorPickerModal(false);
+      }
+    } else if (!selectedProductId) {
+      setEditingProductColor(null);
+      setTempColor('#2D4660');
+      setPendingColorUpdate(null);
+      setShowColorPickerModal(false);
+    }
+  }, [selectedProductId, products]);
+
   const effectiveVotesPerUser = useAutoVotes 
     ? Math.max(1, Math.floor(featureCount / 2))
     : watch('votesPerUser');
 
+  // Handle form submission - update both session and product color if pending
+  const handleFormSubmit = async (data: SessionEditFormValues) => {
+    try {
+      console.log('=== FORM SUBMISSION STARTED ===');
+      console.log('handleFormSubmit called with form data:', data);
+      console.log('data.productId:', data.productId);
+      console.log('selectedProductId from watch:', selectedProductId);
+      console.log('Form errors:', errors);
+      
+      // If there's a pending color update, apply it first
+      if (pendingColorUpdate && selectedProductId) {
+        console.log('Updating product color:', pendingColorUpdate, 'for product:', selectedProductId);
+        setIsUpdatingColor(true);
+        try {
+          await db.updateProduct(selectedProductId, { color_hex: pendingColorUpdate });
+          // Notify parent to refresh products list
+          if (onProductColorUpdated) {
+            onProductColorUpdated();
+          }
+          setPendingColorUpdate(null);
+          setEditingProductColor(pendingColorUpdate);
+          console.log('Product color updated successfully');
+        } catch (error) {
+          console.error('Error updating product color:', error);
+          // Still submit the form even if color update fails
+        } finally {
+          setIsUpdatingColor(false);
+        }
+      }
+      
+      // Submit the session update
+      console.log('Calling onSubmit with data:', data);
+      onSubmit(data);
+      console.log('=== FORM SUBMISSION COMPLETED ===');
+    } catch (error) {
+      console.error('ERROR in handleFormSubmit:', error);
+      throw error;
+    }
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)}>
+    <form onSubmit={handleSubmit((data) => {
+      console.log('FORM onSubmit triggered via handleSubmit');
+      return handleFormSubmit(data);
+    }, (errors) => {
+      console.log('FORM VALIDATION ERRORS:', errors);
+    })}>
       <Controller
         control={control}
         name="productId"
         render={({ field }) => {
           const selectedProduct =
-            products.find((product) => product.id === field.value) ?? null;
+            displayProducts.find((product) => product.id === field.value) ?? null;
 
           const lookupName = field.value ? productLookup[field.value] ?? null : null;
           const fallbackProductName = !selectedProduct
             ? lookupName ?? (initialProductName ? initialProductName : null)
             : null;
 
+          const hasProductSelected = Boolean(field.value);
+          // Use the product color from displayProducts (which includes pending updates)
+          const displayColorHex = selectedProduct?.color_hex || null;
+          // Always use the same color source as ProductPicker for consistency
+          const selectedProductColors = selectedProduct
+            ? getProductColor(selectedProduct.name, displayColorHex ?? null)
+            : null;
+          const productColorHex = selectedProductColors?.background || null;
+
           return (
             <div className="mb-4">
-              <ProductPicker
-                products={products}
-                value={field.value}
-                onChange={field.onChange}
-                fallbackName={fallbackProductName}
-                isLoading={isLoadingProducts}
-                error={productError}
-                disabled={isLoadingProducts || products.length === 0}
-                helperText={
-                  !isLoadingProducts && products.length === 0 && !productError
-                    ? 'No products found yet. Create products from the session creation modal.'
-                    : undefined
-                }
-              />
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <ProductPicker
+                    products={displayProducts}
+                    value={field.value}
+                    onChange={(value) => {
+                      console.log('ProductPicker onChange called with value:', value);
+                      field.onChange(value);
+                    }}
+                    fallbackName={fallbackProductName}
+                    isLoading={isLoadingProducts}
+                    error={productError}
+                    disabled={isLoadingProducts || displayProducts.length === 0}
+                    helperText={
+                      !isLoadingProducts && displayProducts.length === 0 && !productError
+                        ? 'No products found yet. Create products from the session creation modal.'
+                        : undefined
+                    }
+                    allowDelete={Boolean(onRequestDeleteProduct)}
+                    onRequestDeleteProduct={onRequestDeleteProduct}
+                  />
+                </div>
+                {hasProductSelected && (
+                  <div className="flex items-center gap-2 mt-6">
+                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                      Product Color
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const productColor = productColorHex || '#2D4660';
+                        setTempColor(productColor);
+                        setEditingProductColor(productColor);
+                        setShowColorPickerModal(true);
+                      }}
+                      className="block w-10 h-10 rounded-md border-2 border-gray-300 hover:border-gray-400 transition-all shadow-sm"
+                      style={{ 
+                        backgroundColor: productColorHex || '#2D4660', 
+                        borderColor: selectedProductColors?.border || '#D1D5DB'
+                      }}
+                      title="Change product color"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           );
         }}
@@ -1224,11 +1369,122 @@ function SessionEditForm({
           <Button variant="secondary" type="button" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit">
+          <Button 
+            variant="primary" 
+            type="button"
+            onClick={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              
+              console.log('SAVE BUTTON CLICKED - Manual trigger');
+              const formData = watch();
+              console.log('Form data:', formData);
+              console.log('Form errors:', errors);
+              
+              // Manually trigger form submission
+              const result = await handleSubmit(
+                (data) => {
+                  console.log('Manual handleFormSubmit called with:', data);
+                  return handleFormSubmit(data);
+                },
+                (errors) => {
+                  console.log('Form validation failed:', errors);
+                  alert('Please fix form errors: ' + JSON.stringify(errors));
+                }
+              )();
+              
+              console.log('Form submission result:', result);
+            }}
+          >
             Save Changes
           </Button>
         </div>
       </div>
+
+      {/* Color Picker Modal - No Header */}
+      {showColorPickerModal && selectedProductId && (() => {
+        const currentProduct = displayProducts.find((product) => product.id === selectedProductId);
+        return currentProduct ? (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          onClick={() => {
+            setShowColorPickerModal(false);
+            setEditingProductColor(currentProduct.color_hex ?? null);
+            setTempColor(currentProduct.color_hex ?? '#2D4660');
+            setPendingColorUpdate(null); // Cancel pending update when closing modal
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl px-3 py-2 w-auto mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex gap-3 items-stretch">
+              {/* Color input on the left - will trigger native picker */}
+              <div className="flex-shrink-0" style={{ width: '240px', height: '260px' }}>
+                <input
+                  id="native-color-input"
+                  type="color"
+                  value={tempColor}
+                  onChange={(e) => {
+                    setTempColor(e.target.value);
+                    setEditingProductColor(e.target.value);
+                  }}
+                  ref={(input) => {
+                    if (input && showColorPickerModal) {
+                      // Auto-click to open native picker immediately
+                      setTimeout(() => input.click(), 50);
+                    }
+                  }}
+                  className="opacity-0 absolute"
+                  style={{ width: '1px', height: '1px' }}
+                />
+                {/* Placeholder space for where native picker will appear */}
+                <div className="w-full h-full"></div>
+              </div>
+              
+              {/* Looks Good Button on the right - same height as picker */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedProductId || !tempColor) return;
+                  
+                  const selectedProduct = displayProducts.find((product) => product.id === selectedProductId);
+                  if (!selectedProduct) return;
+
+                  // Only update if color changed from current (including pending)
+                  const currentColor = selectedProduct.color_hex || null;
+                  if (currentColor === tempColor) {
+                    setShowColorPickerModal(false);
+                    return;
+                  }
+
+                  // Store the color as pending - will be saved when form is submitted
+                  // This updates displayProducts immediately via the useMemo
+                  setPendingColorUpdate(tempColor);
+                  setEditingProductColor(tempColor);
+                  setShowColorPickerModal(false);
+                }}
+                disabled={isUpdatingColor}
+                className="px-6 rounded-lg text-white font-bold shadow-lg hover:shadow-xl transition-all flex flex-col items-center justify-center gap-3 text-lg flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: tempColor, height: '260px', minWidth: '100px' }}
+              >
+                {isUpdatingColor ? (
+                  <RefreshCw className="h-8 w-8 animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle className="h-8 w-8" />
+                    <div className="text-center leading-tight">
+                      <div>Looks</div>
+                      <div>Good</div>
+                    </div>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+        ) : null;
+      })()}
     </form>
   );
 }
@@ -1329,6 +1585,8 @@ export function AdminDashboard({
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
   const productLookup = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach((product) => {
@@ -1357,11 +1615,7 @@ export function AdminDashboard({
             (currentSession as any)?.product_id ??
             (votingSession as any).productId ??
             null,
-          product_name:
-            (votingSession as any).product_name ??
-            (currentSession as any)?.product_name ??
-            (votingSession as any).productName ??
-            null
+          product_name: null // Products table is single source of truth - don't store product_name
         },
         productLookup
       ),
@@ -1407,6 +1661,21 @@ export function AdminDashboard({
 
     loadProducts();
   }, [currentUser?.tenant_id, currentUser?.tenantId]);
+  
+  const handleDeleteProduct = useCallback(async () => {
+    if (!productToDelete) return;
+    setIsDeletingProduct(true);
+    try {
+      await db.deleteProduct(productToDelete.id);
+      setProducts(prev => prev.filter((product) => product.id !== productToDelete.id));
+      setProductToDelete(null);
+    } catch (error) {
+      console.error('Error deleting product from admin dashboard:', error);
+      setProductError('Failed to delete product. Please try again.');
+    } finally {
+      setIsDeletingProduct(false);
+    }
+  }, [productToDelete]);
   
   const handleProjectChange = useCallback((project: string) => {
     const normalizedProject = project?.trim();
@@ -1603,7 +1872,17 @@ export function AdminDashboard({
   }, [suggestionToMove, otherSessions]);
 
   const handleSessionUpdate = (data: any) => {
-    const selectedProduct = products.find(product => product.id === data.productId) || null;
+    console.log('handleSessionUpdate called with data:', data);
+    console.log('Current products:', products);
+    console.log('Current votingSession.product_id:', votingSession.product_id);
+    
+    // Handle productId - can be empty string, null, undefined, or a valid ID
+    const productId = data.productId && data.productId.trim() !== '' ? data.productId : null;
+    console.log('Extracted productId:', productId);
+    
+    const selectedProduct = productId ? products.find(product => product.id === productId) || null : null;
+    console.log('Found selectedProduct:', selectedProduct);
+    
     const updatedSession: VotingSession = {
       ...votingSession,
       title: data.title,
@@ -1614,8 +1893,11 @@ export function AdminDashboard({
       endDate: new Date(data.endDate + 'T23:59:59').toISOString(),
       isActive: votingSession.isActive,
       product_id: selectedProduct?.id ?? null,
-      product_name: selectedProduct?.name ?? null
+      product_name: null // Products table is single source of truth - don't store product_name
     };
+    
+    console.log('Updated session product_id:', updatedSession.product_id);
+    console.log('Full updatedSession:', updatedSession);
     
     onUpdateVotingSession(updatedSession);
     setShowSessionEditForm(false);
@@ -2673,8 +2955,42 @@ export function AdminDashboard({
           products={products}
           isLoadingProducts={isLoadingProducts}
           productError={productError}
+          onRequestDeleteProduct={(product) => setProductToDelete(product)}
+          onProductColorUpdated={async () => {
+            // Refresh products list after color update
+            const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId ?? null;
+            if (tenantId) {
+              try {
+                const results = await db.getProductsForTenant(tenantId);
+                setProducts(results);
+              } catch (error) {
+                console.error('Error refreshing products after color update:', error);
+              }
+            }
+          }}
         />
       </Modal>
+
+      {productToDelete && (
+        <Modal
+          isOpen
+          onClose={() => setProductToDelete(null)}
+          title="Delete Product"
+        >
+          <p className="text-sm text-gray-700 mb-4">
+            Are you sure you want to delete <span className="font-semibold">{productToDelete.name}</span>?
+            This will remove it for everyone in your tenant.
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setProductToDelete(null)} disabled={isDeletingProduct}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteProduct} disabled={isDeletingProduct}>
+              {isDeletingProduct ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </Modal>
+      )}
 
       <Modal
         isOpen={showPreviewModal}
@@ -2953,6 +3269,22 @@ export function AdminDashboard({
           </div>
         </form>
       </Modal>
+
+      {/* Footer with role toggle - only Session Admin and System Admin */}
+      <Footer
+        currentRole={adminPerspective === 'system' ? 'system-admin' : 'session-admin'}
+        onSelectSessionAdmin={() => {
+          if (adminPerspective !== 'session' && currentSession) {
+            navigate('/admin');
+          }
+        }}
+        onSelectSystemAdmin={() => {
+          if (adminPerspective !== 'system') {
+            navigate('/users');
+          }
+        }}
+        showRoleToggle={true}
+      />
     </div>
   );
 }

@@ -8,9 +8,10 @@ import { getDisplayProductName } from '../utils/productDisplay';
 import { getProductColor } from '../utils/productColors';
 import { isFallbackSystemAdmin } from '../utils/systemAdmins';
 import type { Product } from '../types';
+import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
-  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield
+  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Star, Sparkles
 } from 'lucide-react';
 
 export default function SessionSelectionScreen() {
@@ -54,6 +55,8 @@ export default function SessionSelectionScreen() {
   const [showColorPickerModal, setShowColorPickerModal] = useState(false);
   const [tempColor, setTempColor] = useState<string>('#2D4660');
   const sessionTitleInputRef = useRef<HTMLInputElement>(null);
+  const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(new Set());
+  const [pendingProductName, setPendingProductName] = useState<string | null>(null);
 
   useEffect(() => {
     const loadModalProducts = async () => {
@@ -72,12 +75,48 @@ export default function SessionSelectionScreen() {
       setIsLoadingProducts(true);
       setProductError(null);
       try {
+        // Get ALL products from the products table for this tenant
+        // This is the single source of truth for products
         const results = await db.getProductsForTenant(tenantId);
-        setModalProducts(results);
-        setSelectedProductId(results[0]?.id ?? '');
+        
+        // Log for debugging - ensure we're getting all products
+        console.log(`Loaded ${results.length} products from products table for tenant ${tenantId}`);
+        console.log('Products:', results.map(p => p.name));
+        
+        // Use all products from the database - they should all be included in the dropdown
+        // No filtering, no additional logic - just use what's in the products table
+        const uniqueProducts = results;
+        
+        setModalProducts(uniqueProducts);
+        // Only set default product if no product is already selected
+        // Also validate that the selected product exists in the results
+        setSelectedProductId(prev => {
+          if (prev) {
+            // If a product is pre-selected, verify it exists in the loaded products
+            const exists = uniqueProducts.some(p => p.id === prev);
+            if (exists) {
+              return prev;
+            }
+          }
+          
+          // If we have a pending product name (from button click), try to find it by name
+          if (pendingProductName) {
+            const foundByName = uniqueProducts.find(p => 
+              p.name?.toLowerCase().trim() === pendingProductName.toLowerCase().trim()
+            );
+            if (foundByName?.id) {
+              setPendingProductName(null); // Clear after use
+              return foundByName.id;
+            }
+          }
+          
+          return uniqueProducts[0]?.id ?? '';
+        });
+        // Update productLookup with ALL products from the products table
+        // This ensures session cards use product names from the products table (single source of truth)
         setProductLookup(prev => {
           const updated = { ...prev };
-          results.forEach(product => {
+          uniqueProducts.forEach(product => {
             if (product.id && product.name) {
               updated[product.id] = product.name;
             }
@@ -86,7 +125,7 @@ export default function SessionSelectionScreen() {
         });
         setProductColorLookup(prev => {
           const updated = { ...prev };
-          results.forEach(product => {
+          uniqueProducts.forEach(product => {
             if (product.id && product.color_hex) {
               updated[product.id] = product.color_hex;
             }
@@ -138,6 +177,7 @@ export default function SessionSelectionScreen() {
     setPendingProduct(null);
     setShowColorPickerModal(false);
     setTempColor('#2D4660');
+    setPendingProductName(null);
   };
 
   const validateCreateSessionForm = () => {
@@ -163,13 +203,14 @@ export default function SessionSelectionScreen() {
       errors.endDate = 'End date must be after start date';
     }
     
-    // Require either a selected product or a pending product
-    if (!productError && modalProducts.length > 0 && !selectedProductId && !pendingProduct && !isCreatingNewProduct) {
-      errors.product = 'Please select a product or create a new one';
+    // Require either a selected product, a pending product, or a new product name entered
+    const hasNewProductName = newProductName.trim().length > 0;
+    if (!productError && modalProducts.length > 0 && !selectedProductId && !pendingProduct && !isCreatingNewProduct && !hasNewProductName) {
+      errors.product = 'Please select a product or enter a new product name';
     }
     
-    // If creating new product, ensure name is provided
-    if (isCreatingNewProduct && !newProductName.trim()) {
+    // If user is in "creating new product" mode but hasn't entered a name, show error
+    if (isCreatingNewProduct && !hasNewProductName) {
       errors.product = 'Please enter a product name or select an existing product';
     }
 
@@ -261,28 +302,71 @@ export default function SessionSelectionScreen() {
     setIsCreatingSession(true);
     try {
       const code = generateSessionCode();
-      let productIdToUse = selectedProductId;
-      let productNameToUse = null;
+      const tenantId = currentUser.tenant_id ?? currentUser.tenantId ?? null;
+      // Start with selectedProductId, but will be overridden if we create a new product
+      let productIdToUse = selectedProductId && selectedProductId.trim() !== '' ? selectedProductId : null;
       
-      // If user created a pending product, create it now
+      // Auto-create product if user has entered a new product name
+      // Priority: 1. pendingProduct (from "Create New Product" button), 2. newProductName (from simple input)
+      const trimmedNewProductName = newProductName.trim();
+      const hasNewProductName = trimmedNewProductName.length > 0;
+      const hasSelectedProduct = selectedProductId && selectedProductId.trim() !== '';
+      
+      console.log('Product creation check:', {
+        pendingProduct,
+        newProductName: trimmedNewProductName,
+        hasNewProductName,
+        selectedProductId,
+        hasSelectedProduct
+      });
+      
+      // Determine product name and color to use
+      let productNameToCreate: string | null = null;
+      let productColorToUse: string | null = null;
+      
       if (pendingProduct) {
-        const tenantId = currentUser.tenant_id ?? currentUser.tenantId ?? null;
-        if (tenantId) {
+        // User clicked "Create New Product" button
+        productNameToCreate = pendingProduct.name;
+        productColorToUse = pendingProduct.color;
+        console.log('Using pendingProduct:', productNameToCreate);
+      } else if (hasNewProductName) {
+        // User typed a new product name - create it regardless of selectedProductId
+        // (selectedProductId should be cleared when typing, but we'll create anyway if name is entered)
+        productNameToCreate = trimmedNewProductName;
+        productColorToUse = newProductColor;
+        console.log('Using newProductName:', productNameToCreate);
+      }
+      
+      // Create product if we have a name to create
+      if (productNameToCreate) {
+        console.log('Will create/find product:', productNameToCreate);
+        // Check if product name already exists
+        const existingProduct = modalProducts.find(p => 
+          p.name.toLowerCase().trim() === productNameToCreate.toLowerCase().trim()
+        );
+        
+        if (existingProduct) {
+          // Product already exists, use it
+          console.log('Product already exists, using:', existingProduct.id);
+          productIdToUse = existingProduct.id;
+        } else if (tenantId) {
+          // Create the new product automatically
+          console.log('Creating new product:', productNameToCreate);
           try {
             const created = await db.createProductForTenant(
               tenantId, 
-              pendingProduct.name, 
-              pendingProduct.color ?? undefined
+              productNameToCreate, 
+              productColorToUse || undefined
             );
+            console.log('Product created successfully:', created.id);
             productIdToUse = created.id;
-            productNameToUse = created.name;
             
             // Update local state for immediate display
             setModalProducts(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
             setProductLookup(prev => ({ ...prev, [created.id]: created.name }));
             setProductColorLookup(prev => {
               const next = { ...prev };
-              if (created.color_hex) next[created.id] = created.color_hex;
+              if (created.color_hex) next[created.id] = created.color_hex as string;
               return next;
             });
           } catch (error) {
@@ -294,11 +378,19 @@ export default function SessionSelectionScreen() {
             setIsCreatingSession(false);
             return;
           }
+        } else {
+          console.error('No tenantId available to create product');
+          setCreateSessionErrors(prev => ({
+            ...prev,
+            submit: 'Unable to create product: No tenant assigned.'
+          }));
+          setIsCreatingSession(false);
+          return;
         }
       }
 
-      const selectedProduct = modalProducts.find(p => p.id === productIdToUse) || null;
-
+      // Products table is the single source of truth - only use product_id
+      // product_name will be looked up from products table when needed
       const newSession = await db.createSession({
         title: createSessionForm.title,
         goal: createSessionForm.goal,
@@ -310,22 +402,48 @@ export default function SessionSelectionScreen() {
         session_code: code,
         access_type: 'invite-only',
         product_id: productIdToUse ?? null,
-        product_name: productNameToUse ?? selectedProduct?.name ?? null
+        product_name: null // Products table is single source of truth - don't store product_name
       });
 
       await db.addSessionAdmin(newSession.id, currentUser.id);
-      await refreshSessions();
-      await loadUserSessions();
-
+      
+      // Get the session with product information before refreshing
       const refreshedSession = await db.getSessionById(newSession.id);
-      if (refreshedSession) {
-        setCurrentSession(refreshedSession);
-      } else {
-        setCurrentSession(newSession);
+      const sessionToUse = refreshedSession || newSession;
+      
+      // Update product lookup if the session has a product_id and we have tenantId
+      if (sessionToUse.product_id && tenantId) {
+        try {
+          const products = await db.getProductsForTenant(tenantId);
+          const product = products.find(p => p.id === sessionToUse.product_id);
+          if (product) {
+            setProductLookup(prev => ({ ...prev, [product.id]: product.name }));
+            if (product.color_hex && product.color_hex.trim() !== '') {
+              setProductColorLookup(prev => ({ ...prev, [product.id]: product.color_hex as string }));
+            }
+          }
+        } catch (error) {
+          console.error('Error loading product for lookup:', error);
+          // Continue even if product lookup fails
+        }
       }
+      
+      // Set current session FIRST so refreshSessions can find it
+      setCurrentSession(sessionToUse);
+      
+      // Now refresh sessions - this will update the session list and preserve currentSession
+      await refreshSessions();
+      
+      // Load user sessions after setting current session
+      await loadUserSessions();
+      
       setShowCreateSessionModal(false);
       resetCreateSessionForm();
-      navigate('/admin');
+      
+      // Small delay to ensure state is updated before navigation
+      setTimeout(() => {
+        navigate('/admin');
+      }, 100);
     } catch (error) {
       console.error('Error creating session from modal:', error);
       setCreateSessionErrors(prev => ({
@@ -444,14 +562,14 @@ export default function SessionSelectionScreen() {
       const calculatedVotes = Math.max(1, Math.floor(featureCount / 2));
       return {
         votes: calculatedVotes,
-        displayText: `${calculatedVotes} votes per user`,
+        displayText: `${calculatedVotes} votes/user`,
         isAuto: true,
         formula: `Auto: ${featureCount} ${featureCount === 1 ? 'feature' : 'features'} ÷ 2 = ${calculatedVotes}`
       };
     } else {
       return {
         votes: session.votes_per_user,
-        displayText: `${session.votes_per_user} votes per user`,
+        displayText: `${session.votes_per_user} votes/user`,
         isAuto: false,
         formula: ''
       };
@@ -496,11 +614,13 @@ export default function SessionSelectionScreen() {
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    const formatted = date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
     });
+    // Replace full year with abbreviated year (e.g., "2024" -> "'24")
+    return formatted.replace(/\b(\d{4})\b/g, (match) => `'${match.slice(-2)}`);
   };
 
   const getSessionStatus = (session: any) => {
@@ -602,6 +722,320 @@ export default function SessionSelectionScreen() {
   const adminSessionsToDisplay = (viewMode === 'admin' || viewMode === 'system-admin') ? adminSessions : [];
   const stakeholderSessionsToDisplay = viewMode === 'admin' ? stakeholderOnlySessions : [];
 
+  // Group sessions by product name (display name), not product_id
+  // This ensures sessions with the same product name are grouped together
+  const groupSessionsByProduct = (sessions: any[], lookup: Record<string, string>) => {
+  const groups: Record<string, any[]> = {};
+  sessions.forEach(session => {
+    // Get the display product name (handles both product_id and product_name)
+    const productName = getDisplayProductName(session, lookup);
+    
+    // Skip only if there's truly no product information at all
+    if (!productName || productName === 'No Product' || productName.trim() === '') {
+      return;
+    }
+    
+    // Normalize: lowercase and trim for consistent grouping
+    const normalizedName = productName.toLowerCase().trim();
+    
+    if (!groups[normalizedName]) {
+      groups[normalizedName] = [];
+    }
+    groups[normalizedName].push(session);
+  });
+  
+  // Debug logging to see what's being grouped
+  console.log('🔍 Product grouping:', Object.entries(groups).map(([name, sessions]) => ({
+    product: name,
+    count: sessions.length,
+    sessionTitles: sessions.map(s => s.title)
+  })));
+  
+  return groups;
+};
+
+  const toggleProductGroup = (productId: string) => {
+    setExpandedProductGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+      return next;
+    });
+  };
+
+  // Development function to create placeholder sessions
+  const createPlaceholderSessions = async () => {
+    if (!currentUser) return;
+    
+    const tenantId = currentUser.tenant_id ?? currentUser.tenantId ?? null;
+    if (!tenantId) {
+      alert('No tenant assigned. Cannot create placeholder sessions.');
+      return;
+    }
+
+    try {
+      // Get existing products
+      const products = await db.getProductsForTenant(tenantId);
+      if (products.length === 0) {
+        alert('No products found. Please create products first.');
+        return;
+      }
+
+      // Create multiple sessions for the first few products
+      const productsToUse = products.slice(0, 3); // Use first 3 products
+      const sessionTitles = [
+        ['Q1 2025 Roadmap', 'Sprint Planning - January', 'Feature Prioritization'],
+        ['Q2 Planning Session', 'Backlog Review', 'Sprint 10 Planning'],
+        ['Product Review', 'Feature Requests', 'Technical Debt Assessment']
+      ];
+
+      let createdCount = 0;
+      for (let i = 0; i < productsToUse.length; i++) {
+        const product = productsToUse[i];
+        const titles = sessionTitles[i] || ['Session 1', 'Session 2', 'Session 3'];
+        
+        for (let j = 0; j < titles.length; j++) {
+          const title = titles[j];
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() + (j * 7)); // Stagger by weeks
+          const endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + 7); // 7 days duration
+
+          const code = generateSessionCode();
+          await db.createSession({
+            title: title,
+            goal: `This is a placeholder session for ${product.name}. Use this to test the grouping functionality.`,
+            votes_per_user: 10,
+            use_auto_votes: false,
+            start_date: startDate.toISOString().split('T')[0],
+            end_date: endDate.toISOString().split('T')[0],
+            is_active: true,
+            session_code: code,
+            access_type: 'invite-only',
+            product_id: product.id,
+            product_name: null // Products table is single source of truth - don't store product_name
+          });
+
+          // Add current user as admin
+          const session = await db.getSessionByCode(code);
+          if (session) {
+            await db.addSessionAdmin(session.id, currentUser.id);
+          }
+          createdCount++;
+        }
+      }
+
+      alert(`Created ${createdCount} placeholder sessions across ${productsToUse.length} products.`);
+      await refreshSessions();
+      await loadUserSessions();
+    } catch (error) {
+      console.error('Error creating placeholder sessions:', error);
+      alert('Failed to create placeholder sessions. Check console for details.');
+    }
+  };
+
+  // Helper function to render a session card
+  const renderSessionCard = (
+    session: any,
+    productName: string,
+    productColors: any,
+    status: any,
+    StatusIcon: any,
+    votesInfo: any,
+    isClosed: boolean,
+    showTab: boolean = true
+  ) => {
+    return (
+      <>
+        {/* Product Name Tab */}
+        {showTab && (
+          <div
+            className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+            style={{
+              top: '0',
+              left: '-1px',
+              transform: 'translateY(-100%)',
+              backgroundColor: productColors.background,
+              color: productColors.text,
+              borderColor: productColors.border,
+              borderWidth: '1px',
+              borderBottomWidth: '0',
+              boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+              borderTopLeftRadius: '0.9rem',
+              borderTopRightRadius: '0.9rem'
+            }}
+          >
+            <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+            <span className="overflow-hidden text-ellipsis">{productName}</span>
+          </div>
+        )}
+        <div className="p-6 flex flex-col h-full">
+          {/* Action Buttons */}
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isClosed) handleSelectSession(session);
+                  }}
+                  disabled={isClosed}
+                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                    isClosed
+                      ? 'bg-gray-200 text-gray-500'
+                      : 'bg-[#576C71] text-white hover:bg-[#1E5461]'
+                  }`}
+                  style={isClosed ? { cursor: 'not-allowed' } : {}}
+                >
+                  <Vote className="h-3 w-3 mr-1" />
+                  Vote!
+                </button>
+                {isClosed && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                    Session Closed
+                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
+                <button
+                  onClick={(e) => handleManageAdmins(e, session)}
+                  disabled={isClosed}
+                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    isClosed
+                      ? 'bg-gray-200 text-gray-500'
+                      : 'bg-[#2D4660] text-white hover:bg-[#1D3144]'
+                  }`}
+                  style={isClosed ? { cursor: 'not-allowed' } : {}}
+                >
+                  <Settings className="h-3 w-3 mr-1" />
+                  Admins
+                </button>
+                {isClosed && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                    Session Closed
+                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                  </div>
+                )}
+              </div>
+
+              <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
+                <button
+                  onClick={(e) => handleManageStakeholders(e, session)}
+                  disabled={isClosed}
+                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    isClosed
+                      ? 'bg-gray-200 text-gray-500'
+                      : 'bg-[#1E5461] text-white hover:bg-[#576C71]'
+                  }`}
+                  style={isClosed ? { cursor: 'not-allowed' } : {}}
+                >
+                  <Users className="h-3 w-3 mr-1" />
+                  Stakeholders
+                </button>
+                {isClosed && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                    Session Closed
+                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Session Title */}
+          <h3 className="text-lg font-semibold text-[#2D4660] mb-2">
+            {session.title}
+          </h3>
+
+          {/* Session Goal */}
+          <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+            {session.goal}
+          </p>
+
+          {/* Spacer */}
+          <div className="flex-1"></div>
+
+          {/* Session Details */}
+          <div className="space-y-2 text-sm text-gray-500">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <Calendar className="h-4 w-4 mr-2" />
+                <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+              </div>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
+                <StatusIcon className="h-3 w-3 mr-1" />
+                {status.text}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <List className="h-4 w-4 mr-2" />
+                <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'}</span>
+              </div>
+              <span className="text-sm font-medium text-[#2D4660]">{productName}</span>
+            </div>
+            <div className="flex items-start">
+              <Vote className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 flex items-center justify-between">
+                <div className="flex items-center">
+                  <span className="break-words">{votesInfo.displayText}</span>
+                  {votesInfo.isAuto && (
+                    <div className="group relative ml-1 mt-0.5">
+                      <Info className="h-4 w-4 text-blue-500 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                        {votesInfo.formula}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={(e) => handleViewResults(e, session)}
+                  className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#6A4234] transition-colors cursor-pointer flex-shrink-0"
+                >
+                  <BarChart2 className="h-3 w-3 mr-1" />
+                  {status.text === 'Closed' ? 'Final Results' : 'Current Results'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Email Invite */}
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <div className={`relative inline-block w-full ${isClosed ? 'group' : ''}`}>
+              <button
+                onClick={(e) => handleEmailInvite(e, session)}
+                disabled={isClosed}
+                className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
+                  isClosed
+                    ? 'bg-gray-200 text-gray-500'
+                    : 'bg-blue-50 hover:bg-blue-100'
+                }`}
+                style={isClosed ? { cursor: 'not-allowed' } : {}}
+              >
+                <Mail className={`h-4 w-4 mr-2 ${isClosed ? 'text-gray-500' : 'text-blue-600'}`} />
+                <span className={`text-sm font-medium ${isClosed ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
+              </button>
+              {isClosed && (
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                  Session Closed
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
       {/* Desktop: Centered logo at top */}
@@ -662,14 +1096,16 @@ export default function SessionSelectionScreen() {
               </>
             )}
             {(isSystemAdmin || adminSessions.length > 0) && (viewMode === 'admin' || viewMode === 'system-admin') && (
-              <button
-                onClick={() => setShowCreateSessionModal(true)}
-                className="flex items-center px-4 py-2 bg-[#C89212] text-white rounded-lg hover:bg-[#6A4234] transition-colors"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Create Session</span>
-                <span className="sm:hidden">Create</span>
-              </button>
+              <>
+                <button
+                  onClick={() => setShowCreateSessionModal(true)}
+                  className="flex items-center px-4 py-2 bg-[#C89212] text-white rounded-lg hover:bg-[#6A4234] transition-colors"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  <span className="hidden sm:inline">Create Session</span>
+                  <span className="sm:hidden">Create</span>
+                </button>
+              </>
             )}
             <button
               onClick={handleLogout}
@@ -707,13 +1143,15 @@ export default function SessionSelectionScreen() {
                   </>
                 )}
                 {(isSystemAdmin || adminSessions.length > 0) && (viewMode === 'admin' || viewMode === 'system-admin') && (
-                  <button
-                    onClick={() => { setMobileMenuOpen(false); setShowCreateSessionModal(true); }}
-                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
-                  >
-                    <Plus className="h-4 w-4 mr-2 text-gray-700" />
-                    Create Session
-                  </button>
+                  <>
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); setShowCreateSessionModal(true); }}
+                      className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                    >
+                      <Plus className="h-4 w-4 mr-2 text-gray-700" />
+                      Create Session
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
@@ -755,130 +1193,385 @@ export default function SessionSelectionScreen() {
                 <Vote className="h-5 w-5 mr-2" />
                 All Your Voting Sessions
               </h2>
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {sessionsToDisplay.map((session) => {
-                  const status = getSessionStatus(session);
-                  const isClosed = status.text === 'Closed';
-                  const StatusIcon = status.icon;
-                  const votesInfo = getEffectiveVotesPerUser(session);
-                  const hasVoted = votingStatus[session.id];
-                  const productName = getDisplayProductName(session, productLookup);
-                  const productColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
-                  const productColors = getProductColor(productName, productColorHex);
+              {(() => {
+                // Separate sessions with and without products
+                const sessionsWithProducts = sessionsToDisplay.filter(s => {
+                  const productName = getDisplayProductName(s, productLookup);
+                  return productName && productName !== 'No Product' && productName.trim() !== '';
+                });
+                const sessionsWithoutProducts = sessionsToDisplay.filter(s => {
+                  const productName = getDisplayProductName(s, productLookup);
+                  return !productName || productName === 'No Product' || productName.trim() === '';
+                });
+                
+                const productGroups = groupSessionsByProduct(sessionsWithProducts, productLookup);
+                
+                // Separate multi-session products from single-session products
+                const multiSessionProducts: Array<{ key: string; sessions: any[] }> = [];
+                const singleSessionProducts: any[] = [];
+                
+                Object.entries(productGroups).forEach(([normalizedProductName, sessions]) => {
+                  if (sessions.length >= 2) {
+                    multiSessionProducts.push({ key: normalizedProductName, sessions });
+                  } else {
+                    singleSessionProducts.push(...sessions);
+                  }
+                });
+                
+                return (
+                  <div className="space-y-8">
+                    {/* Multi-session product groups at the top */}
+                    {multiSessionProducts.map(({ key: normalizedProductName, sessions }) => {
+                      // Use normalized product name for expanded state tracking
+                      const isExpanded = expandedProductGroups.has(normalizedProductName);
+                      const sessionsToShow = !isExpanded ? sessions.slice(0, 3) : sessions;
+                      const remainingCount = sessions.length > 3 ? sessions.length - 3 : 0;
+                      // Get display name from first session (all sessions in group have same display name)
+                      const productName = getDisplayProductName(sessions[0], productLookup);
+                      // Use first session's product_id for color lookup (if available)
+                      const productColorHex = sessions[0]?.product_id ? productColorLookup[sessions[0].product_id] : undefined;
+                      const productColors = getProductColor(productName, productColorHex);
 
-                  return (
-                    <div
-                      key={session.id}
-                      className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                      style={{ borderColor: productColors.border, borderWidth: '1px' }}
-                      onClick={() => handleSelectSession(session)}
-                    >
-                      {/* Product Name Tab */}
-                      <div
-                        className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
-                        style={{
-                          top: '0',
-                          left: '-1px',
-                          transform: 'translateY(-100%)',
-                          backgroundColor: productColors.background,
-                          color: productColors.text,
-                          borderColor: productColors.border,
-                          borderWidth: '1px',
-                          borderBottomWidth: '0',
-                          boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-                          borderTopLeftRadius: '0.9rem',
-                          borderTopRightRadius: '0.9rem'
-                        }}
-                      >
-                        <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-                        <span className="overflow-hidden text-ellipsis">{productName}</span>
-                      </div>
-                      <div className="p-6 flex flex-col h-full">
-                        {/* Voting Status Badge */}
-                        <div className="flex justify-end items-start mb-4">
-                          {hasVoted ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Voted
-                            </span>
-                          ) : status.text === 'Active' ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                              <AlertCircle className="h-3 w-3 mr-1" />
-                              Needs Your Vote
-                            </span>
-                          ) : null}
-                        </div>
+                      // Multiple sessions - render with wrapper
+                      // Helper to create light tint background from hex color
+                      const hexToRgba = (hex: string, alpha: number) => {
+                        const normalized = hex.replace('#', '');
+                        const r = parseInt(normalized.substring(0, 2), 16);
+                        const g = parseInt(normalized.substring(2, 4), 16);
+                        const b = parseInt(normalized.substring(4, 6), 16);
+                        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                      };
+                      const lightTintBackground = productColors.background 
+                        ? hexToRgba(productColors.background, 0.1)
+                        : '#F9FAFB';
 
-                        {/* Session Title */}
-                        <h3 className="text-lg font-semibold text-[#2D4660] mb-2">
-                          {session.title}
-                        </h3>
-
-                        {/* Session Goal */}
-                        <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                          {session.goal}
-                        </p>
-
-                        {/* Spacer */}
-                        <div className="flex-1"></div>
-
-                        {/* Session Details */}
-                        <div className="space-y-2 text-sm text-gray-500">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center">
-                              <Calendar className="h-4 w-4 mr-2" />
-                              <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+                      return (
+                        <div key={normalizedProductName} className="relative" style={{ marginTop: '50px' }}>
+                          {/* Wrapper Container */}
+                          <div 
+                            className="rounded-lg rounded-tl-none border border-gray-200 pt-2 px-6 pb-6 relative overflow-visible"
+                            style={{ 
+                              backgroundColor: lightTintBackground,
+                              borderColor: productColors.border || '#E5E7EB'
+                            }}
+                          >
+                            {/* Product Name Tab - On Top */}
+                            <div
+                              className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+                              style={{
+                                top: '0',
+                                left: '-1px',
+                                transform: 'translateY(-100%)',
+                                backgroundColor: productColors.background,
+                                color: productColors.text,
+                                borderColor: productColors.border,
+                                borderWidth: '1px',
+                                borderBottomWidth: '0',
+                                boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+                                borderTopLeftRadius: '0.9rem',
+                                borderTopRightRadius: '0.9rem'
+                              }}
+                            >
+                              <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+                              <span className="overflow-hidden text-ellipsis">{productName}</span>
                             </div>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                              <StatusIcon className="h-3 w-3 mr-1" />
-                              {status.text}
-                            </span>
-                          </div>
-                          <div className="flex items-center">
-                            <List className="h-4 w-4 mr-2" />
-                            <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'} to vote on</span>
-                          </div>
-                          <div className="flex items-center">
-                            <Vote className="h-4 w-4 mr-2" />
-                            <span>{votesInfo.displayText}</span>
-                            {votesInfo.isAuto && (
-                              <div className="group relative ml-1">
-                                <Info className="h-4 w-4 text-blue-500 cursor-help" />
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                                  {votesInfo.formula}
-                                  <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
-                                </div>
+                            
+                            {/* Show More text - Same row as tab (desktop only) */}
+                            {remainingCount > 0 && (
+                              <div
+                                className="absolute right-0 z-20 hidden md:block"
+                                style={{
+                                  top: '0',
+                                  transform: 'translateY(calc(-100% - 3px))'
+                                }}
+                              >
+                                <button
+                                  onClick={() => toggleProductGroup(normalizedProductName)}
+                                  className="flex items-center gap-1 text-sm text-[#2D4660] hover:text-[#173B65] transition-colors cursor-pointer"
+                                >
+                                  {isExpanded ? (
+                                    <>
+                                      Show Less
+                                      <ChevronDown className="h-4 w-4 rotate-180" />
+                                    </>
+                                  ) : (
+                                    <>
+                                      Show More ({remainingCount})
+                                      <ChevronDown className="h-4 w-4" />
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
+                            
+                            {/* Sessions Grid */}
+                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                              {sessionsToShow.map((session) => {
+                                const status = getSessionStatus(session);
+                                const isClosed = status.text === 'Closed';
+                                const StatusIcon = status.icon;
+                                const votesInfo = getEffectiveVotesPerUser(session);
+                                const hasVoted = votingStatus[session.id];
+                                const sessionProductName = getDisplayProductName(session, productLookup);
+                                const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
+                                const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
+
+                                return (
+                                  <div
+                                    key={session.id}
+                                    className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                    style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                                    onClick={() => handleSelectSession(session)}
+                                  >
+                                    <div className="p-6 flex flex-col h-full">
+                                      {/* Voting Status Badge */}
+                                      <div className="flex justify-end items-start mb-4">
+                                        {hasVoted ? (
+                                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                            <CheckCircle className="h-3 w-3 mr-1" />
+                                            Voted
+                                          </span>
+                                        ) : status.text === 'Active' ? (
+                                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                            <AlertCircle className="h-3 w-3 mr-1" />
+                                            Needs Your Vote
+                                          </span>
+                                        ) : null}
+                                      </div>
+
+                                      {/* Session Title */}
+                                      <h3 className="text-lg font-semibold text-[#2D4660] mb-2">
+                                        {session.title}
+                                      </h3>
+
+                                      {/* Session Goal */}
+                                      <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                                        {session.goal}
+                                      </p>
+
+                                      {/* Spacer */}
+                                      <div className="flex-1"></div>
+
+                                      {/* Session Details */}
+                                      <div className="space-y-2 text-sm text-gray-500">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center">
+                                            <Calendar className="h-4 w-4 mr-2" />
+                                            <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+                                          </div>
+                                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
+                                            <StatusIcon className="h-3 w-3 mr-1" />
+                                            {status.text}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center">
+                                            <List className="h-4 w-4 mr-2" />
+                                            <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'} to vote on</span>
+                                          </div>
+                                          <span className="text-sm font-medium text-[#2D4660]">{sessionProductName}</span>
+                                        </div>
+                                        <div className="flex items-center">
+                                          <Vote className="h-4 w-4 mr-2" />
+                                          <span>{votesInfo.displayText}</span>
+                                          {votesInfo.isAuto && (
+                                            <div className="group relative ml-1">
+                                              <Info className="h-4 w-4 text-blue-500 cursor-help" />
+                                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                                                {votesInfo.formula}
+                                                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Action Button */}
+                                      <div className="mt-4 pt-4 border-t border-gray-200">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!isClosed) handleSelectSession(session);
+                                          }}
+                                          disabled={isClosed}
+                                          className={`w-full flex items-center justify-center px-4 py-2 rounded-lg transition-colors font-medium ${
+                                            isClosed
+                                              ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                                              : hasVoted
+                                              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                              : 'bg-[#2D4660] text-white hover:bg-[#173B65]'
+                                          }`}
+                                          style={isClosed ? { cursor: 'not-allowed' } : {}}
+                                        >
+                                          <Vote className="h-4 w-4 mr-2" />
+                                          {hasVoted ? 'View or Change Votes' : 'Cast Your Votes'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Show More button for mobile */}
+                            {remainingCount > 0 && (
+                              <div className="mt-4 md:hidden">
+                                <button
+                                  onClick={() => toggleProductGroup(normalizedProductName)}
+                                  className="w-full flex items-center justify-center gap-1 px-4 py-2 text-sm font-medium text-[#2D4660] bg-white hover:bg-gray-50 rounded-md border border-gray-300 transition-colors"
+                                >
+                                  {isExpanded ? (
+                                    <>
+                                      Show Less
+                                      <ChevronDown className="h-4 w-4 rotate-180" />
+                                    </>
+                                  ) : (
+                                    <>
+                                      Show More ({remainingCount})
+                                      <ChevronDown className="h-4 w-4" />
+                                    </>
+                                  )}
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
+                      );
+                    })}
+                    
+                    {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
+                    {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (
+                      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                        {[...singleSessionProducts, ...sessionsWithoutProducts].map((session) => {
+                          const status = getSessionStatus(session);
+                          const isClosed = status.text === 'Closed';
+                          const StatusIcon = status.icon;
+                          const votesInfo = getEffectiveVotesPerUser(session);
+                          const hasVoted = votingStatus[session.id];
+                          const sessionProductName = getDisplayProductName(session, productLookup);
+                          const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
+                          const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
 
-                        {/* Action Button */}
-                        <div className="mt-4 pt-4 border-t border-gray-200">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!isClosed) handleSelectSession(session);
-                            }}
-                            disabled={isClosed}
-                            className={`w-full flex items-center justify-center px-4 py-2 rounded-lg transition-colors font-medium ${
-                              isClosed
-                                ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
-                                : hasVoted
-                                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                : 'bg-[#2D4660] text-white hover:bg-[#173B65]'
-                            }`}
-                            style={isClosed ? { cursor: 'not-allowed' } : {}}
-                          >
-                            <Vote className="h-4 w-4 mr-2" />
-                            {hasVoted ? 'View or Change Votes' : 'Cast Your Votes'}
-                          </button>
-                        </div>
+                          return (
+                            <div
+                              key={session.id}
+                              className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                              style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                              onClick={() => handleSelectSession(session)}
+                            >
+                              {/* Product Name Tab */}
+                              <div
+                                className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+                                style={{
+                                  top: '0',
+                                  left: '-1px',
+                                  transform: 'translateY(-100%)',
+                                  backgroundColor: sessionProductColors.background,
+                                  color: sessionProductColors.text,
+                                  borderColor: sessionProductColors.border,
+                                  borderWidth: '1px',
+                                  borderBottomWidth: '0',
+                                  boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+                                  borderTopLeftRadius: '0.9rem',
+                                  borderTopRightRadius: '0.9rem'
+                                }}
+                              >
+                                <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+                                <span className="overflow-hidden text-ellipsis">{sessionProductName}</span>
+                              </div>
+                              <div className="p-6 flex flex-col h-full">
+                                {/* Voting Status Badge */}
+                                <div className="flex justify-end items-start mb-4">
+                                  {hasVoted ? (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                      <CheckCircle className="h-3 w-3 mr-1" />
+                                      Voted
+                                    </span>
+                                  ) : status.text === 'Active' ? (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                      <AlertCircle className="h-3 w-3 mr-1" />
+                                      Needs Your Vote
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                {/* Session Title */}
+                                <h3 className="text-lg font-semibold text-[#2D4660] mb-2">
+                                  {session.title}
+                                </h3>
+
+                                {/* Session Goal */}
+                                <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                                  {session.goal}
+                                </p>
+
+                                {/* Spacer */}
+                                <div className="flex-1"></div>
+
+                                {/* Session Details */}
+                                <div className="space-y-2 text-sm text-gray-500">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                      <Calendar className="h-4 w-4 mr-2" />
+                                      <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+                                    </div>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
+                                      <StatusIcon className="h-3 w-3 mr-1" />
+                                      {status.text}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                      <List className="h-4 w-4 mr-2" />
+                                      <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'} to vote on</span>
+                                    </div>
+                                    <span className="text-sm font-medium text-[#2D4660]">{sessionProductName}</span>
+                                  </div>
+                                  <div className="flex items-center">
+                                    <Vote className="h-4 w-4 mr-2" />
+                                    <span>{votesInfo.displayText}</span>
+                                    {votesInfo.isAuto && (
+                                      <div className="group relative ml-1">
+                                        <Info className="h-4 w-4 text-blue-500 cursor-help" />
+                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                                          {votesInfo.formula}
+                                          <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Action Button */}
+                                <div className="mt-4 pt-4 border-t border-gray-200">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isClosed) handleSelectSession(session);
+                                    }}
+                                    disabled={isClosed}
+                                    className={`w-full flex items-center justify-center px-4 py-2 rounded-lg transition-colors font-medium ${
+                                      isClosed
+                                        ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                                        : hasVoted
+                                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        : 'bg-[#2D4660] text-white hover:bg-[#173B65]'
+                                    }`}
+                                    style={isClosed ? { cursor: 'not-allowed' } : {}}
+                                  >
+                                    <Vote className="h-4 w-4 mr-2" />
+                                    {hasVoted ? 'View or Change Votes' : 'Cast Your Votes'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -971,9 +1664,12 @@ export default function SessionSelectionScreen() {
                               {status.text}
                             </span>
                           </div>
-                          <div className="flex items-center">
-                            <List className="h-4 w-4 mr-2" />
-                            <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'} to vote on</span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center">
+                              <List className="h-4 w-4 mr-2" />
+                              <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'} to vote on</span>
+                            </div>
+                            <span className="text-sm font-medium text-[#2D4660]">{productName}</span>
                           </div>
                           <div className="flex items-center">
                             <Vote className="h-4 w-4 mr-2" />
@@ -1033,204 +1729,257 @@ export default function SessionSelectionScreen() {
                       </p>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                    {adminSessionsToDisplay.map((session) => {
-                  const status = getSessionStatus(session);
-                  const StatusIcon = status.icon;
-                  const votesInfo = getEffectiveVotesPerUser(session);
-                  const isClosed = status.text === 'Closed';
-                  const productName = getDisplayProductName(session, productLookup);
-                  const productColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
-                  const productColors = getProductColor(productName, productColorHex);
+                  {(() => {
+                    
+                    // Separate sessions with and without products
+                    const sessionsWithProducts = adminSessionsToDisplay.filter(s => {
+                      const productName = getDisplayProductName(s, productLookup);
+                      return productName && productName !== 'No Product' && productName.trim() !== '';
+                    });
+                    const sessionsWithoutProducts = adminSessionsToDisplay.filter(s => {
+                      const productName = getDisplayProductName(s, productLookup);
+                      return !productName || productName === 'No Product' || productName.trim() === '';
+                    });
+                    
+                    const productGroups = groupSessionsByProduct(sessionsWithProducts, productLookup);
+                    
+                    // Separate multi-session products from single-session products
+                    const multiSessionProducts: Array<{ key: string; sessions: any[] }> = [];
+                    const singleSessionProducts: any[] = [];
+                    
+                    Object.entries(productGroups).forEach(([normalizedProductName, sessions]) => {
+                      if (sessions.length >= 2) {
+                        multiSessionProducts.push({ key: normalizedProductName, sessions });
+                      } else {
+                        singleSessionProducts.push(...sessions);
+                      }
+                    });
+                    
+                    return (
+                      <div className="space-y-8">
+                        {/* Multi-session product groups at the top */}
+                        {multiSessionProducts.map(({ key: normalizedProductName, sessions }) => {
+                          // Use normalized product name for expanded state tracking
+                          const isExpanded = expandedProductGroups.has(normalizedProductName);
+                          const sessionsToShow = !isExpanded ? sessions.slice(0, 3) : sessions;
+                          const remainingCount = sessions.length > 3 ? sessions.length - 3 : 0;
+                          // Get display name from first session (all sessions in group have same display name)
+                          const productName = getDisplayProductName(sessions[0], productLookup);
+                          // Use first session's product_id for color lookup (if available)
+                          const productColorHex = sessions[0]?.product_id ? productColorLookup[sessions[0].product_id] : undefined;
+                          const productColors = getProductColor(productName, productColorHex);
 
-                  return (
-                    <div
-                      key={session.id}
-                      className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                      style={{ borderColor: productColors.border, borderWidth: '1px' }}
-                      onClick={() => handleSelectSession(session)}
-                    >
-                      {/* Product Name Tab */}
-                      <div
-                        className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
-                        style={{
-                          top: '0',
-                          left: '-1px',
-                          transform: 'translateY(-100%)',
-                          backgroundColor: productColors.background,
-                          color: productColors.text,
-                          borderColor: productColors.border,
-                          borderWidth: '1px',
-                          borderBottomWidth: '0',
-                          boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-                          borderTopLeftRadius: '0.9rem',
-                          borderTopRightRadius: '0.9rem'
-                        }}
-                      >
-                        <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-                        <span className="overflow-hidden text-ellipsis">{productName}</span>
-                      </div>
-                      <div className="p-6 flex flex-col h-full">
-                        {/* Action Buttons */}
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!isClosed) handleSelectSession(session);
+                          // Multiple sessions - render with wrapper
+                          // Helper to create light tint background from hex color
+                          const hexToRgba = (hex: string, alpha: number) => {
+                            const normalized = hex.replace('#', '');
+                            const r = parseInt(normalized.substring(0, 2), 16);
+                            const g = parseInt(normalized.substring(2, 4), 16);
+                            const b = parseInt(normalized.substring(4, 6), 16);
+                            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                          };
+                          const lightTintBackground = productColors.background 
+                            ? hexToRgba(productColors.background, 0.1)
+                            : '#F9FAFB';
+
+                          return (
+                            <div key={normalizedProductName} className="relative" style={{ marginTop: '50px' }}>
+                              {/* Wrapper Container */}
+                              <div 
+                                className="rounded-lg rounded-tl-none border border-gray-200 pt-2 px-6 pb-6 relative overflow-visible"
+                                style={{ 
+                                  backgroundColor: lightTintBackground,
+                                  borderColor: productColors.border || '#E5E7EB'
                                 }}
-                                disabled={isClosed}
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-                                  isClosed
-                                    ? 'bg-gray-200 text-gray-500'
-                                    : 'bg-[#576C71] text-white hover:bg-[#1E5461]'
-                                }`}
-                                style={isClosed ? { cursor: 'not-allowed' } : {}}
                               >
-                                <Vote className="h-3 w-3 mr-1" />
-                                Vote!
-                              </button>
-                              {isClosed && (
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                                  Session Closed
-                                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                                {/* Product Name Tab - On Top */}
+                                <div
+                                  className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+                                  style={{
+                                    top: '0',
+                                    left: '-1px',
+                                    transform: 'translateY(-100%)',
+                                    backgroundColor: productColors.background,
+                                    color: productColors.text,
+                                    borderColor: productColors.border,
+                                    borderWidth: '1px',
+                                    borderBottomWidth: '0',
+                                    boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+                                    borderTopLeftRadius: '0.9rem',
+                                    borderTopRightRadius: '0.9rem'
+                                  }}
+                                >
+                                  <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+                                  <span className="overflow-hidden text-ellipsis">{productName}</span>
                                 </div>
-                              )}
-                            </div>
-                          </div>
+                                
+                                {/* Show More text - Same row as tab (desktop only) */}
+                                {remainingCount > 0 && (
+                                  <div
+                                    className="absolute right-0 z-20 hidden md:block"
+                                    style={{
+                                      top: '0',
+                                      transform: 'translateY(calc(-100% - 3px))'
+                                    }}
+                                  >
+                                    <button
+                                      onClick={() => toggleProductGroup(normalizedProductName)}
+                                      className="flex items-center gap-1 text-sm text-[#2D4660] hover:text-[#173B65] transition-colors cursor-pointer"
+                                    >
+                                      {isExpanded ? (
+                                        <>
+                                          Show Less
+                                          <ChevronDown className="h-4 w-4 rotate-180" />
+                                        </>
+                                      ) : (
+                                        <>
+                                          Show More ({remainingCount})
+                                          <ChevronDown className="h-4 w-4" />
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                {/* Sessions Grid */}
+                                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                                  {sessionsToShow.map((session) => {
+                                    const status = getSessionStatus(session);
+                                    const StatusIcon = status.icon;
+                                    const votesInfo = getEffectiveVotesPerUser(session);
+                                    const isClosed = status.text === 'Closed';
+                                    const sessionProductName = getDisplayProductName(session, productLookup);
+                                    const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
+                                    const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
 
-                          <div className="flex items-center gap-2">
-                            <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
-                              <button
-                                onClick={(e) => handleManageAdmins(e, session)}
-                                disabled={isClosed}
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                                  isClosed
-                                    ? 'bg-gray-200 text-gray-500'
-                                    : 'bg-gray-100 text-[#173B65] hover:bg-gray-200'
-                                }`}
-                                style={isClosed ? { cursor: 'not-allowed' } : {}}
-                              >
-                                <Settings className="h-3 w-3 mr-1" />
-                                Admins
-                              </button>
-                              {isClosed && (
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                                  Session Closed
-                                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
-                              <button
-                                onClick={(e) => handleManageStakeholders(e, session)}
-                                disabled={isClosed}
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                                  isClosed
-                                    ? 'bg-gray-200 text-gray-500'
-                                    : 'bg-[#1E5461] text-white hover:bg-[#576C71]'
-                                }`}
-                                style={isClosed ? { cursor: 'not-allowed' } : {}}
-                              >
-                                <Users className="h-3 w-3 mr-1" />
-                                Stakeholders
-                              </button>
-                              {isClosed && (
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                                  Session Closed
-                                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Session Title */}
-                        <h3 className="text-lg font-semibold text-[#2D4660] mb-2">
-                          {session.title}
-                        </h3>
-
-                        {/* Session Goal */}
-                        <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                          {session.goal}
-                        </p>
-
-                        {/* Spacer */}
-                        <div className="flex-1"></div>
-
-                        {/* Session Details */}
-                        <div className="space-y-2 text-sm text-gray-500">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center">
-                              <Calendar className="h-4 w-4 mr-2" />
-                              <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
-                            </div>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                              <StatusIcon className="h-3 w-3 mr-1" />
-                              {status.text}
-                            </span>
-                          </div>
-                          <div className="flex items-center">
-                            <List className="h-4 w-4 mr-2" />
-                            <span>{featureCounts[session.id] || 0} {featureCounts[session.id] === 1 ? 'feature' : 'features'}</span>
-                          </div>
-                          <div className="flex items-start">
-                            <Vote className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" />
-                            <div className="flex-1 flex items-center justify-between">
-                              <div className="flex items-center">
-                                <span className="break-words">{votesInfo.displayText}</span>
-                                {votesInfo.isAuto && (
-                                  <div className="group relative ml-1 mt-0.5">
-                                    <Info className="h-4 w-4 text-blue-500 cursor-help" />
-                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                                      {votesInfo.formula}
-                                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                                    return (
+                                      <div
+                                        key={session.id}
+                                        className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                        style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                                        onClick={() => handleSelectSession(session)}
+                                      >
+                                        {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed, false)}
+                                      </div>
+                                    );
+                                  })}
+                                  {/* Create Session Button - Only show when there are exactly 2 sessions in the group (desktop only) */}
+                                  {sessions.length === 2 && (
+                                    <div className="hidden lg:block relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow mt-6 border" style={{ borderColor: productColors.border || '#E5E7EB', borderWidth: '1px' }}>
+                                      <div className="p-6 flex flex-col h-full items-center justify-center min-h-[200px]">
+                                        <button
+                                          onClick={() => {
+                                            // Pre-select the product for this group
+                                            const productId = sessions[0]?.product_id;
+                                            const productName = getDisplayProductName(sessions[0], productLookup);
+                                            if (productId) {
+                                              setSelectedProductId(productId);
+                                            }
+                                            // Store product name for lookup if product_id doesn't match
+                                            if (productName && productName !== 'No Product') {
+                                              setPendingProductName(productName);
+                                            }
+                                            setShowCreateSessionModal(true);
+                                          }}
+                                          className="group relative flex items-center justify-center w-48 h-48 bg-white text-[#C89212] rounded-lg font-semibold overflow-hidden transition-all duration-300"
+                                          style={{
+                                            background: 'white'
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = 'radial-gradient(circle at center, rgba(200, 146, 18, 0.15) 0%, rgba(200, 146, 18, 0.05) 30%, white 60%)';
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'white';
+                                          }}
+                                        >
+                                          {/* Sparkle effects */}
+                                          <Star className="absolute top-2 left-4 w-3 h-3 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '0ms', animationDuration: '1.5s' }} />
+                                          <Sparkles className="absolute top-6 right-6 w-5 h-5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '200ms', animationDuration: '1.5s' }} />
+                                          <Star className="absolute bottom-8 left-8 w-4 h-4 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '400ms', animationDuration: '1.5s' }} />
+                                          <Sparkles className="absolute bottom-4 right-4 w-3.5 h-3.5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '600ms', animationDuration: '1.5s' }} />
+                                          <Star className="absolute top-1/2 left-2 w-5 h-5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '800ms', animationDuration: '1.5s' }} />
+                                          <Sparkles className="absolute top-1/2 right-2 w-3 h-3 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '1000ms', animationDuration: '1.5s' }} />
+                                          <Star className="absolute top-4 left-1/2 w-4.5 h-4.5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '300ms', animationDuration: '1.5s' }} />
+                                          <Sparkles className="absolute bottom-2 left-1/2 w-3.5 h-3.5 text-[#C89212] opacity-0 group-hover:opacity-100 group-hover:animate-ping transition-opacity duration-500" style={{ animationDelay: '700ms', animationDuration: '1.5s' }} />
+                                          
+                                          <div className="relative z-10 flex flex-col items-center gap-2">
+                                            <Plus className="h-8 w-8" />
+                                            <span className="text-sm">Create a Session</span>
+                                          </div>
+                                        </button>
+                                      </div>
                                     </div>
+                                  )}
+                                </div>
+
+                                {/* Show More button for mobile */}
+                                {remainingCount > 0 && (
+                                  <div className="mt-4 md:hidden">
+                                    <button
+                                      onClick={() => toggleProductGroup(normalizedProductName)}
+                                      className="w-full flex items-center justify-center gap-1 px-4 py-2 text-sm font-medium text-[#2D4660] bg-white hover:bg-gray-50 rounded-md border border-gray-300 transition-colors"
+                                    >
+                                      {isExpanded ? (
+                                        <>
+                                          Show Less
+                                          <ChevronDown className="h-4 w-4 rotate-180" />
+                                        </>
+                                      ) : (
+                                        <>
+                                          Show More ({remainingCount})
+                                          <ChevronDown className="h-4 w-4" />
+                                        </>
+                                      )}
+                                    </button>
                                   </div>
                                 )}
                               </div>
-                              <button
-                                onClick={(e) => handleViewResults(e, session)}
-                                className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#6A4234] transition-colors cursor-pointer flex-shrink-0"
-                              >
-                                <BarChart2 className="h-3 w-3 mr-1" />
-                                {status.text === 'Closed' ? 'Final Results' : 'Current Results'}
-                              </button>
                             </div>
-                          </div>
-                        </div>
+                          );
+                        })}
+                        
+                        {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
+                        {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (
+                          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                            {[...singleSessionProducts, ...sessionsWithoutProducts].map((session) => {
+                              const status = getSessionStatus(session);
+                              const StatusIcon = status.icon;
+                              const votesInfo = getEffectiveVotesPerUser(session);
+                              const isClosed = status.text === 'Closed';
+                              const sessionProductName = getDisplayProductName(session, productLookup);
+                              const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
+                              const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
 
-                        {/* Email Invite */}
-                        <div className="mt-4 pt-4 border-t border-gray-200">
-                          <div className={`relative inline-block w-full ${isClosed ? 'group' : ''}`}>
-                            <button
-                              onClick={(e) => handleEmailInvite(e, session)}
-                              disabled={isClosed}
-                              className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
-                                isClosed
-                                  ? 'bg-gray-200 text-gray-500'
-                                  : 'bg-blue-50 hover:bg-blue-100'
-                              }`}
-                              style={isClosed ? { cursor: 'not-allowed' } : {}}
-                            >
-                              <Mail className={`h-4 w-4 mr-2 ${isClosed ? 'text-gray-500' : 'text-blue-600'}`} />
-                              <span className={`text-sm font-medium ${isClosed ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
-                            </button>
-                            {isClosed && (
-                              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                                Session Closed
-                                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                              return (
+                                <div
+                                  key={session.id}
+                                  className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                  style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                                  onClick={() => handleSelectSession(session)}
+                                >
+                                  {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed)}
+                                </div>
+                              );
+                            })}
+                            {/* Create Session Card - Only show on desktop when there are exactly 2 admin sessions total and single sessions are displayed */}
+                            {adminSessionsToDisplay.length === 2 && (singleSessionProducts.length + sessionsWithoutProducts.length) > 0 && (
+                              <div className="hidden lg:block relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow mt-6 border border-gray-200">
+                                <div className="p-6 flex flex-col h-full items-end justify-center min-h-[200px]">
+                                  <button
+                                    onClick={() => setShowCreateSessionModal(true)}
+                                    className="flex items-center px-6 py-3 bg-[#C89212] text-white rounded-lg hover:bg-[#6A4234] transition-colors font-semibold"
+                                  >
+                                    <Plus className="h-5 w-5 mr-2" />
+                                    Create Session
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
-                        </div>
+                        )}
                       </div>
-                    </div>
-                  );
-                    })}
-                  </div>
+                    );
+                  })()}
                 </div>
               )}
           </>
@@ -1252,52 +2001,106 @@ export default function SessionSelectionScreen() {
             </label>
             
             {!isCreatingNewProduct && !pendingProduct ? (
-              /* Default State: Dropdown + OR + Create Button */
-              <div className="flex gap-3 items-center">
-                <div className="flex-1">
-                  <select
-                    value={selectedProductId}
-                    onChange={(e) => {
-                      setSelectedProductId(e.target.value);
-                      if (createSessionErrors.product) {
-                        setCreateSessionErrors(prev => {
-                          const next = { ...prev };
-                          delete next.product;
-                          return next;
-                        });
+              /* Default State: Dropdown + OR + Create Button + Optional New Product Input */
+              <div className="space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="flex-1 w-full">
+                    <ProductPicker
+                      label=""
+                      products={modalProducts}
+                      value={selectedProductId}
+                      onChange={(value) => {
+                        setSelectedProductId(value);
+                        // Clear new product name if an existing product is selected
+                        if (value) {
+                          setNewProductName('');
+                        }
+                        if (createSessionErrors.product) {
+                          setCreateSessionErrors(prev => {
+                            const next = { ...prev };
+                            delete next.product;
+                            return next;
+                          });
+                        }
+                      }}
+                      isLoading={isLoadingProducts}
+                      error={productError}
+                      disabled={isLoadingProducts || modalProducts.length === 0}
+                      placeholder="Select a product"
+                      helperText={
+                        !isLoadingProducts && modalProducts.length === 0 && !productError
+                          ? 'No products found yet. Enter a product name below to create one.'
+                          : undefined
                       }
-                    }}
-                    disabled={isLoadingProducts}
-                    className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2D4660] ${
-                      createSessionErrors.product ? 'border-red-500' : 'border-gray-300'
-                    } ${isLoadingProducts ? 'bg-gray-50 cursor-not-allowed' : ''}`}
-                  >
-                    {isLoadingProducts ? (
-                      <option>Loading products...</option>
-                    ) : modalProducts.length === 0 ? (
-                      <option value="">No products available</option>
-                    ) : (
-                      <>
-                        <option value="">Select a product</option>
-                        {modalProducts.map(product => (
-                          <option key={product.id} value={product.id}>
-                            {product.name}
-                          </option>
-                        ))}
-                      </>
-                    )}
-                  </select>
+                      allowDelete
+                      onRequestDeleteProduct={(product) => {
+                        setProductToDelete(product);
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 sm:flex-none">
+                    <span className="text-gray-500 font-medium px-2">or</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNewProduct(true)}
+                      disabled={isLoadingProducts}
+                      className="px-4 py-2 bg-[#1E5461] text-white rounded-md hover:bg-[#576C71] transition-colors font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="h-4 w-4 inline mr-2" />
+                      Create New Product
+                    </button>
+                  </div>
                 </div>
-                <span className="text-gray-500 font-medium px-2">or</span>
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingNewProduct(true)}
-                  disabled={isLoadingProducts}
-                  className="px-4 py-2 bg-[#1E5461] text-white rounded-md hover:bg-[#576C71] transition-colors font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus className="h-4 w-4 inline mr-2" />
-                  Create New Product
-                </button>
+                {/* Simple input for typing new product name - always visible */}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">Or type a new product name:</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={newProductName}
+                      onChange={(e) => {
+                        setNewProductName(e.target.value);
+                        // Clear selected product if typing new name
+                        if (e.target.value.trim()) {
+                          setSelectedProductId('');
+                        }
+                        if (productError) setProductError(null);
+                        if (createSessionErrors.product) {
+                          setCreateSessionErrors(prev => {
+                            const next = { ...prev };
+                            delete next.product;
+                            return next;
+                          });
+                        }
+                      }}
+                      placeholder="Enter new product name (will be created automatically)"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-0 focus:border-[#2D4660]"
+                    />
+                    {newProductName.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTempColor(newProductColor || '#2D4660');
+                          setShowColorPickerModal(true);
+                        }}
+                        className="block w-10 h-10 rounded-md border-2 border-gray-300 hover:border-gray-400 transition-all shadow-sm flex-shrink-0"
+                        style={{ 
+                          backgroundColor: newProductColor || '#2D4660',
+                          borderColor: newProductColor || '#2D4660'
+                        }}
+                        title="Choose product color"
+                      />
+                    )}
+                  </div>
+                  {newProductName.trim() && (
+                    <p className="text-xs text-gray-500">
+                      This product will be created automatically when you save the session.
+                    </p>
+                  )}
+                </div>
               </div>
             ) : pendingProduct ? (
               /* Pending Product Display - Minimal */
@@ -1382,7 +2185,7 @@ export default function SessionSelectionScreen() {
                         }
                       `}</style>
                       <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                        Select a Product Color
+                        Product Color
                       </label>
                       <button
                         type="button"
@@ -1453,15 +2256,10 @@ export default function SessionSelectionScreen() {
                 {createSessionErrors.product}
               </p>
             )}
-            {productError && (
+            {productError && (isCreatingNewProduct || Boolean(pendingProduct)) && (
               <p className="text-sm text-red-600 flex items-center">
                 <AlertCircle className="h-4 w-4 mr-1" />
                 {productError}
-              </p>
-            )}
-            {!isCreatingNewProduct && !isLoadingProducts && modalProducts.length === 0 && !productError && (
-              <p className="text-sm text-gray-500">
-                No products found yet. Click "Create New Product" to add one.
               </p>
             )}
           </div>

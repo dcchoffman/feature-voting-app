@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BadgeCheck, CheckCircle, ChevronDown } from 'lucide-react';
+import { CheckCircle, ChevronDown, Trash2 } from 'lucide-react';
 import type { Product } from '../types';
 import { getProductColor } from '../utils/productColors';
 
@@ -107,6 +107,9 @@ export function ProductPicker({
   const canPickColor = Boolean(onNewProductColorChange);
   const colorPreview = newProductColor ?? '#2D4660';
 
+  const hasLabel = Boolean(label && label.trim().length > 0);
+  const showHeaderRow = hasLabel || showAddSection;
+
   return (
     <div className={`space-y-3 ${className}`}>
       <style>{`
@@ -145,111 +148,113 @@ export function ProductPicker({
         }
 
         .product-color-badge {
-          width: 1.75rem;
-          height: 1.75rem;
-          border-radius: 0.25rem;
+          width: 1.5rem;
+          height: 1.5rem;
+          border-radius: 0.35rem;
           flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
           background-color: var(--product-color, #2D4660);
-          color: white;
+          border: 1px solid var(--product-border-color, rgba(0,0,0,0.12));
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35);
         }
       `}</style>
 
       <div className="relative" ref={dropdownRef}>
-        <div className="flex items-center justify-between mb-1 gap-3">
-          <label className="block text-sm font-medium text-gray-700">{label}</label>
-          {showAddSection && (
-            <div className="flex-1 flex items-center justify-end gap-2">
-              {!displayInlineCreate ? (
-                <button
-                  type="button"
-                  onClick={() => setShowInlineCreate(true)}
-                  className="text-sm font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap"
-                >
-                  + Create New Product
-                </button>
-              ) : (
-                <div className="flex items-center gap-2 transition-all duration-300">
-                  <input
-                    type="text"
-                    value={newProductName}
-                    onChange={(e) => {
-                      setColorConfirmed(false);
-                      onNewProductNameChange?.(e.target.value);
-                    }}
-                    placeholder="Product name"
-                    className="flex-1 h-10 px-3 border rounded-md text-sm focus:outline-none focus:ring-0"
-                    style={{
-                      borderColor:
-                        newProductColor && newProductName.trim().length > 0
-                          ? newProductColor
-                          : '#D1D5DB'
-                    }}
-                  />
-                  {canPickColor && newProductName.trim().length > 0 && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => colorInputRef.current?.click()}
-                        className={`relative h-10 w-10 rounded-md border shadow-sm flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[#2d4660] ${
-                          newProductColor ? '' : 'border-gray-300 bg-white'
-                        }`}
-                        style={
-                          newProductColor
-                            ? { backgroundColor: newProductColor, borderColor: newProductColor }
-                            : undefined
-                        }
-                        aria-label="Choose product color"
-                      >
-                        {!newProductColor && (
-                          <img
-                            src="https://icon-library.com/images/color-wheel-icon-png/color-wheel-icon-png-25.jpg"
-                            alt=""
-                            className="h-7 w-7 object-contain pointer-events-none"
-                          />
-                        )}
-                      </button>
-                      <input
-                        ref={colorInputRef}
-                        type="color"
-                        value={colorPreview}
-                        onChange={(e) => {
-                          setColorConfirmed(false);
-                          onNewProductColorChange?.(e.target.value);
-                        }}
-                        className="sr-only"
-                      />
-                      {newProductName.trim().length > 0 && (
+        {showHeaderRow && (
+          <div className="flex items-center justify-between mb-1 gap-3">
+            {hasLabel && (
+              <label className="block text-sm font-medium text-gray-700">{label}</label>
+            )}
+            {showAddSection && (
+              <div className="flex-1 flex items-center justify-end gap-2">
+                {!displayInlineCreate ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowInlineCreate(true)}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                  >
+                    + Create New Product
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 transition-all duration-300">
+                    <input
+                      type="text"
+                      value={newProductName}
+                      onChange={(e) => {
+                        setColorConfirmed(false);
+                        onNewProductNameChange?.(e.target.value);
+                      }}
+                      placeholder="Product name"
+                      className="flex-1 h-10 px-3 border rounded-md text-sm focus:outline-none focus:ring-0"
+                      style={{
+                        borderColor:
+                          newProductColor && newProductName.trim().length > 0
+                            ? newProductColor
+                            : '#D1D5DB'
+                      }}
+                    />
+                    {canPickColor && newProductName.trim().length > 0 && (
+                      <>
                         <button
                           type="button"
-                          onClick={() => setColorConfirmed(true)}
-                          className={`h-10 px-3 rounded-md text-sm font-medium border transition-colors ${
-                            colorConfirmed
-                              ? 'bg-green-50 border-green-500 text-green-700'
-                              : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                          onClick={() => colorInputRef.current?.click()}
+                          className={`relative h-10 w-10 rounded-md border shadow-sm flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[#2d4660] ${
+                            newProductColor ? '' : 'border-gray-300 bg-white'
                           }`}
+                          style={
+                            newProductColor
+                              ? { backgroundColor: newProductColor, borderColor: newProductColor }
+                              : undefined
+                          }
+                          aria-label="Choose product color"
                         >
-                          Looks Great
+                          {!newProductColor && (
+                            <img
+                              src="https://icon-library.com/images/color-wheel-icon-png/color-wheel-icon-png-25.jpg"
+                              alt=""
+                              className="h-7 w-7 object-contain pointer-events-none"
+                            />
+                          )}
                         </button>
-                      )}
-                    </>
-                  )}
-                  {newProductName.trim().length > 0 && newProductColor && colorConfirmed && (
-                    <button
-                      type="button"
-                      onClick={onCreateProduct}
-                      className="h-10 px-4 bg-[#C89212] text-white rounded-md text-sm font-semibold hover:bg-[#A67810] transition-colors"
-                    >
-                      {isCreatingProduct ? 'Creating…' : 'Create New Product'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                        <input
+                          ref={colorInputRef}
+                          type="color"
+                          value={colorPreview}
+                          onChange={(e) => {
+                            setColorConfirmed(false);
+                            onNewProductColorChange?.(e.target.value);
+                          }}
+                          className="sr-only"
+                        />
+                        {newProductName.trim().length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setColorConfirmed(true)}
+                            className={`h-10 px-3 rounded-md text-sm font-medium border transition-colors ${
+                              colorConfirmed
+                                ? 'bg-green-50 border-green-500 text-green-700'
+                                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            Looks Great
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {newProductName.trim().length > 0 && newProductColor && colorConfirmed && (
+                      <button
+                        type="button"
+                        onClick={onCreateProduct}
+                        className="h-10 px-4 bg-[#C89212] text-white rounded-md text-sm font-semibold hover:bg-[#A67810] transition-colors"
+                      >
+                        {isCreatingProduct ? 'Creating…' : 'Create New Product'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => !isSelectorDisabled && setMenuOpen(prev => !prev)}
@@ -266,20 +271,34 @@ export function ProductPicker({
           aria-expanded={menuOpen}
           aria-haspopup="listbox"
         >
-          <span
-            className={`truncate ${selectedDisplayName ? '' : 'text-gray-400'}`}
-            style={
-              selectedProductColors
-                ? ({ color: selectedProductColors.background } as React.CSSProperties)
-                : undefined
-            }
-          >
-            {selectedDisplayName
-              ? selectedDisplayName
-              : products.length === 0
-              ? 'No products available'
-              : placeholder}
-          </span>
+          <div className="flex items-center gap-2 truncate">
+            {selectedProductColors && (
+              <span
+                className="inline-flex h-3.5 w-3.5 rounded-sm border border-white/60 shadow-inner"
+                style={
+                  {
+                    backgroundColor: selectedProductColors.background,
+                    borderColor: selectedProductColors.border
+                  } as React.CSSProperties
+                }
+                aria-hidden="true"
+              />
+            )}
+            <span
+              className={`truncate ${selectedDisplayName ? '' : 'text-gray-400'}`}
+              style={
+                selectedProductColors
+                  ? ({ color: selectedProductColors.background } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              {selectedDisplayName
+                ? selectedDisplayName
+                : products.length === 0
+                ? 'No products available'
+                : placeholder}
+            </span>
+          </div>
           <ChevronDown
           className={`ml-2 h-4 w-4 transition-transform ${
             menuOpen ? 'rotate-180' : ''
@@ -304,7 +323,8 @@ export function ProductPicker({
                     style={
                       {
                         '--product-color': colors.background,
-                        '--product-light-bg': colors.badgeBackground
+                        '--product-light-bg': colors.badgeBackground,
+                        '--product-border-color': colors.border
                       } as React.CSSProperties
                     }
                   >
@@ -314,9 +334,7 @@ export function ProductPicker({
                       onClick={() => handleSelect(product.id)}
                       aria-selected={isSelected}
                     >
-                      <span className="product-color-badge">
-                        <BadgeCheck className="h-4 w-4" />
-                      </span>
+                      <span className="product-color-badge" aria-hidden="true" />
                       <span className="flex-1 truncate font-medium">{product.name}</span>
                       {isSelected && <CheckCircle className="h-4 w-4 text-gray-400" />}
                     </button>
@@ -325,14 +343,14 @@ export function ProductPicker({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setMenuOpen(false);
                           onRequestDeleteProduct(product);
                         }}
                         className="ml-2 text-gray-400 hover:text-[#B83A2F]"
                         aria-label={`Delete ${product.name}`}
+                        title="Delete product"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7h6m2 0h-2m-6 0H7m2 0V5a2 2 0 012-2h0a2 2 0 012 2v2" />
-                        </svg>
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     )}
                   </div>

@@ -1044,6 +1044,15 @@ export default function UsersManagementScreen() {
                   {viewMode === 'session-admin' ? 'Add Stakeholder' : 'Add User'}
                 </button>
               )}
+              {(isSystemAdmin || isSessionAdmin) && currentSession && (
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="flex items-center px-4 py-2 bg-[#1E5461] text-white rounded-lg hover:bg-[#145668] transition-colors"
+                >
+                  <Shield className="h-4 w-4 mr-2" />
+                  Admin Dashboard
+                </button>
+              )}
               <button
                 onClick={() => navigate('/sessions')}
                 className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
@@ -1082,6 +1091,15 @@ export default function UsersManagementScreen() {
                   >
                     <Users className="h-5 w-5 mr-3 text-green-600" />
                     <span className="text-base">{viewMode === 'session-admin' ? 'Add Stakeholder' : 'Add User'}</span>
+                  </button>
+                )}
+                {(isSystemAdmin || isSessionAdmin) && currentSession && (
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); navigate('/admin'); }}
+                    className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <Shield className="h-5 w-5 mr-3 text-[#1E5461]" />
+                    <span className="text-base">Admin Dashboard</span>
                   </button>
                 )}
                   <button

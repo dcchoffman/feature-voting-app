@@ -33,7 +33,8 @@ import {
   BarChart2,
   Settings,
   BadgeCheck,
-  List
+  List,
+  Pencil
 } from "lucide-react";
 
 // Import shared components
@@ -1593,6 +1594,12 @@ export function AdminDashboard({
   const [productError, setProductError] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeletingProduct, setIsDeletingProduct] = useState(false);
+  const [hoveredProductTab, setHoveredProductTab] = useState<boolean>(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [editingProductName, setEditingProductName] = useState('');
+  const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+  const [showEditProductColorPicker, setShowEditProductColorPicker] = useState(false);
+  const [editTempColor, setEditTempColor] = useState<string>('#2D4660');
   const productLookup = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach((product) => {
@@ -2194,13 +2201,15 @@ export function AdminDashboard({
                   <Users className="h-4 w-4 mr-2 text-gray-700" />
                   All Sessions
                 </button>
-                <button
-                  onClick={() => { setMobileMenuOpen(false); onShowResults(); }}
-                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
-                >
-                  <BarChart2 className="h-4 w-4 mr-2 text-gray-700" />
-                  {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
-                </button>
+                {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); onShowResults(); }}
+                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <BarChart2 className="h-4 w-4 mr-2 text-gray-700" />
+                    {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+                  </button>
+                )}
                 <button
                   onClick={() => { setMobileMenuOpen(false); setShowSessionEditForm(true); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
@@ -2225,7 +2234,7 @@ export function AdminDashboard({
       <div className="relative bg-white rounded-lg shadow-md p-4 mb-6" style={{ marginTop: productName ? '3.5rem' : '0' }}>
         {productName && (
           <div
-            className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+            className="absolute left-0 px-4 py-1 pr-8 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap group cursor-pointer"
             style={{
               top: '0',
               left: '-1px',
@@ -2237,11 +2246,39 @@ export function AdminDashboard({
               borderBottomWidth: '0',
               boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
               borderTopLeftRadius: '0.9rem',
-              borderTopRightRadius: '0.9rem'
+              borderTopRightRadius: '0.9rem',
+              overflow: 'visible'
+            }}
+            onMouseEnter={() => {
+              const productId = (votingSession as any).product_id || (votingSession as any).productId;
+              if (productId) {
+                setHoveredProductTab(true);
+              }
+            }}
+            onMouseLeave={() => setHoveredProductTab(false)}
+            onClick={async (e) => {
+              const productId = (votingSession as any).product_id || (votingSession as any).productId;
+              if (!productId) return;
+              e.stopPropagation();
+              const product = products.find(p => p.id === productId);
+              if (product) {
+                setProductToEdit(product);
+                setEditingProductName(product.name || '');
+                setEditingProductColor(product.color_hex || null);
+                setEditTempColor(product.color_hex || '#2D4660');
+              }
             }}
           >
             <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-            <span className="overflow-hidden text-ellipsis">{productName}</span>
+            <span className="overflow-hidden text-ellipsis flex-1 min-w-0">{productName}</span>
+            {(() => {
+              const productId = (votingSession as any).product_id || (votingSession as any).productId;
+              return productId && hoveredProductTab && (
+                <div className="absolute right-2 flex-shrink-0 opacity-80">
+                  <Pencil className="h-4 w-4" style={{ color: productColors.text }} />
+                </div>
+              );
+            })()}
           </div>
         )}
         <div className="pt-1">
@@ -2252,14 +2289,16 @@ export function AdminDashboard({
           <div ref={sessionActionsMenuRef} className="relative z-40">
             {/* Desktop buttons */}
             <div className="hidden md:flex space-x-2">
-              <Button 
-                variant="gold"
-                onClick={onShowResults}
-                className="flex items-center"
-              >
-                <BarChart2 className="h-4 w-4 mr-2" />
-                {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
-              </Button>
+              {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
+                <Button 
+                  variant="gold"
+                  onClick={onShowResults}
+                  className="flex items-center"
+                >
+                  <BarChart2 className="h-4 w-4 mr-2" />
+                  {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+                </Button>
+              )}
               <Button 
                 variant="primary"
                 onClick={() => setShowSessionEditForm(true)}
@@ -2285,13 +2324,15 @@ export function AdminDashboard({
             {sessionActionsMenuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
                 <div className="py-1">
-                  <button
-                    onClick={() => { setSessionActionsMenuOpen(false); onShowResults(); }}
-                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
-                  >
-                    <BarChart2 className="h-4 w-4 mr-2 text-gray-700" />
-                    {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
-                  </button>
+                  {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
+                    <button
+                      onClick={() => { setSessionActionsMenuOpen(false); onShowResults(); }}
+                      className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                    >
+                      <BarChart2 className="h-4 w-4 mr-2 text-gray-700" />
+                      {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+                    </button>
+                  )}
                   <button
                     onClick={() => { setSessionActionsMenuOpen(false); setShowSessionEditForm(true); }}
                     className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
@@ -3416,6 +3457,162 @@ export function AdminDashboard({
           </div>
         </form>
       </Modal>
+
+      {/* Edit Product Modal */}
+      {productToEdit && (
+        <Modal
+          isOpen
+          onClose={() => {
+            setProductToEdit(null);
+            setEditingProductName('');
+            setEditingProductColor(null);
+            setShowEditProductColorPicker(false);
+          }}
+          title="Edit Product"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Product Name *
+              </label>
+              <input
+                type="text"
+                value={editingProductName}
+                onChange={(e) => setEditingProductName(e.target.value)}
+                placeholder="Enter product name"
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-0 focus:border-[#2D4660]"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Product Color
+              </label>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditTempColor(editingProductColor || '#2D4660');
+                    setShowEditProductColorPicker(true);
+                  }}
+                  className="block w-12 h-12 rounded-md border-2 border-gray-300 hover:border-gray-400 transition-all flex items-center justify-center overflow-hidden"
+                  style={editingProductColor ? { backgroundColor: editingProductColor } : { backgroundColor: '#ffffff' }}
+                >
+                  {!editingProductColor && (
+                    <img 
+                      src="/colorpicker.png" 
+                      alt="Color Picker"
+                      className="w-8 h-8 object-contain"
+                    />
+                  )}
+                </button>
+                <span className="text-sm text-gray-600">
+                  {editingProductColor || 'No color selected'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setProductToEdit(null);
+                  setEditingProductName('');
+                  setEditingProductColor(null);
+                  setShowEditProductColorPicker(false);
+                }}
+                disabled={isUpdatingProduct}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  if (!productToEdit?.id || !editingProductName.trim()) {
+                    return;
+                  }
+                  setIsUpdatingProduct(true);
+                  try {
+                    await db.updateProduct(productToEdit.id, {
+                      name: editingProductName.trim(),
+                      color_hex: editingProductColor
+                    });
+                    // Refresh products
+                    const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId;
+                    if (tenantId) {
+                      const updatedProducts = await db.getProductsForTenant(tenantId);
+                      setProducts(updatedProducts.sort((a, b) => a.name.localeCompare(b.name)));
+                    }
+                    setProductToEdit(null);
+                    setEditingProductName('');
+                    setEditingProductColor(null);
+                    setShowEditProductColorPicker(false);
+                    if (onProductColorUpdated) {
+                      onProductColorUpdated();
+                    }
+                  } catch (error) {
+                    console.error('Error updating product:', error);
+                    alert('Failed to update product. Please try again.');
+                  } finally {
+                    setIsUpdatingProduct(false);
+                  }
+                }}
+                disabled={isUpdatingProduct || !editingProductName.trim()}
+              >
+                {isUpdatingProduct ? 'Updating...' : 'Update Product'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Product Color Picker Modal */}
+      {showEditProductColorPicker && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          onClick={() => setShowEditProductColorPicker(false)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl px-3 py-2 w-auto mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex gap-3 items-stretch">
+              <div className="flex-shrink-0" style={{ width: '240px', height: '260px' }}>
+                <input
+                  id="edit-native-color-input"
+                  type="color"
+                  value={editTempColor}
+                  onChange={(e) => setEditTempColor(e.target.value)}
+                  ref={(input) => {
+                    if (input && showEditProductColorPicker) {
+                      setTimeout(() => input.click(), 50);
+                    }
+                  }}
+                  className="opacity-0 absolute"
+                  style={{ width: '1px', height: '1px' }}
+                />
+                <div className="w-full h-full"></div>
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProductColor(editTempColor);
+                  setShowEditProductColorPicker(false);
+                }}
+                className="px-6 rounded-lg text-white font-bold shadow-lg hover:shadow-xl transition-all flex flex-col items-center justify-center gap-3 text-lg flex-shrink-0"
+                style={{ backgroundColor: editTempColor, height: '260px', minWidth: '100px' }}
+              >
+                <CheckCircle className="h-8 w-8" />
+                <div className="text-center leading-tight">
+                  <div>Looks</div>
+                  <div>Good</div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

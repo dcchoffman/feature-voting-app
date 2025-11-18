@@ -283,6 +283,8 @@ export default function UsersManagementScreen() {
   const [filteredSessionsForSessionAdmin, setFilteredSessionsForSessionAdmin] = useState<VotingSession[]>([]);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<{ email: string; password: string; userType: string } | null>(null);
+  const [useAllSessionsForStakeholder, setUseAllSessionsForStakeholder] = useState<boolean>(true);
+  const [useAllSessionsForSessionAdmin, setUseAllSessionsForSessionAdmin] = useState<boolean>(true);
 
   const handleLogout = async () => {
     try {
@@ -1050,6 +1052,8 @@ export default function UsersManagementScreen() {
     setFilteredSessionsForProduct([]);
     setSelectedProductIdForSessionAdmin('');
     setFilteredSessionsForSessionAdmin([]);
+    setUseAllSessionsForStakeholder(true);
+    setUseAllSessionsForSessionAdmin(true);
     setAccordionOpen({
       systemAdmin: false,
       sessionAdmin: false,
@@ -1111,11 +1115,25 @@ export default function UsersManagementScreen() {
 
       // Add session admin roles (only in system-admin mode)
       if (viewMode === 'system-admin') {
-        for (const sessionId of newUserData.sessionAdminIds) {
-          try {
-            await db.addSessionAdmin(sessionId, newUserId);
-          } catch (err) {
-            console.error('Error adding session admin role:', err);
+        if (accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin) {
+          if (useAllSessionsForSessionAdmin) {
+            // Add to all current sessions for the product
+            for (const session of filteredSessionsForSessionAdmin) {
+              try {
+                await db.addSessionAdmin(session.id, newUserId);
+              } catch (err) {
+                console.error(`Error adding session admin role to session ${session.id}:`, err);
+              }
+            }
+          } else {
+            // Add to selected sessions only
+            for (const sessionId of newUserData.sessionAdminIds) {
+              try {
+                await db.addSessionAdmin(sessionId, newUserId);
+              } catch (err) {
+                console.error('Error adding session admin role:', err);
+              }
+            }
           }
         }
       }
@@ -1126,10 +1144,35 @@ export default function UsersManagementScreen() {
       console.log('User admin sessions:', userAdminSessions);
       console.log('All sessions:', allSessions.map(s => ({ id: s.id, title: s.title })));
       
-      if (newUserData.stakeholderSessionIds.length === 0) {
-        console.log('No stakeholder sessions selected');
+      // Determine which sessions to add the user to
+      let sessionsToAdd: string[] = [];
+      
+      if (viewMode === 'session-admin') {
+        // Session Admin mode: use selected product's sessions
+        if (selectedProductId && useAllSessionsForStakeholder) {
+          // Add to all current sessions for the product
+          sessionsToAdd = filteredSessionsForProduct.map(s => s.id);
+        } else if (selectedProductId && !useAllSessionsForStakeholder) {
+          // Add to selected sessions only
+          sessionsToAdd = newUserData.stakeholderSessionIds;
+        }
+      } else if (viewMode === 'system-admin') {
+        // System Admin mode: check if stakeholder accordion is open
+        if (accordionOpen.stakeholder && selectedProductId) {
+          if (useAllSessionsForStakeholder) {
+            // Add to all current sessions for the product
+            sessionsToAdd = filteredSessionsForProduct.map(s => s.id);
+          } else {
+            // Add to selected sessions only
+            sessionsToAdd = newUserData.stakeholderSessionIds;
+          }
+        }
+      }
+      
+      if (sessionsToAdd.length === 0) {
+        console.log('No stakeholder sessions to add');
       } else {
-        for (const sessionId of newUserData.stakeholderSessionIds) {
+        for (const sessionId of sessionsToAdd) {
           // In session-admin mode, ensure we only add to sessions they manage
           // Note: In session-admin mode, allSessions already contains only their sessions
           if (viewMode === 'session-admin') {
@@ -1160,9 +1203,10 @@ export default function UsersManagementScreen() {
       let userType = 'User';
       if (newUserData.isSystemAdmin) {
         userType = 'System Admin';
-      } else if (newUserData.sessionAdminIds.length > 0) {
+      } else if (accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin && (useAllSessionsForSessionAdmin || newUserData.sessionAdminIds.length > 0)) {
         userType = 'Session Admin';
-      } else if (newUserData.stakeholderSessionIds.length > 0) {
+      } else if ((viewMode === 'session-admin' && selectedProductId && (useAllSessionsForStakeholder || newUserData.stakeholderSessionIds.length > 0)) || 
+                 (viewMode === 'system-admin' && accordionOpen.stakeholder && selectedProductId && (useAllSessionsForStakeholder || newUserData.stakeholderSessionIds.length > 0))) {
         userType = 'Stakeholder';
       }
 
@@ -2562,48 +2606,95 @@ export default function UsersManagementScreen() {
                               setSelectedProductIdForSessionAdmin(productId);
                               // Clear selected sessions when product changes
                               setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
+                              setUseAllSessionsForSessionAdmin(true);
                             }}
                             label="Product *"
                           />
                         </div>
 
-                        {/* Session Selection - Only show after product is selected */}
+                        {/* Session Selection Toggle - Only show after product is selected */}
                         {selectedProductIdForSessionAdmin && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Sessions * (Current and Future)
-                            </label>
-                            {filteredSessionsForSessionAdmin.length === 0 ? (
-                              <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                            ) : (
-                              <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                                {filteredSessionsForSessionAdmin.map((session) => (
-                                  <label
-                                    key={session.id}
-                                    className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={newUserData.sessionAdminIds.includes(session.id)}
-                                      onChange={() => toggleSessionAdmin(session.id)}
-                                      className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                                      style={{ accentColor: '#16a34a' }}
-                                    />
-                                    <div className="ml-3 flex-1">
-                                      <div className="text-sm font-medium text-gray-900">
-                                        {session.title || session.name || 'Unnamed Session'}
-                                      </div>
-                                      <div className="text-xs text-gray-500 mt-0.5">
-                                        {formatSessionDateRange(session)}
-                                      </div>
-                                      <div className="text-xs mt-0.5">
-                                        <span className={`font-medium ${getSessionStatus(session).color}`}>
-                                          {getSessionStatus(session).text}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </label>
-                                ))}
+                          <div className="space-y-3">
+                            {/* Toggle: All Sessions / Select Sessions */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Session Selection *
+                              </label>
+                              <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUseAllSessionsForSessionAdmin(false);
+                                  }}
+                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                                    !useAllSessionsForSessionAdmin
+                                      ? 'bg-white text-[#2d4660] shadow-sm'
+                                      : 'text-gray-600 hover:text-gray-900'
+                                  }`}
+                                >
+                                  Select Sessions
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUseAllSessionsForSessionAdmin(true);
+                                    setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
+                                  }}
+                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                                    useAllSessionsForSessionAdmin
+                                      ? 'bg-white text-[#2d4660] shadow-sm'
+                                      : 'text-gray-600 hover:text-gray-900'
+                                  }`}
+                                >
+                                  All Sessions
+                                </button>
+                              </div>
+                              {useAllSessionsForSessionAdmin && (
+                                <p className="mt-2 text-xs text-gray-500">
+                                  User will be added to all current and future sessions for this product
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Session Selection List - Only show if "Select Sessions" is chosen */}
+                            {!useAllSessionsForSessionAdmin && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Sessions * (Current and Future)
+                                </label>
+                                {filteredSessionsForSessionAdmin.length === 0 ? (
+                                  <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                                ) : (
+                                  <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                                    {filteredSessionsForSessionAdmin.map((session) => (
+                                      <label
+                                        key={session.id}
+                                        className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={newUserData.sessionAdminIds.includes(session.id)}
+                                          onChange={() => toggleSessionAdmin(session.id)}
+                                          className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                                          style={{ accentColor: '#16a34a' }}
+                                        />
+                                        <div className="ml-3 flex-1">
+                                          <div className="text-sm font-medium text-gray-900">
+                                            {session.title || session.name || 'Unnamed Session'}
+                                          </div>
+                                          <div className="text-xs text-gray-500 mt-0.5">
+                                            {formatSessionDateRange(session)}
+                                          </div>
+                                          <div className="text-xs mt-0.5">
+                                            <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                              {getSessionStatus(session).text}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2636,48 +2727,95 @@ export default function UsersManagementScreen() {
                             setSelectedProductId(productId);
                             // Clear selected sessions when product changes
                             setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+                            setUseAllSessionsForStakeholder(true);
                           }}
                           label="Product *"
                         />
                       </div>
 
-                      {/* Session Selection - Only show after product is selected */}
+                      {/* Session Selection Toggle - Only show after product is selected */}
                       {selectedProductId && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Sessions * (Current and Future)
-                          </label>
-                          {filteredSessionsForProduct.length === 0 ? (
-                            <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                          ) : (
-                            <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                              {filteredSessionsForProduct.map((session) => (
-                                <label
-                                  key={session.id}
-                                  className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                    onChange={() => toggleStakeholder(session.id)}
-                                    className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                                    style={{ accentColor: '#16a34a' }}
-                                  />
-                                  <div className="ml-3 flex-1">
-                                    <div className="text-sm font-medium text-gray-900">
-                                      {session.title || session.name || 'Unnamed Session'}
-                                    </div>
-                                    <div className="text-xs text-gray-500 mt-0.5">
-                                      {formatSessionDateRange(session)}
-                                    </div>
-                                    <div className="text-xs mt-0.5">
-                                      <span className={`font-medium ${getSessionStatus(session).color}`}>
-                                        {getSessionStatus(session).text}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </label>
-                              ))}
+                        <div className="space-y-3">
+                          {/* Toggle: All Sessions / Select Sessions */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Session Selection *
+                            </label>
+                            <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUseAllSessionsForStakeholder(false);
+                                }}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                                  !useAllSessionsForStakeholder
+                                    ? 'bg-white text-[#2d4660] shadow-sm'
+                                    : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                              >
+                                Select Sessions
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUseAllSessionsForStakeholder(true);
+                                  setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+                                }}
+                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                                  useAllSessionsForStakeholder
+                                    ? 'bg-white text-[#2d4660] shadow-sm'
+                                    : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                              >
+                                All Sessions
+                              </button>
+                            </div>
+                            {useAllSessionsForStakeholder && (
+                              <p className="mt-2 text-xs text-gray-500">
+                                User will be added to all current and future sessions for this product
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Session Selection List - Only show if "Select Sessions" is chosen */}
+                          {!useAllSessionsForStakeholder && (
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Sessions * (Current and Future)
+                              </label>
+                              {filteredSessionsForProduct.length === 0 ? (
+                                <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                              ) : (
+                                <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                                  {filteredSessionsForProduct.map((session) => (
+                                    <label
+                                      key={session.id}
+                                      className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={newUserData.stakeholderSessionIds.includes(session.id)}
+                                        onChange={() => toggleStakeholder(session.id)}
+                                        className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                                        style={{ accentColor: '#16a34a' }}
+                                      />
+                                      <div className="ml-3 flex-1">
+                                        <div className="text-sm font-medium text-gray-900">
+                                          {session.title || session.name || 'Unnamed Session'}
+                                        </div>
+                                        <div className="text-xs text-gray-500 mt-0.5">
+                                          {formatSessionDateRange(session)}
+                                        </div>
+                                        <div className="text-xs mt-0.5">
+                                          <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                            {getSessionStatus(session).text}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -2717,48 +2855,95 @@ export default function UsersManagementScreen() {
                               setSelectedProductId(productId);
                               // Clear selected sessions when product changes
                               setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+                              setUseAllSessionsForStakeholder(true);
                             }}
                             label="Product *"
                           />
                         </div>
 
-                        {/* Session Selection - Only show after product is selected */}
+                        {/* Session Selection Toggle - Only show after product is selected */}
                         {selectedProductId && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Sessions * (Current and Future)
-                            </label>
-                            {filteredSessionsForProduct.length === 0 ? (
-                              <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                            ) : (
-                              <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                                {filteredSessionsForProduct.map((session) => (
-                                  <label
-                                    key={session.id}
-                                    className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                      onChange={() => toggleStakeholder(session.id)}
-                                      className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                                      style={{ accentColor: '#16a34a' }}
-                                    />
-                                    <div className="ml-3 flex-1">
-                                      <div className="text-sm font-medium text-gray-900">
-                                        {session.title || session.name || 'Unnamed Session'}
-                                      </div>
-                                      <div className="text-xs text-gray-500 mt-0.5">
-                                        {formatSessionDateRange(session)}
-                                      </div>
-                                      <div className="text-xs mt-0.5">
-                                        <span className={`font-medium ${getSessionStatus(session).color}`}>
-                                          {getSessionStatus(session).text}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </label>
-                                ))}
+                          <div className="space-y-3">
+                            {/* Toggle: All Sessions / Select Sessions */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Session Selection *
+                              </label>
+                              <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUseAllSessionsForStakeholder(false);
+                                  }}
+                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                                    !useAllSessionsForStakeholder
+                                      ? 'bg-white text-[#2d4660] shadow-sm'
+                                      : 'text-gray-600 hover:text-gray-900'
+                                  }`}
+                                >
+                                  Select Sessions
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUseAllSessionsForStakeholder(true);
+                                    setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+                                  }}
+                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                                    useAllSessionsForStakeholder
+                                      ? 'bg-white text-[#2d4660] shadow-sm'
+                                      : 'text-gray-600 hover:text-gray-900'
+                                  }`}
+                                >
+                                  All Sessions
+                                </button>
+                              </div>
+                              {useAllSessionsForStakeholder && (
+                                <p className="mt-2 text-xs text-gray-500">
+                                  User will be added to all current and future sessions for this product
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Session Selection List - Only show if "Select Sessions" is chosen */}
+                            {!useAllSessionsForStakeholder && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Sessions * (Current and Future)
+                                </label>
+                                {filteredSessionsForProduct.length === 0 ? (
+                                  <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                                ) : (
+                                  <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                                    {filteredSessionsForProduct.map((session) => (
+                                      <label
+                                        key={session.id}
+                                        className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={newUserData.stakeholderSessionIds.includes(session.id)}
+                                          onChange={() => toggleStakeholder(session.id)}
+                                          className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                                          style={{ accentColor: '#16a34a' }}
+                                        />
+                                        <div className="ml-3 flex-1">
+                                          <div className="text-sm font-medium text-gray-900">
+                                            {session.title || session.name || 'Unnamed Session'}
+                                          </div>
+                                          <div className="text-xs text-gray-500 mt-0.5">
+                                            {formatSessionDateRange(session)}
+                                          </div>
+                                          <div className="text-xs mt-0.5">
+                                            <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                              {getSessionStatus(session).text}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2780,7 +2965,7 @@ export default function UsersManagementScreen() {
                 </button>
                 <button
                   onClick={handleAddUser}
-                  disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim() || (viewMode === 'session-admin' && (!selectedProductId || newUserData.stakeholderSessionIds.length === 0))}
+                  disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim() || (viewMode === 'session-admin' && (!selectedProductId || (!useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))) || (viewMode === 'system-admin' && accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin && !useAllSessionsForSessionAdmin && newUserData.sessionAdminIds.length === 0) || (viewMode === 'system-admin' && accordionOpen.stakeholder && selectedProductId && !useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0)}
                   className="flex-1 px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   {isAddingUser ? (

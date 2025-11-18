@@ -312,7 +312,7 @@ const Button = React.memo(function Button({
     primary: "bg-[#2d4660] text-white hover:bg-[#173B65]",
     secondary: "border border-gray-300 text-gray-700 hover:bg-gray-50",
     danger: "bg-[#591D0F] text-white hover:bg-[#492434]",
-    gold: "bg-[#C89212] text-white hover:bg-[#A67810]",
+    gold: "bg-[#C89212] text-white hover:bg-[#E0A814]",
     blue: "bg-[#173B65] text-white hover:bg-[#1D2C49]",
     gray: "bg-[#576C71] text-white hover:bg-[#1E5461]"
   };

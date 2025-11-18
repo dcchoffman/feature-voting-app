@@ -11,7 +11,7 @@ import type { Product } from '../types';
 import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
-  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Star, Sparkles
+  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Star, Sparkles, Pencil
 } from 'lucide-react';
 
 export default function SessionSelectionScreen() {
@@ -29,6 +29,7 @@ export default function SessionSelectionScreen() {
   const [productLookup, setProductLookup] = useState<Record<string, string>>({});
   const [productColorLookup, setProductColorLookup] = useState<Record<string, string>>({});
   const [showCreateSessionModal, setShowCreateSessionModal] = useState(false);
+  const [allowCreateProduct, setAllowCreateProduct] = useState(true);
   const [createSessionForm, setCreateSessionForm] = useState({
     title: '',
     goal: '',
@@ -58,6 +59,15 @@ export default function SessionSelectionScreen() {
   const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(new Set());
   const [pendingProductName, setPendingProductName] = useState<string | null>(null);
   const [hoveredPlusButton, setHoveredPlusButton] = useState<string | null>(null);
+  const [hoveredThirdCard, setHoveredThirdCard] = useState<string | null>(null);
+  const [hoveredProductTab, setHoveredProductTab] = useState<string | null>(null);
+  const [hoveredSessionCard, setHoveredSessionCard] = useState<string | null>(null);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [editingProductName, setEditingProductName] = useState('');
+  const [editingProductColor, setEditingProductColor] = useState<string | null>(null);
+  const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+  const [showEditProductColorPicker, setShowEditProductColorPicker] = useState(false);
+  const [editTempColor, setEditTempColor] = useState<string>('#2D4660');
 
   useEffect(() => {
     const loadModalProducts = async () => {
@@ -179,6 +189,7 @@ export default function SessionSelectionScreen() {
     setShowColorPickerModal(false);
     setTempColor('#2D4660');
     setPendingProductName(null);
+    setAllowCreateProduct(true);
   };
 
   const validateCreateSessionForm = () => {
@@ -732,8 +743,13 @@ export default function SessionSelectionScreen() {
   const hasAdminAccess = isSystemAdmin || adminSessions.length > 0;
 
   const isSystemAdminView = isSystemAdmin && viewMode === 'system-admin';
-  // When in stakeholder view mode, show all sessions as stakeholder cards
-  const sessionsToDisplay = viewMode === 'stakeholder' ? sortedUserSessions : [];
+  // When in stakeholder view mode, show only active sessions (excluding upcoming and closed sessions)
+  const sessionsToDisplay = viewMode === 'stakeholder' 
+    ? sortedUserSessions.filter(s => {
+        const status = getSessionStatus(s);
+        return status.text === 'Active';
+      })
+    : [];
   const adminSessionsToDisplay = (viewMode === 'admin' || viewMode === 'system-admin') ? adminSessions : [];
   const stakeholderSessionsToDisplay = viewMode === 'admin' ? stakeholderOnlySessions : [];
 
@@ -852,6 +868,81 @@ export default function SessionSelectionScreen() {
     }
   };
 
+  // Helper function to render product tab with edit pencil
+  const renderProductTab = (
+    productName: string,
+    productColors: any,
+    productId?: string | null,
+    tabKey?: string
+  ) => {
+    const key = tabKey || productId || productName;
+    const handleTabClick = async (e: React.MouseEvent) => {
+      if (!productId) return;
+      e.stopPropagation();
+      // Load product if not already in modalProducts
+      let product = modalProducts.find(p => p.id === productId);
+      if (!product) {
+        const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId;
+        if (tenantId) {
+          try {
+            const products = await db.getProductsForTenant(tenantId);
+            product = products.find(p => p.id === productId);
+            if (product) {
+              setModalProducts(prev => {
+                const exists = prev.find(p => p.id === productId);
+                if (exists) return prev;
+                return [...prev, product!].sort((a, b) => a.name.localeCompare(b.name));
+              });
+            }
+          } catch (error) {
+            console.error('Error loading product for edit:', error);
+          }
+        }
+      }
+      if (product) {
+        setProductToEdit(product);
+        setEditingProductName(product.name || '');
+        setEditingProductColor(product.color_hex || null);
+        setEditTempColor(product.color_hex || '#2D4660');
+      }
+    };
+
+    return (
+      <div
+        className="absolute left-0 px-4 py-1 pr-8 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap group cursor-pointer"
+        style={{
+          top: '0',
+          left: '-1px',
+          transform: 'translateY(-100%)',
+          backgroundColor: productColors.background,
+          color: productColors.text,
+          borderColor: productColors.border,
+          borderWidth: '1px',
+          borderBottomWidth: '0',
+          boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+          borderTopLeftRadius: '0.9rem',
+          borderTopRightRadius: '0.9rem',
+          overflow: 'visible'
+        }}
+        onMouseEnter={() => {
+          if (productId && viewMode !== 'stakeholder' && hasAdminAccess) {
+            setHoveredProductTab(key);
+          }
+        }}
+        onMouseLeave={() => setHoveredProductTab(null)}
+        onClick={viewMode !== 'stakeholder' && hasAdminAccess ? handleTabClick : undefined}
+      >
+        <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+        <span className="overflow-hidden text-ellipsis flex-1 min-w-0">{productName}</span>
+        {productId && hoveredProductTab === key && viewMode !== 'stakeholder' && hasAdminAccess && (
+          <div className="absolute right-2 flex-shrink-0 opacity-80">
+            <Pencil className="h-4 w-4" style={{ color: productColors.text }} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Helper function to render a session card
   const renderSessionCard = (
     session: any,
@@ -861,32 +952,13 @@ export default function SessionSelectionScreen() {
     StatusIcon: any,
     votesInfo: any,
     isClosed: boolean,
-    showTab: boolean = true
+    showTab: boolean = true,
+    productId?: string | null
   ) => {
     return (
       <>
         {/* Product Name Tab */}
-        {showTab && (
-          <div
-            className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
-            style={{
-              top: '0',
-              left: '-1px',
-              transform: 'translateY(-100%)',
-              backgroundColor: productColors.background,
-              color: productColors.text,
-              borderColor: productColors.border,
-              borderWidth: '1px',
-              borderBottomWidth: '0',
-              boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-              borderTopLeftRadius: '0.9rem',
-              borderTopRightRadius: '0.9rem'
-            }}
-          >
-            <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-            <span className="overflow-hidden text-ellipsis">{productName}</span>
-          </div>
-        )}
+        {showTab && renderProductTab(productName, productColors, productId)}
         <div className="p-6 flex flex-col h-full">
           {/* Action Buttons */}
           <div className="flex justify-between items-start mb-4">
@@ -984,8 +1056,8 @@ export default function SessionSelectionScreen() {
                 <Calendar className="h-4 w-4 mr-2" />
                 <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
               </div>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                <StatusIcon className="h-3 w-3 mr-1" />
+              <span className={`inline-flex items-center ${status.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${status.color}`}>
+                <StatusIcon className={`${status.text === 'Active' ? 'h-4 w-4' : 'h-3 w-3'} mr-1`} />
                 {status.text}
               </span>
             </div>
@@ -1011,13 +1083,15 @@ export default function SessionSelectionScreen() {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={(e) => handleViewResults(e, session)}
-                  className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#6A4234] transition-colors cursor-pointer flex-shrink-0"
-                >
-                  <BarChart2 className="h-3 w-3 mr-1" />
-                  {status.text === 'Closed' ? 'Final Results' : 'Current Results'}
-                </button>
+                {status.text !== 'Upcoming' && (
+                  <button
+                    onClick={(e) => handleViewResults(e, session)}
+                    className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#E0A814] transition-colors cursor-pointer flex-shrink-0"
+                  >
+                    <BarChart2 className="h-3 w-3 mr-1" />
+                    {status.text === 'Closed' ? 'Final Results' : 'Current Results'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1113,7 +1187,10 @@ export default function SessionSelectionScreen() {
             {(isSystemAdmin || adminSessions.length > 0) && (viewMode === 'admin' || viewMode === 'system-admin') && (
               <>
                 <button
-                  onClick={() => setShowCreateSessionModal(true)}
+                  onClick={() => {
+                    setAllowCreateProduct(true);
+                    setShowCreateSessionModal(true);
+                  }}
                   className="flex items-center px-4 py-2 bg-[#C89212] text-white rounded-lg hover:bg-[#6A4234] transition-colors"
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -1160,7 +1237,11 @@ export default function SessionSelectionScreen() {
                 {(isSystemAdmin || adminSessions.length > 0) && (viewMode === 'admin' || viewMode === 'system-admin') && (
                   <>
                     <button
-                      onClick={() => { setMobileMenuOpen(false); setShowCreateSessionModal(true); }}
+                      onClick={() => { 
+                        setMobileMenuOpen(false);
+                        setAllowCreateProduct(true);
+                        setShowCreateSessionModal(true);
+                      }}
                       className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                     >
                       <Plus className="h-4 w-4 mr-2 text-gray-700" />
@@ -1191,7 +1272,10 @@ export default function SessionSelectionScreen() {
           </p>
           {isSystemAdmin && (
             <button
-              onClick={() => setShowCreateSessionModal(true)}
+              onClick={() => {
+                setAllowCreateProduct(true);
+                setShowCreateSessionModal(true);
+              }}
               className="inline-flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
             >
               <Plus className="h-5 w-5 mr-2" />
@@ -1271,25 +1355,7 @@ export default function SessionSelectionScreen() {
                             }}
                           >
                             {/* Product Name Tab - On Top */}
-                            <div
-                              className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
-                              style={{
-                                top: '0',
-                                left: '-1px',
-                                transform: 'translateY(-100%)',
-                                backgroundColor: productColors.background,
-                                color: productColors.text,
-                                borderColor: productColors.border,
-                                borderWidth: '1px',
-                                borderBottomWidth: '0',
-                                boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-                                borderTopLeftRadius: '0.9rem',
-                                borderTopRightRadius: '0.9rem'
-                              }}
-                            >
-                              <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-                              <span className="overflow-hidden text-ellipsis">{productName}</span>
-                            </div>
+                            {renderProductTab(productName, productColors, sessions[0]?.product_id, normalizedProductName)}
                             
                             {/* Show More text - Same row as tab (desktop only) */}
                             {remainingCount > 0 && (
@@ -1337,6 +1403,7 @@ export default function SessionSelectionScreen() {
                                     if (productName && productName !== 'No Product') {
                                       setPendingProductName(productName);
                                     }
+                                    setAllowCreateProduct(false);
                                     setShowCreateSessionModal(true);
                                   }}
                                   onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
@@ -1369,7 +1436,13 @@ export default function SessionSelectionScreen() {
                                   <div
                                     key={session.id}
                                     className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                                    style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                                    style={{ 
+                                      borderColor: sessionProductColors.border, 
+                                      borderWidth: '1px',
+                                      opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                                    }}
+                                    onMouseEnter={() => setHoveredSessionCard(session.id)}
+                                    onMouseLeave={() => setHoveredSessionCard(null)}
                                     onClick={() => handleSelectSession(session)}
                                   >
                                     <div className="p-6 flex flex-col h-full">
@@ -1408,8 +1481,8 @@ export default function SessionSelectionScreen() {
                                             <Calendar className="h-4 w-4 mr-2" />
                                             <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
                                           </div>
-                                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                                            <StatusIcon className="h-3 w-3 mr-1" />
+                                          <span className={`inline-flex items-center ${status.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${status.color}`}>
+                                            <StatusIcon className={`${status.text === 'Active' ? 'h-4 w-4' : 'h-3 w-3'} mr-1`} />
                                             {status.text}
                                           </span>
                                         </div>
@@ -1507,29 +1580,17 @@ export default function SessionSelectionScreen() {
                             <div
                               key={session.id}
                               className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                              style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                              style={{ 
+                                borderColor: sessionProductColors.border, 
+                                borderWidth: '1px',
+                                opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                              }}
+                              onMouseEnter={() => setHoveredSessionCard(session.id)}
+                              onMouseLeave={() => setHoveredSessionCard(null)}
                               onClick={() => handleSelectSession(session)}
                             >
                               {/* Product Name Tab */}
-                              <div
-                                className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
-                                style={{
-                                  top: '0',
-                                  left: '-1px',
-                                  transform: 'translateY(-100%)',
-                                  backgroundColor: sessionProductColors.background,
-                                  color: sessionProductColors.text,
-                                  borderColor: sessionProductColors.border,
-                                  borderWidth: '1px',
-                                  borderBottomWidth: '0',
-                                  boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-                                  borderTopLeftRadius: '0.9rem',
-                                  borderTopRightRadius: '0.9rem'
-                                }}
-                              >
-                                <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-                                <span className="overflow-hidden text-ellipsis">{sessionProductName}</span>
-                              </div>
+                              {renderProductTab(sessionProductName, sessionProductColors, session.product_id)}
                               
                               {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
                               {isSingleSessionProduct && hasAdminAccess && viewMode !== 'stakeholder' && (
@@ -1549,6 +1610,7 @@ export default function SessionSelectionScreen() {
                                       if (productName && productName !== 'No Product') {
                                         setPendingProductName(productName);
                                       }
+                                      setAllowCreateProduct(false);
                                       setShowCreateSessionModal(true);
                                     }}
                                     className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
@@ -1608,8 +1670,8 @@ export default function SessionSelectionScreen() {
                                       <Calendar className="h-4 w-4 mr-2" />
                                       <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
                                     </div>
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                                      <StatusIcon className="h-3 w-3 mr-1" />
+                                    <span className={`inline-flex items-center ${status.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${status.color}`}>
+                                      <StatusIcon className={`${status.text === 'Active' ? 'h-4 w-4' : 'h-3 w-3'} mr-1`} />
                                       {status.text}
                                     </span>
                                   </div>
@@ -1693,7 +1755,13 @@ export default function SessionSelectionScreen() {
                     <div
                       key={session.id}
                       className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                      style={{ borderColor: productColors.border, borderWidth: '1px' }}
+                      style={{ 
+                        borderColor: productColors.border, 
+                        borderWidth: '1px',
+                        opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                      }}
+                      onMouseEnter={() => setHoveredSessionCard(session.id)}
+                      onMouseLeave={() => setHoveredSessionCard(null)}
                       onClick={() => handleSelectSession(session)}
                     >
                       {/* Product Name Tab */}
@@ -1752,8 +1820,8 @@ export default function SessionSelectionScreen() {
                               <Calendar className="h-4 w-4 mr-2" />
                               <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
                             </div>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>
-                              <StatusIcon className="h-3 w-3 mr-1" />
+                            <span className={`inline-flex items-center ${status.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${status.color}`}>
+                              <StatusIcon className={`${status.text === 'Active' ? 'h-4 w-4' : 'h-3 w-3'} mr-1`} />
                               {status.text}
                             </span>
                           </div>
@@ -1886,25 +1954,7 @@ export default function SessionSelectionScreen() {
                                 }}
                               >
                                 {/* Product Name Tab - On Top */}
-                                <div
-                                  className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
-                                  style={{
-                                    top: '0',
-                                    left: '-1px',
-                                    transform: 'translateY(-100%)',
-                                    backgroundColor: productColors.background,
-                                    color: productColors.text,
-                                    borderColor: productColors.border,
-                                    borderWidth: '1px',
-                                    borderBottomWidth: '0',
-                                    boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-                                    borderTopLeftRadius: '0.9rem',
-                                    borderTopRightRadius: '0.9rem'
-                                  }}
-                                >
-                                  <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-                                  <span className="overflow-hidden text-ellipsis">{productName}</span>
-                                </div>
+                                {renderProductTab(productName, productColors, sessions[0]?.product_id, normalizedProductName)}
                                 
                                 {/* Show More text - Same row as tab (desktop only) */}
                                 {remainingCount > 0 && (
@@ -1952,6 +2002,7 @@ export default function SessionSelectionScreen() {
                                         if (productName && productName !== 'No Product') {
                                           setPendingProductName(productName);
                                         }
+                                        setAllowCreateProduct(false);
                                         setShowCreateSessionModal(true);
                                       }}
                                       onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
@@ -1983,59 +2034,311 @@ export default function SessionSelectionScreen() {
                                       <div
                                         key={session.id}
                                         className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                                        style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                                        style={{ 
+                                          borderColor: sessionProductColors.border, 
+                                          borderWidth: '1px',
+                                          opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                                        }}
+                                        onMouseEnter={() => setHoveredSessionCard(session.id)}
+                                        onMouseLeave={() => setHoveredSessionCard(null)}
                                         onClick={() => handleSelectSession(session)}
                                       >
-                                        {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed, false)}
+                                        {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed, false, session.product_id)}
                                       </div>
                                     );
                                   })}
                                   {/* Create Session Button - Only show when there are exactly 2 sessions in the group (desktop only) */}
                                   {sessions.length === 2 && (
-                                    <div 
-                                      className="hidden lg:block relative z-10 overflow-hidden shadow-md rounded-lg mt-6 border" 
-                                      style={{ 
-                                        borderColor: productColors.border || '#E5E7EB', 
-                                        borderWidth: '1px',
-                                        backgroundColor: 'rgba(255, 255, 255, 0.7)'
-                                      }}
-                                    >
-                                      <div className="p-6 flex flex-col h-full items-center justify-center min-h-[200px] relative rounded-lg" style={{ backgroundColor: 'transparent' }}>
-                                        {/* Sparkle effects - fade in when + button is hovered, disappear immediately on leave */}
-                                        <Star 
-                                          className={`absolute top-4 left-4 w-3 h-3 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '0ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Sparkles 
-                                          className={`absolute top-6 right-6 w-5 h-5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '200ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Star 
-                                          className={`absolute bottom-8 left-8 w-4 h-4 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '400ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Sparkles 
-                                          className={`absolute bottom-4 right-4 w-3.5 h-3.5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '600ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Star 
-                                          className={`absolute top-1/2 left-2 w-5 h-5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '800ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Sparkles 
-                                          className={`absolute top-1/2 right-2 w-3 h-3 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '1000ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Star 
-                                          className={`absolute top-4 left-1/2 w-4.5 h-4.5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '300ms', animationDuration: '1.5s' }} 
-                                        />
-                                        <Sparkles 
-                                          className={`absolute bottom-2 left-1/2 w-3.5 h-3.5 transition-opacity duration-[2000ms] ease-in ${hoveredPlusButton === normalizedProductName ? 'opacity-100 animate-ping' : 'opacity-0 transition-opacity duration-0'}`} 
-                                          style={{ color: productColors.background || '#C89212', animationDelay: '700ms', animationDuration: '1.5s' }} 
-                                        />
+                                    <>
+                                      <style>{`
+                                        @keyframes fadeIn {
+                                          from {
+                                            opacity: 0;
+                                          }
+                                          to {
+                                            opacity: 1;
+                                          }
+                                        }
+                                        @keyframes sparkle {
+                                          0% {
+                                            opacity: 0.2;
+                                            transform: scale(0.6) rotate(0deg);
+                                            filter: brightness(0.8);
+                                          }
+                                          15% {
+                                            opacity: 1;
+                                            transform: scale(1.4) rotate(120deg);
+                                            filter: brightness(1.5);
+                                          }
+                                          30% {
+                                            opacity: 0.3;
+                                            transform: scale(0.7) rotate(240deg);
+                                            filter: brightness(0.6);
+                                          }
+                                          45% {
+                                            opacity: 1;
+                                            transform: scale(1.5) rotate(360deg);
+                                            filter: brightness(1.8);
+                                          }
+                                          60% {
+                                            opacity: 0.4;
+                                            transform: scale(0.8) rotate(480deg);
+                                            filter: brightness(0.7);
+                                          }
+                                          75% {
+                                            opacity: 1;
+                                            transform: scale(1.3) rotate(600deg);
+                                            filter: brightness(1.6);
+                                          }
+                                          90% {
+                                            opacity: 0.3;
+                                            transform: scale(0.65) rotate(720deg);
+                                            filter: brightness(0.5);
+                                          }
+                                          100% {
+                                            opacity: 0.2;
+                                            transform: scale(0.6) rotate(720deg);
+                                            filter: brightness(0.8);
+                                          }
+                                        }
+                                        @keyframes twinkle {
+                                          0% {
+                                            opacity: 0.1;
+                                            transform: scale(0.5);
+                                            filter: brightness(0.5);
+                                          }
+                                          10% {
+                                            opacity: 1;
+                                            transform: scale(1.6);
+                                            filter: brightness(2);
+                                          }
+                                          20% {
+                                            opacity: 0.2;
+                                            transform: scale(0.6);
+                                            filter: brightness(0.4);
+                                          }
+                                          35% {
+                                            opacity: 1;
+                                            transform: scale(1.7);
+                                            filter: brightness(2.2);
+                                          }
+                                          50% {
+                                            opacity: 0.15;
+                                            transform: scale(0.55);
+                                            filter: brightness(0.3);
+                                          }
+                                          65% {
+                                            opacity: 1;
+                                            transform: scale(1.5);
+                                            filter: brightness(1.9);
+                                          }
+                                          80% {
+                                            opacity: 0.25;
+                                            transform: scale(0.7);
+                                            filter: brightness(0.6);
+                                          }
+                                          95% {
+                                            opacity: 1;
+                                            transform: scale(1.4);
+                                            filter: brightness(1.8);
+                                          }
+                                          100% {
+                                            opacity: 0.1;
+                                            transform: scale(0.5);
+                                            filter: brightness(0.5);
+                                          }
+                                        }
+                                        @keyframes gentlePulse {
+                                          0% {
+                                            opacity: 0.3;
+                                            transform: scale(0.8);
+                                            filter: brightness(0.7);
+                                          }
+                                          25% {
+                                            opacity: 1;
+                                            transform: scale(1.4);
+                                            filter: brightness(1.6);
+                                          }
+                                          50% {
+                                            opacity: 0.2;
+                                            transform: scale(0.6);
+                                            filter: brightness(0.5);
+                                          }
+                                          75% {
+                                            opacity: 1;
+                                            transform: scale(1.3);
+                                            filter: brightness(1.5);
+                                          }
+                                          100% {
+                                            opacity: 0.3;
+                                            transform: scale(0.8);
+                                            filter: brightness(0.7);
+                                          }
+                                        }
+                                      `}</style>
+                                      <div 
+                                        className="hidden lg:block relative z-10 overflow-hidden shadow-md rounded-lg mt-6 border cursor-pointer transition-all" 
+                                        style={{ 
+                                          borderColor: productColors.border || '#E5E7EB', 
+                                          borderWidth: '1px',
+                                          backgroundColor: 'rgba(255, 255, 255, 0.7)'
+                                        }}
+                                        onMouseEnter={() => setHoveredThirdCard(normalizedProductName)}
+                                        onMouseLeave={() => setHoveredThirdCard(null)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const productId = sessions[0]?.product_id;
+                                          const productName = getDisplayProductName(sessions[0], productLookup);
+                                          if (productId) {
+                                            setSelectedProductId(productId);
+                                          }
+                                          if (productName && productName !== 'No Product') {
+                                            setPendingProductName(productName);
+                                          }
+                                          setAllowCreateProduct(false);
+                                          setShowCreateSessionModal(true);
+                                        }}
+                                      >
+                                        <div 
+                                          className="p-6 flex flex-col h-full items-center justify-center min-h-[200px] relative rounded-lg transition-all duration-300" 
+                                        style={{ 
+                                          backgroundColor: 'transparent',
+                                          backgroundImage: (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName)
+                                            ? `radial-gradient(circle at center, ${productColors.badgeBackground || 'rgba(200, 146, 18, 0.15)'}, transparent 70%)`
+                                            : 'none'
+                                        }}
+                                      >
+                                        {/* Sparkle effects - fade in when card or + button is hovered */}
+                                        {(hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName) && (
+                                          <>
+                                            <Star 
+                                              className="absolute top-4 left-4 w-3 h-3" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '0ms', 
+                                                animation: 'fadeIn 1.2s ease-in forwards, sparkle 2.8s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Sparkles 
+                                              className="absolute top-6 right-6 w-4 h-4" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '300ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.3s forwards, twinkle 2.4s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
+                                              }} 
+                                            />
+                                            <Star 
+                                              className="absolute bottom-8 left-8 w-3.5 h-3.5" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '600ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.6s forwards, gentlePulse 3.2s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Sparkles 
+                                              className="absolute bottom-4 right-4 w-3 h-3" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '900ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.9s forwards, sparkle 3.5s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Star 
+                                              className="absolute top-1/2 left-2 w-4 h-4" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '150ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.15s forwards, twinkle 2.1s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
+                                              }} 
+                                            />
+                                            <Sparkles 
+                                              className="absolute top-1/2 right-2 w-3 h-3" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '450ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.45s forwards, gentlePulse 2.9s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Star 
+                                              className="absolute top-4 left-1/2 w-3.5 h-3.5" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '750ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.75s forwards, sparkle 2.6s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Sparkles 
+                                              className="absolute bottom-2 left-1/2 w-3 h-3" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '1050ms', 
+                                                animation: 'fadeIn 1.2s ease-in 1.05s forwards, twinkle 3.1s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
+                                              }} 
+                                            />
+                                            <Star 
+                                              className="absolute top-1/4 right-1/4 w-2.5 h-2.5" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '200ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.2s forwards, gentlePulse 3.4s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 3px currentColor) drop-shadow(0 0 6px currentColor)'
+                                              }} 
+                                            />
+                                            <Sparkles 
+                                              className="absolute bottom-1/4 left-1/4 w-3.5 h-3.5" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '800ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.8s forwards, sparkle 3.0s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Star 
+                                              className="absolute top-3/4 right-1/3 w-3 h-3" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '500ms', 
+                                                animation: 'fadeIn 1.2s ease-in 0.5s forwards, twinkle 2.7s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
+                                              }} 
+                                            />
+                                            <Sparkles 
+                                              className="absolute bottom-1/3 left-1/3 w-4 h-4" 
+                                              style={{ 
+                                                color: productColors.background || '#C89212', 
+                                                animationDelay: '1100ms', 
+                                                animation: 'fadeIn 1.2s ease-in 1.1s forwards, gentlePulse 3.3s ease-in-out infinite',
+                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
+                                              }} 
+                                            />
+                                          </>
+                                        )}
+                                        
+                                        {/* Create New Session text - show on hover of card or + button */}
+                                        <div 
+                                          className={`flex flex-col items-center justify-center gap-2 z-10 ${
+                                            (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName) 
+                                              ? 'opacity-100 transition-opacity duration-[1200ms] ease-in' 
+                                              : 'opacity-0'
+                                          }`}
+                                        >
+                                          <Plus className="h-8 w-8" style={{ color: productColors.background || '#C89212' }} />
+                                          <div className="flex flex-col items-center justify-center text-base font-semibold" style={{ color: productColors.background || '#C89212' }}>
+                                            <span>Create</span>
+                                            <span>New Session</span>
+                                          </div>
+                                        </div>
                                       </div>
                                     </div>
+                                    </>
                                   )}
                                 </div>
 
@@ -2083,7 +2386,13 @@ export default function SessionSelectionScreen() {
                                 <div
                                   key={session.id}
                                   className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
-                                  style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
+                                  style={{ 
+                                    borderColor: sessionProductColors.border, 
+                                    borderWidth: '1px',
+                                    opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                                  }}
+                                  onMouseEnter={() => setHoveredSessionCard(session.id)}
+                                  onMouseLeave={() => setHoveredSessionCard(null)}
                                   onClick={() => handleSelectSession(session)}
                                 >
                                   {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
@@ -2104,6 +2413,7 @@ export default function SessionSelectionScreen() {
                                           if (productName && productName !== 'No Product') {
                                             setPendingProductName(productName);
                                           }
+                                          setAllowCreateProduct(false);
                                           setShowCreateSessionModal(true);
                                         }}
                                         className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
@@ -2127,7 +2437,7 @@ export default function SessionSelectionScreen() {
                                       </button>
                                     </div>
                                   )}
-                                  {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed)}
+                                  {renderSessionCard(session, sessionProductName, sessionProductColors, status, StatusIcon, votesInfo, isClosed, true, session.product_id)}
                                 </div>
                               );
                             })}
@@ -2136,7 +2446,10 @@ export default function SessionSelectionScreen() {
                               <div className="hidden lg:block relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow mt-6 border border-gray-200">
                                 <div className="p-6 flex flex-col h-full items-end justify-center min-h-[200px]">
                                   <button
-                                    onClick={() => setShowCreateSessionModal(true)}
+                                    onClick={() => {
+                                      setAllowCreateProduct(true);
+                                      setShowCreateSessionModal(true);
+                                    }}
                                     className="flex items-center px-6 py-3 bg-[#C89212] text-white rounded-lg hover:bg-[#6A4234] transition-colors font-semibold"
                                   >
                                     <Plus className="h-5 w-5 mr-2" />
@@ -2198,77 +2511,30 @@ export default function SessionSelectionScreen() {
                       disabled={isLoadingProducts || modalProducts.length === 0}
                       placeholder="Select a product"
                       helperText={
-                        !isLoadingProducts && modalProducts.length === 0 && !productError
+                        !isLoadingProducts && modalProducts.length === 0 && !productError && allowCreateProduct
                           ? 'No products found yet. Enter a product name below to create one.'
                           : undefined
                       }
-                      allowDelete
-                      onRequestDeleteProduct={(product) => {
+                      allowDelete={allowCreateProduct}
+                      onRequestDeleteProduct={allowCreateProduct ? ((product) => {
                         setProductToDelete(product);
-                      }}
+                      }) : undefined}
                       className="w-full"
                     />
                   </div>
-                  <div className="flex items-center gap-2 sm:flex-none">
-                    <span className="text-gray-500 font-medium px-2">or</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsCreatingNewProduct(true)}
-                      disabled={isLoadingProducts}
-                      className="px-4 py-2 bg-[#1E5461] text-white rounded-md hover:bg-[#576C71] transition-colors font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus className="h-4 w-4 inline mr-2" />
-                      Create New Product
-                    </button>
-                  </div>
-                </div>
-                {/* Simple input for typing new product name - always visible */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Or type a new product name:</span>
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={newProductName}
-                      onChange={(e) => {
-                        setNewProductName(e.target.value);
-                        // Clear selected product if typing new name
-                        if (e.target.value.trim()) {
-                          setSelectedProductId('');
-                        }
-                        if (productError) setProductError(null);
-                        if (createSessionErrors.product) {
-                          setCreateSessionErrors(prev => {
-                            const next = { ...prev };
-                            delete next.product;
-                            return next;
-                          });
-                        }
-                      }}
-                      placeholder="Enter new product name (will be created automatically)"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-0 focus:border-[#2D4660]"
-                    />
-                    {newProductName.trim() && (
+                  {allowCreateProduct && (
+                    <div className="flex items-center gap-2 sm:flex-none">
+                      <span className="text-gray-500 font-medium px-2">or</span>
                       <button
                         type="button"
-                        onClick={() => {
-                          setTempColor(newProductColor || '#2D4660');
-                          setShowColorPickerModal(true);
-                        }}
-                        className="block w-10 h-10 rounded-md border-2 border-gray-300 hover:border-gray-400 transition-all shadow-sm flex-shrink-0"
-                        style={{ 
-                          backgroundColor: newProductColor || '#2D4660',
-                          borderColor: newProductColor || '#2D4660'
-                        }}
-                        title="Choose product color"
-                      />
-                    )}
-                  </div>
-                  {newProductName.trim() && (
-                    <p className="text-xs text-gray-500">
-                      This product will be created automatically when you save the session.
-                    </p>
+                        onClick={() => setIsCreatingNewProduct(true)}
+                        disabled={isLoadingProducts}
+                        className="px-4 py-2 bg-[#1E5461] text-white rounded-md hover:bg-[#576C71] transition-colors font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Plus className="h-4 w-4 inline mr-2" />
+                        Create New Product
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -2295,7 +2561,7 @@ export default function SessionSelectionScreen() {
                 <span className="font-medium text-gray-900 flex-1">{pendingProduct.name}</span>
                 <span className="text-xs text-gray-500">Click to edit</span>
               </div>
-            ) : (
+            ) : allowCreateProduct && isCreatingNewProduct ? (
               /* Creating New Product State: Animated Input + Color Picker + Create Button */
               <div className="space-y-3">
                 <div className="flex gap-3 items-center">
@@ -2372,53 +2638,17 @@ export default function SessionSelectionScreen() {
                       >
                         {!newProductColor && (
                           <img 
-                            src="https://icon-library.com/images/color-wheel-icon-png/color-wheel-icon-png-25.jpg" 
-                            alt="Color Wheel"
+                            src="/colorpicker.png" 
+                            alt="Color Picker"
                             className="w-8 h-8 object-contain"
                           />
                         )}
                       </button>
                     </div>
                   )}
-                  
-                  {/* Create Button - Slides in from right in same row */}
-                  {showCreateButton && (
-                    <button
-                      type="button"
-                      onClick={handleCreateProduct}
-                      disabled={!newProductName.trim() || isCreatingProduct}
-                      className="relative px-6 py-2 bg-[#C89212] text-white rounded-md hover:bg-[#6A4234] transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group whitespace-nowrap"
-                      style={{
-                        animation: 'slideInFromRight 0.8s ease-out forwards'
-                      }}
-                    >
-                      <span className="relative z-10 flex items-center">
-                        {isCreatingProduct ? (
-                          <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Preparing...
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Create New Product
-                          </>
-                        )}
-                      </span>
-                      {/* Sparkle animation */}
-                      {!isCreatingProduct && (
-                        <>
-                          <span className="absolute top-1 left-1/4 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '0ms', animationDuration: '1.5s' }}></span>
-                          <span className="absolute top-2 right-1/3 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '300ms', animationDuration: '1.5s' }}></span>
-                          <span className="absolute bottom-2 left-1/3 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '600ms', animationDuration: '1.5s' }}></span>
-                          <span className="absolute bottom-1 right-1/4 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '900ms', animationDuration: '1.5s' }}></span>
-                        </>
-                      )}
-                    </button>
-                  )}
                 </div>
               </div>
-            )}
+            ) : null}
             
             {createSessionErrors.product && (
               <p className="text-sm text-red-600 flex items-center">
@@ -2580,9 +2810,27 @@ export default function SessionSelectionScreen() {
             </Button>
             <Button
               type="submit"
+              variant={isCreatingNewProduct && newProductName.trim() && newProductColor ? 'gold' : 'primary'}
               disabled={isCreatingSession}
+              className={`transition-all duration-500 ease-in-out ${isCreatingNewProduct && newProductName.trim() && newProductColor ? 'relative overflow-hidden' : ''}`}
             >
-              {isCreatingSession ? 'Creating...' : 'Create Session'}
+              {isCreatingSession ? (
+                'Creating...'
+              ) : isCreatingNewProduct && newProductName.trim() && newProductColor ? (
+                <>
+                  <span className="relative z-10 flex items-center">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create New Product and Session
+                  </span>
+                  {/* Sparkle animation */}
+                  <span className="absolute top-1 left-1/4 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '0ms', animationDuration: '1.5s' }}></span>
+                  <span className="absolute top-2 right-1/3 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '300ms', animationDuration: '1.5s' }}></span>
+                  <span className="absolute bottom-2 left-1/3 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '600ms', animationDuration: '1.5s' }}></span>
+                  <span className="absolute bottom-1 right-1/4 w-1 h-1 bg-white rounded-full animate-ping opacity-75" style={{ animationDelay: '900ms', animationDuration: '1.5s' }}></span>
+                </>
+              ) : (
+                'Create Session'
+              )}
             </Button>
           </div>
         </form>
@@ -2625,9 +2873,10 @@ export default function SessionSelectionScreen() {
                 onClick={() => {
                   setNewProductColor(tempColor);
                   setShowColorPickerModal(false);
-                  if (!showCreateButton && newProductName.trim()) {
-                    setTimeout(() => setShowCreateButton(true), 300);
-                  }
+                  // Auto-focus Session title field after color selection
+                  setTimeout(() => {
+                    sessionTitleInputRef.current?.focus();
+                  }, 100);
                 }}
                 className="px-6 rounded-lg text-white font-bold shadow-lg hover:shadow-xl transition-all flex flex-col items-center justify-center gap-3 text-lg flex-shrink-0"
                 style={{ backgroundColor: tempColor, height: '260px', minWidth: '100px' }}
@@ -2725,6 +2974,170 @@ export default function SessionSelectionScreen() {
             </Button>
           </div>
         </Modal>
+      )}
+
+      {/* Edit Product Modal */}
+      {productToEdit && (
+        <Modal
+          isOpen
+          onClose={() => {
+            setProductToEdit(null);
+            setEditingProductName('');
+            setEditingProductColor(null);
+            setShowEditProductColorPicker(false);
+          }}
+          title="Edit Product"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Product Name *
+              </label>
+              <input
+                type="text"
+                value={editingProductName}
+                onChange={(e) => setEditingProductName(e.target.value)}
+                placeholder="Enter product name"
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-0 focus:border-[#2D4660]"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Product Color
+              </label>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditTempColor(editingProductColor || '#2D4660');
+                    setShowEditProductColorPicker(true);
+                  }}
+                  className="block w-12 h-12 rounded-md border-2 border-gray-300 hover:border-gray-400 transition-all flex items-center justify-center overflow-hidden"
+                  style={editingProductColor ? { backgroundColor: editingProductColor } : { backgroundColor: '#ffffff' }}
+                >
+                  {!editingProductColor && (
+                    <img 
+                      src="/colorpicker.png" 
+                      alt="Color Picker"
+                      className="w-8 h-8 object-contain"
+                    />
+                  )}
+                </button>
+                <span className="text-sm text-gray-600">
+                  {editingProductColor || 'No color selected'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setProductToEdit(null);
+                  setEditingProductName('');
+                  setEditingProductColor(null);
+                  setShowEditProductColorPicker(false);
+                }}
+                disabled={isUpdatingProduct}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  if (!productToEdit?.id || !editingProductName.trim()) {
+                    return;
+                  }
+                  setIsUpdatingProduct(true);
+                  try {
+                    await db.updateProduct(productToEdit.id, {
+                      name: editingProductName.trim(),
+                      color_hex: editingProductColor
+                    });
+                    // Refresh products
+                    const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId;
+                    if (tenantId) {
+                      const updatedProducts = await db.getProductsForTenant(tenantId);
+                      setModalProducts(updatedProducts.sort((a, b) => a.name.localeCompare(b.name)));
+                      // Update lookups
+                      const newLookup: Record<string, string> = {};
+                      const newColorLookup: Record<string, string> = {};
+                      updatedProducts.forEach(p => {
+                        newLookup[p.id] = p.name || '';
+                        if (p.color_hex) newColorLookup[p.id] = p.color_hex as string;
+                      });
+                      setProductLookup(newLookup);
+                      setProductColorLookup(newColorLookup);
+                    }
+                    setProductToEdit(null);
+                    setEditingProductName('');
+                    setEditingProductColor(null);
+                    setShowEditProductColorPicker(false);
+                    await refreshSessions();
+                    await loadUserSessions();
+                  } catch (error) {
+                    console.error('Error updating product:', error);
+                    alert('Failed to update product. Please try again.');
+                  } finally {
+                    setIsUpdatingProduct(false);
+                  }
+                }}
+                disabled={isUpdatingProduct || !editingProductName.trim()}
+              >
+                {isUpdatingProduct ? 'Updating...' : 'Update Product'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Product Color Picker Modal */}
+      {showEditProductColorPicker && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          onClick={() => setShowEditProductColorPicker(false)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl px-3 py-2 w-auto mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex gap-3 items-stretch">
+              <div className="flex-shrink-0" style={{ width: '240px', height: '260px' }}>
+                <input
+                  id="edit-native-color-input"
+                  type="color"
+                  value={editTempColor}
+                  onChange={(e) => setEditTempColor(e.target.value)}
+                  ref={(input) => {
+                    if (input && showEditProductColorPicker) {
+                      setTimeout(() => input.click(), 50);
+                    }
+                  }}
+                  className="opacity-0 absolute"
+                  style={{ width: '1px', height: '1px' }}
+                />
+                <div className="w-full h-full"></div>
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProductColor(editTempColor);
+                  setShowEditProductColorPicker(false);
+                }}
+                className="px-6 rounded-lg text-white font-bold shadow-lg hover:shadow-xl transition-all flex flex-col items-center justify-center gap-3 text-lg flex-shrink-0"
+                style={{ backgroundColor: editTempColor, height: '260px', minWidth: '100px' }}
+              >
+                <CheckCircle className="h-8 w-8" />
+                <div className="text-center leading-tight">
+                  <div>Looks</div>
+                  <div>Good</div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

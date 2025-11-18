@@ -390,6 +390,20 @@ export default function SessionSelectionScreen() {
         }
       }
 
+      // Check if there's already an active session for this product
+      if (productIdToUse) {
+        const existingActiveSession = await db.getActiveSessionByProduct(productIdToUse);
+        if (existingActiveSession) {
+          const productName = productLookup[productIdToUse] || 'this product';
+          setCreateSessionErrors(prev => ({
+            ...prev,
+            submit: `There is already an active session for ${productName}. Each product can only have one active session at a time.`
+          }));
+          setIsCreatingSession(false);
+          return;
+        }
+      }
+
       // Products table is the single source of truth - only use product_id
       // product_name will be looked up from products table when needed
       const newSession = await db.createSession({

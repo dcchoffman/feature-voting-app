@@ -447,6 +447,26 @@ export async function getSessionsForUser(userId: string): Promise<VotingSession[
   return normalizeSessionRows(sessions as SessionRow[]);
 }
 
+export async function getActiveSessionByProduct(productId: string | null): Promise<VotingSession | null> {
+  if (!productId) {
+    return null;
+  }
+  
+  const { data, error } = await supabase
+    .from('voting_sessions')
+    .select(SESSION_SELECT)
+    .eq('product_id', productId)
+    .eq('is_active', true)
+    .maybeSingle();
+  
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  
+  return data ? normalizeSessionRow(data as SessionRow) : null;
+}
+
 export async function createSession(session: Omit<DbVotingSession, 'id' | 'created_at'>): Promise<VotingSession> {
   const { data, error } = await supabase
     .from('voting_sessions')

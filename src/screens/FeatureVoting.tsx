@@ -3091,9 +3091,9 @@ useEffect(() => {
           await db.updateFeature(existing.id, {
             title: feature.title,
             description: truncatedDescription,
-            epic: feature.epic,
+            epic: feature.epic || null,
             state: feature.state,
-            area_path: feature.areaPath,
+            areaPath: feature.areaPath,
             tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
@@ -3103,9 +3103,9 @@ useEffect(() => {
             session_id: currentSession.id,
             title: feature.title,
             description: truncatedDescription,
-            epic: feature.epic,
+            epic: feature.epic || null,
             state: feature.state,
-            area_path: feature.areaPath,
+            areaPath: feature.areaPath,
             tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
@@ -3231,9 +3231,9 @@ useEffect(() => {
           await db.updateFeature(existing.id, {
             title: feature.title,
             description: truncatedDescription,
-            epic: feature.epic,
+            epic: feature.epic || null,
             state: feature.state,
-            area_path: feature.areaPath,
+            areaPath: feature.areaPath,
             tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
@@ -3243,9 +3243,9 @@ useEffect(() => {
             session_id: currentSession.id,
             title: feature.title,
             description: truncatedDescription,
-            epic: feature.epic,
+            epic: feature.epic || null,
             state: feature.state,
-            area_path: feature.areaPath,
+            areaPath: feature.areaPath,
             tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
             azure_devops_url: feature.azureDevOpsUrl
@@ -3812,7 +3812,7 @@ const handleDeleteSession = useCallback(async () => {
 
   const handleShowResultsPage = useCallback(() => {
     if (currentSession) {
-      navigate('../results');
+      navigate('/results');
     } else {
       setView('results');
     }

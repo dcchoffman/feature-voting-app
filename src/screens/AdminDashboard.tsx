@@ -31,7 +31,8 @@ import {
   Trophy,
   LogOut,
   BarChart2,
-  Settings
+  Settings,
+  BadgeCheck
 } from "lucide-react";
 
 // Import shared components
@@ -2122,18 +2123,29 @@ export function AdminDashboard({
       </div>
       
       {/* Session Info (with Edit button) */}
-      <div className="relative bg-white rounded-lg shadow-md p-4 mb-6">
-        <div
-          className="absolute -top-4 left-6 px-4 py-1 rounded-t-xl rounded-b-none text-sm font-semibold shadow"
-          style={{
-            backgroundColor: productColors.background,
-            color: productColors.text,
-            border: `1px solid ${productColors.border}`
-          }}
-        >
-          {productName}
-        </div>
-        <div className="pt-4">
+      <div className="relative bg-white rounded-lg shadow-md p-4 mb-6" style={{ marginTop: productName ? '3.5rem' : '0' }}>
+        {productName && (
+          <div
+            className="absolute left-0 px-4 py-1 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+            style={{
+              top: '0',
+              left: '-1px',
+              transform: 'translateY(-100%)',
+              backgroundColor: productColors.background,
+              color: productColors.text,
+              borderColor: productColors.border,
+              borderWidth: '1px',
+              borderBottomWidth: '0',
+              boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+              borderTopLeftRadius: '0.9rem',
+              borderTopRightRadius: '0.9rem'
+            }}
+          >
+            <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+            <span className="overflow-hidden text-ellipsis">{productName}</span>
+          </div>
+        )}
+        <div className="pt-1">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-[#2D4660]">
             Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>

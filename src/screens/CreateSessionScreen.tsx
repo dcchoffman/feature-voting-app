@@ -149,6 +149,18 @@ export default function CreateSessionScreen() {
       
       const selectedProduct = products.find(p => p.id === selectedProductId) || null;
 
+      // Check if there's already an active session for this product
+      if (selectedProduct?.id) {
+        const existingActiveSession = await db.getActiveSessionByProduct(selectedProduct.id);
+        if (existingActiveSession) {
+          setErrors({
+            submit: `There is already an active session for ${selectedProduct.name}. Each product can only have one active session at a time.`
+          });
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       // Create the session
       const newSession = await db.createSession({
         title: formData.title,

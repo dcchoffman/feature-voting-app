@@ -32,7 +32,8 @@ import {
   LogOut,
   BarChart2,
   Settings,
-  BadgeCheck
+  BadgeCheck,
+  List
 } from "lucide-react";
 
 // Import shared components
@@ -1562,6 +1563,8 @@ export function AdminDashboard({
   const [showSessionEditForm, setShowSessionEditForm] = useState(false);
   const [showEndEarlyModal, setShowEndEarlyModal] = useState(false);
   const [showReopenModal, setShowReopenModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [suggestionToPromote, setSuggestionToPromote] = useState<FeatureSuggestion | null>(null);
   const [isPromotingSuggestion, setIsPromotingSuggestion] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
@@ -2056,6 +2059,22 @@ export function AdminDashboard({
     onRequestDeleteSession();
   }, [onRequestDeleteSession]);
 
+  // Handle click outside mobile menu
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside as any);
+    };
+  }, [mobileMenuOpen]);
+
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
       {/* Desktop: Centered logo at top */}
@@ -2080,45 +2099,107 @@ export function AdminDashboard({
           <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">Admin Dashboard</h1>
         </div>
         
-        <div className="flex space-x-2">
-          <button 
-            onClick={onShowVoterView} 
-            className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
-          >
-            <Vote className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Vote!</span>
-          </button>
-          <button 
-            onClick={() => navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder')} 
-            className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
-          >
-            {adminPerspective === 'system' ? (
-              <Shield className="mr-2 h-4 w-4" />
-            ) : (
-              <Users className="mr-2 h-4 w-4" />
-            )}
-            <span className="hidden md:inline">
+        <div ref={mobileMenuRef} className="relative z-40">
+          {/* Desktop buttons */}
+          <div className="hidden md:flex space-x-2">
+            <button 
+              onClick={onShowVoterView} 
+              className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
+            >
+              <Vote className="mr-2 h-4 w-4" />
+              Vote!
+            </button>
+            <button 
+              onClick={() => navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder')} 
+              className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
+            >
+              {adminPerspective === 'system' ? (
+                <Shield className="mr-2 h-4 w-4" />
+              ) : (
+                <Users className="mr-2 h-4 w-4" />
+              )}
               {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
-            </span>
-            <span className="md:hidden">
-              {adminPerspective === 'system' ? 'Users' : 'Stakeholders'}
-            </span>
-          </button>
-          <button 
-            onClick={() => navigate('/sessions')} 
-            className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
-          >
-            <Users className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">All Sessions</span>
-            <span className="md:hidden">Sessions</span>
-          </button>
-          <button 
-            onClick={onLogout} 
-            className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            <span className="hidden md:inline">Logout</span>
-          </button>
+            </button>
+            <button 
+              onClick={() => navigate('/sessions')} 
+              className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
+            >
+              <Users className="mr-2 h-4 w-4" />
+              All Sessions
+            </button>
+            <button 
+              onClick={onLogout} 
+              className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
+            </button>
+          </div>
+
+          {/* Mobile menu trigger */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+              aria-label="Open menu"
+            >
+              <List className="h-5 w-5 text-gray-700" />
+            </button>
+          </div>
+
+          {/* Mobile dropdown menu */}
+          {mobileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+              <div className="py-1">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onShowVoterView(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Vote className="h-4 w-4 mr-2 text-gray-700" />
+                  Vote!
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder'); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  {adminPerspective === 'system' ? (
+                    <Shield className="h-4 w-4 mr-2 text-gray-700" />
+                  ) : (
+                    <Users className="h-4 w-4 mr-2 text-gray-700" />
+                  )}
+                  {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigate('/sessions'); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Users className="h-4 w-4 mr-2 text-gray-700" />
+                  All Sessions
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onShowResults(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <BarChart2 className="h-4 w-4 mr-2 text-gray-700" />
+                  {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); setShowSessionEditForm(true); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                  Edit Session
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); onLogout(); }}
+                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       

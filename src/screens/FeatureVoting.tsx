@@ -493,7 +493,7 @@ function ShuffleButton({ isShuffling, onShuffle }: ShuffleButtonProps) {
   return (
     <button
       onClick={onShuffle}
-      className={`py-2 px-4 rounded-lg flex items-center transition-all duration-300 ${
+      className={`py-2 px-4 rounded-lg flex items-center justify-center transition-all duration-300 w-full md:w-auto ${
         isShuffling 
           ? 'bg-[#C89212] text-white scale-95' 
           : 'bg-[#C89212] hover:bg-[#A67810] text-white hover:scale-105'
@@ -2236,13 +2236,13 @@ const VotingScreen = React.memo(function VotingScreen({
         </div>
       )}
 
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-4 gap-3">
         <h2 className="text-xl font-semibold text-[#2d4660]">Available Features</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
           <Button 
             variant="gold" 
             onClick={openSuggestModal}
-            className="flex items-center"
+            className="flex items-center justify-center w-full md:w-auto"
           >
             <Lightbulb className="h-4 w-4 mr-2" />
             Suggest a Feature
@@ -3989,7 +3989,7 @@ const handleDeleteSession = useCallback(async () => {
       
       <Footer 
         currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
-        onSelectStakeholder={handleShowVoting}
+        onSelectStakeholder={isAdmin ? undefined : handleShowVoting}
         onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
         onSelectSystemAdmin={isSystemAdmin ? handleSelectSystemPerspective : undefined}
         showRoleToggle={isSystemAdmin || (isAdmin && adminPerspective === 'system')}

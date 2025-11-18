@@ -1319,15 +1319,10 @@ export default function SessionSelectionScreen() {
                               </div>
                             )}
                             
-                            {/* Create Session Button - Circle + button on far right, vertically centered */}
+                            {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) */}
                             {hasAdminAccess && viewMode !== 'stakeholder' && (
                               <div
-                                className="absolute z-20"
-                                style={{
-                                  right: '-20px',
-                                  top: '50%',
-                                  transform: 'translateY(-50%)'
-                                }}
+                                className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
                               >
                                 <button
                                   onClick={(e) => {
@@ -1359,7 +1354,7 @@ export default function SessionSelectionScreen() {
                             )}
                             
                             {/* Sessions Grid */}
-                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
                               {sessionsToShow.map((session) => {
                                 const status = getSessionStatus(session);
                                 const isClosed = status.text === 'Closed';
@@ -1495,7 +1490,7 @@ export default function SessionSelectionScreen() {
                     
                     {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
                     {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (
-                      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
                         {[...singleSessionProducts, ...sessionsWithoutProducts].map((session) => {
                           const status = getSessionStatus(session);
                           const isClosed = status.text === 'Closed';
@@ -1536,15 +1531,10 @@ export default function SessionSelectionScreen() {
                                 <span className="overflow-hidden text-ellipsis">{sessionProductName}</span>
                               </div>
                               
-                              {/* Create Session Button - Circle + button on far right, vertically centered (only for single-session products) */}
+                              {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
                               {isSingleSessionProduct && hasAdminAccess && viewMode !== 'stakeholder' && (
                                 <div
-                                  className="absolute z-20"
-                                  style={{
-                                    right: '-20px',
-                                    top: '50%',
-                                    transform: 'translateY(-50%)'
-                                  }}
+                                  className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
                                 >
                                   <button
                                     onClick={(e) => {
@@ -1944,15 +1934,10 @@ export default function SessionSelectionScreen() {
                                   </div>
                                 )}
                                 
-                                {/* Create Session Button - Circle + button on far right, vertically centered */}
+                                {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) */}
                                 {(isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
                                   <div
-                                    className="absolute z-20"
-                                    style={{
-                                      right: '-20px',
-                                      top: '50%',
-                                      transform: 'translateY(-50%)'
-                                    }}
+                                    className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
                                   >
                                     <button
                                       onClick={(e) => {
@@ -1984,7 +1969,7 @@ export default function SessionSelectionScreen() {
                                 )}
                                 
                                 {/* Sessions Grid */}
-                                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
                                   {sessionsToShow.map((session) => {
                                     const status = getSessionStatus(session);
                                     const StatusIcon = status.icon;
@@ -2082,7 +2067,7 @@ export default function SessionSelectionScreen() {
                         
                         {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
                         {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (
-                          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
                             {[...singleSessionProducts, ...sessionsWithoutProducts].map((session) => {
                               const status = getSessionStatus(session);
                               const StatusIcon = status.icon;
@@ -2101,15 +2086,10 @@ export default function SessionSelectionScreen() {
                                   style={{ borderColor: sessionProductColors.border, borderWidth: '1px' }}
                                   onClick={() => handleSelectSession(session)}
                                 >
-                                  {/* Create Session Button - Circle + button on far right, vertically centered (only for single-session products) */}
+                                  {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
                                   {isSingleSessionProduct && (isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
                                     <div
-                                      className="absolute z-20"
-                                      style={{
-                                        right: '-20px',
-                                        top: '50%',
-                                        transform: 'translateY(-50%)'
-                                      }}
+                                      className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
                                     >
                                       <button
                                         onClick={(e) => {

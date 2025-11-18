@@ -1565,6 +1565,8 @@ export function AdminDashboard({
   const [showReopenModal, setShowReopenModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const [sessionActionsMenuOpen, setSessionActionsMenuOpen] = useState(false);
+  const sessionActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [suggestionToPromote, setSuggestionToPromote] = useState<FeatureSuggestion | null>(null);
   const [isPromotingSuggestion, setIsPromotingSuggestion] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
@@ -2075,6 +2077,22 @@ export function AdminDashboard({
     };
   }, [mobileMenuOpen]);
 
+  // Handle click outside session actions menu
+  useEffect(() => {
+    if (!sessionActionsMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (sessionActionsMenuRef.current && !sessionActionsMenuRef.current.contains(e.target as Node)) {
+        setSessionActionsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside as any);
+    };
+  }, [sessionActionsMenuOpen]);
+
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
       {/* Desktop: Centered logo at top */}
@@ -2231,23 +2249,59 @@ export function AdminDashboard({
           <h2 className="text-xl font-semibold text-[#2D4660]">
             Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
           </h2>
-          <div className="flex space-x-2">
-            <Button 
-              variant="gold"
-              onClick={onShowResults}
-              className="flex items-center"
-            >
-              <BarChart2 className="h-4 w-4 mr-2" />
-              {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
-            </Button>
-            <Button 
-              variant="primary"
-              onClick={() => setShowSessionEditForm(true)}
-              className="flex items-center"
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Edit Session
-            </Button>
+          <div ref={sessionActionsMenuRef} className="relative z-40">
+            {/* Desktop buttons */}
+            <div className="hidden md:flex space-x-2">
+              <Button 
+                variant="gold"
+                onClick={onShowResults}
+                className="flex items-center"
+              >
+                <BarChart2 className="h-4 w-4 mr-2" />
+                {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+              </Button>
+              <Button 
+                variant="primary"
+                onClick={() => setShowSessionEditForm(true)}
+                className="flex items-center"
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                Edit Session
+              </Button>
+            </div>
+
+            {/* Mobile menu trigger */}
+            <div className="flex md:hidden">
+              <button
+                onClick={() => setSessionActionsMenuOpen(!sessionActionsMenuOpen)}
+                className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
+                aria-label="Open session actions menu"
+              >
+                <List className="h-5 w-5 text-gray-700" />
+              </button>
+            </div>
+
+            {/* Mobile dropdown menu */}
+            {sessionActionsMenuOpen && (
+              <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
+                <div className="py-1">
+                  <button
+                    onClick={() => { setSessionActionsMenuOpen(false); onShowResults(); }}
+                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <BarChart2 className="h-4 w-4 mr-2 text-gray-700" />
+                    {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+                  </button>
+                  <button
+                    onClick={() => { setSessionActionsMenuOpen(false); setShowSessionEditForm(true); }}
+                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <Settings className="h-4 w-4 mr-2 text-gray-700" />
+                    Edit Session
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         {isLoadingProducts && (
@@ -3363,21 +3417,6 @@ export function AdminDashboard({
         </form>
       </Modal>
 
-      {/* Footer with role toggle - only Session Admin and System Admin */}
-      <Footer
-        currentRole={adminPerspective === 'system' ? 'system-admin' : 'session-admin'}
-        onSelectSessionAdmin={() => {
-          if (adminPerspective !== 'session' && currentSession) {
-            navigate('/admin');
-          }
-        }}
-        onSelectSystemAdmin={() => {
-          if (adminPerspective !== 'system') {
-            navigate('/users');
-          }
-        }}
-        showRoleToggle={true}
-      />
     </div>
   );
 }

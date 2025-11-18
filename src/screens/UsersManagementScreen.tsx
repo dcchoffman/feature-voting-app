@@ -8,12 +8,13 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
-import type { User, VotingSession } from '../types';
+import type { User, VotingSession, Product } from '../types';
 import type { UserRoleInfo } from '../services/databaseService';
 import { 
   ChevronLeft, Users, Crown, Shield, User as UserIcon, 
-  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown
+  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle
 } from 'lucide-react';
+import { getProductColor } from '../utils/productColors';
 import { supabase } from '../supabaseClient';
 
 interface UserWithRoles extends User {
@@ -23,6 +24,198 @@ interface UserWithRoles extends User {
 }
 
 type RoleModalType = 'stakeholder' | 'session-admin' | 'remove-stakeholder' | null;
+
+// Product Select Component
+interface ProductSelectProps {
+  products: Product[];
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+  error?: boolean;
+  onProductChange?: () => void;
+}
+
+function ProductSelect({ products, value, onChange, label, error, onProductChange }: ProductSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedProduct = products.find(p => p.id === value);
+  const selectedColors = selectedProduct ? getProductColor(selectedProduct.name, selectedProduct.color_hex ?? null) : null;
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full px-3 py-2 border rounded-md bg-white cursor-pointer flex items-center justify-between hover:border-gray-400 ${
+          error ? 'border-red-500' : 'border-gray-300'
+        }`}
+      >
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {selectedProduct && selectedColors && (
+            <div
+              className="w-4 h-4 rounded flex-shrink-0"
+              style={{ backgroundColor: selectedColors.background }}
+            />
+          )}
+          <span className={`text-sm truncate ${!value ? 'text-gray-400' : 'text-gray-900'}`}>
+            {selectedProduct ? selectedProduct.name : 'Select a Product'}
+          </span>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform flex-shrink-0 ${isOpen ? 'transform rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {products.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 text-center">No products available</div>
+          ) : (
+            products.map(product => {
+              const colors = getProductColor(product.name, product.color_hex ?? null);
+              const isSelected = value === product.id;
+              return (
+                <div
+                  key={product.id}
+                  onClick={() => {
+                    onChange(product.id);
+                    setIsOpen(false);
+                    if (onProductChange) onProductChange();
+                  }}
+                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
+                    isSelected ? 'bg-gray-50' : ''
+                  }`}
+                >
+                  <div
+                    className="w-4 h-4 rounded flex-shrink-0"
+                    style={{ backgroundColor: colors.background }}
+                  />
+                  <span className="text-sm text-gray-900 flex-1">{product.name}</span>
+                  {isSelected && <CheckCircle className="h-4 w-4 text-gray-400 flex-shrink-0" />}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Session MultiSelect Component
+interface SessionMultiSelectProps {
+  sessions: VotingSession[];
+  selectedSessionIds: string[];
+  onSelectionChange: (sessionIds: string[]) => void;
+  label?: string;
+}
+
+function SessionMultiSelect({ sessions, selectedSessionIds, onSelectionChange, label }: SessionMultiSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleSession = (sessionId: string) => {
+    if (selectedSessionIds.includes(sessionId)) {
+      onSelectionChange(selectedSessionIds.filter(id => id !== sessionId));
+    } else {
+      onSelectionChange([...selectedSessionIds, sessionId]);
+    }
+  };
+
+  const removeSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelectionChange(selectedSessionIds.filter(id => id !== sessionId));
+  };
+
+  const selectedSessions = sessions.filter(s => selectedSessionIds.includes(s.id));
+  const displayText = selectedSessions.length > 0 
+    ? `${selectedSessions.length} session${selectedSessions.length !== 1 ? 's' : ''} selected`
+    : 'Select sessions...';
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full min-h-[42px] px-3 py-2 border border-gray-300 rounded-md bg-white cursor-pointer flex items-center justify-between hover:border-gray-400"
+      >
+        <div className="flex-1 flex flex-wrap gap-1 items-center">
+          {selectedSessions.length === 0 ? (
+            <span className="text-sm text-gray-400">{displayText}</span>
+          ) : (
+            <>
+              {selectedSessions.map(session => (
+                <span
+                  key={session.id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full"
+                >
+                  <span className="truncate max-w-[150px]">{session.title || session.name || 'Unnamed Session'}</span>
+                  <button
+                    onClick={(e) => removeSession(session.id, e)}
+                    className="hover:bg-green-200 rounded-full p-0.5"
+                    type="button"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {sessions.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 text-center">
+              No current or future sessions found for this product.
+            </div>
+          ) : (
+            sessions.map(session => {
+              const isSelected = selectedSessionIds.includes(session.id);
+              return (
+                <div
+                  key={session.id}
+                  onClick={() => toggleSession(session.id)}
+                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between ${
+                    isSelected ? 'bg-green-50' : ''
+                  }`}
+                >
+                  <span className="text-sm text-gray-900">{session.title || session.name || 'Unnamed Session'}</span>
+                  {isSelected && (
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function UsersManagementScreen() {
   const { currentUser, setCurrentUser, setCurrentSession, currentSession } = useSession();
@@ -83,6 +276,13 @@ export default function UsersManagementScreen() {
     stakeholder: false
   });
   const [pageTitle, setPageTitle] = useState('User Management');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [filteredSessionsForProduct, setFilteredSessionsForProduct] = useState<VotingSession[]>([]);
+  const [selectedProductIdForSessionAdmin, setSelectedProductIdForSessionAdmin] = useState<string>('');
+  const [filteredSessionsForSessionAdmin, setFilteredSessionsForSessionAdmin] = useState<VotingSession[]>([]);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successModalData, setSuccessModalData] = useState<{ email: string; password: string; userType: string } | null>(null);
 
   const handleLogout = async () => {
     try {
@@ -142,6 +342,75 @@ export default function UsersManagementScreen() {
       console.error('Error loading sessions:', error);
     }
   };
+
+  const loadProducts = async () => {
+    try {
+      const productsList = await db.getProducts();
+      const allSessionsList = await db.getAllSessions();
+      const now = new Date();
+      
+      // Filter products to only show those with active or upcoming sessions
+      const productsWithSessions = productsList.filter(product => {
+        return allSessionsList.some(session => {
+          if (session.product_id !== product.id) return false;
+          const endDate = new Date(session.end_date);
+          return endDate >= now; // Only current and future sessions
+        });
+      });
+      
+      setProducts(productsWithSessions);
+    } catch (error) {
+      console.error('Error loading products:', error);
+    }
+  };
+
+  const filterSessionsByProduct = (productId: string) => {
+    if (!productId) {
+      setFilteredSessionsForProduct([]);
+      return;
+    }
+    const now = new Date();
+    const filtered = allSessions.filter(session => {
+      // Filter by product
+      if (session.product_id !== productId) return false;
+      // Only show current and future sessions (not past)
+      const endDate = new Date(session.end_date);
+      return endDate >= now;
+    });
+    setFilteredSessionsForProduct(filtered);
+  };
+
+  useEffect(() => {
+    if (selectedProductId) {
+      filterSessionsByProduct(selectedProductId);
+    } else {
+      setFilteredSessionsForProduct([]);
+    }
+  }, [selectedProductId, allSessions]);
+
+  const filterSessionsForSessionAdmin = (productId: string) => {
+    if (!productId) {
+      setFilteredSessionsForSessionAdmin([]);
+      return;
+    }
+    const now = new Date();
+    const filtered = allSessions.filter(session => {
+      // Filter by product
+      if (session.product_id !== productId) return false;
+      // Only show current and future sessions (not past)
+      const endDate = new Date(session.end_date);
+      return endDate >= now;
+    });
+    setFilteredSessionsForSessionAdmin(filtered);
+  };
+
+  useEffect(() => {
+    if (selectedProductIdForSessionAdmin) {
+      filterSessionsForSessionAdmin(selectedProductIdForSessionAdmin);
+    } else {
+      setFilteredSessionsForSessionAdmin([]);
+    }
+  }, [selectedProductIdForSessionAdmin, allSessions]);
 
   // Update title when query string and session context change
   useEffect(() => {
@@ -481,10 +750,11 @@ export default function UsersManagementScreen() {
   }, [searchParams]);
 
   // Ensure session-admin mode never exposes system-admin filter
+  // Session admins can only filter by 'stakeholder' or 'none'
   useEffect(() => {
     if (viewMode === 'session-admin') {
-      if (filterRole === 'all' || filterRole === 'system-admin') {
-        setFilterRole('session-admin');
+      if (filterRole === 'system-admin' || filterRole === 'session-admin' || filterRole === 'all') {
+        setFilterRole('stakeholder');
       }
     }
   }, [viewMode, filterRole]);
@@ -758,6 +1028,11 @@ export default function UsersManagementScreen() {
       sessionAdminIds: [],
       stakeholderSessionIds: []
     });
+    setSelectedProductId('');
+    setFilteredSessionsForProduct([]);
+    setSelectedProductIdForSessionAdmin('');
+    setFilteredSessionsForSessionAdmin([]);
+    loadProducts();
     setShowAddUserModal(true);
   };
 
@@ -771,6 +1046,10 @@ export default function UsersManagementScreen() {
       sessionAdminIds: [],
       stakeholderSessionIds: []
     });
+    setSelectedProductId('');
+    setFilteredSessionsForProduct([]);
+    setSelectedProductIdForSessionAdmin('');
+    setFilteredSessionsForSessionAdmin([]);
     setAccordionOpen({
       systemAdmin: false,
       sessionAdmin: false,
@@ -877,14 +1156,29 @@ export default function UsersManagementScreen() {
         console.log('Finished adding stakeholder roles');
       }
 
+      // Determine user type for success message
+      let userType = 'User';
+      if (newUserData.isSystemAdmin) {
+        userType = 'System Admin';
+      } else if (newUserData.sessionAdminIds.length > 0) {
+        userType = 'Session Admin';
+      } else if (newUserData.stakeholderSessionIds.length > 0) {
+        userType = 'Stakeholder';
+      }
+
       // Close modal first (before reload to avoid UI delay)
       closeAddUserModal();
 
       // Reload users to show new user with their roles
       await loadUsers(allSessions);
 
-      // Show success message
-      alert(`User created successfully!\n\nEmail: ${newUserData.email}\nTemporary Password: ${newUserData.password}\n\nPlease save this password and share it with the user securely.`);
+      // Show success modal
+      setSuccessModalData({
+        email: newUserData.email,
+        password: newUserData.password,
+        userType: userType
+      });
+      setShowSuccessModal(true);
     } catch (error: any) {
       console.error('Error creating user:', error);
       alert(`Failed to create user: ${error.message || 'Unknown error'}`);
@@ -918,6 +1212,28 @@ export default function UsersManagementScreen() {
       month: 'short', 
       day: 'numeric'
     });
+  };
+
+  const getSessionStatus = (session: VotingSession): { text: string; color: string } => {
+    const now = new Date();
+    const startDate = new Date(session.start_date);
+    const endDate = new Date(session.end_date);
+    
+    if (session.is_active && now >= startDate && now <= endDate) {
+      return { text: 'Active', color: 'text-green-600' };
+    } else if (now < startDate) {
+      return { text: 'Upcoming', color: 'text-blue-600' };
+    } else {
+      return { text: 'Ended', color: 'text-gray-500' };
+    }
+  };
+
+  const formatSessionDateRange = (session: VotingSession): string => {
+    const start = new Date(session.start_date);
+    const end = new Date(session.end_date);
+    const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${startStr} - ${endStr}`;
   };
 
   const getRoleBadge = (user: UserWithRoles) => {
@@ -1153,7 +1469,7 @@ export default function UsersManagementScreen() {
             >
               {viewMode !== 'session-admin' && <option value="all">All Roles</option>}
               {viewMode !== 'session-admin' && <option value="system-admin">System Admin</option>}
-              <option value="session-admin">Session Admin</option>
+              {viewMode !== 'session-admin' && <option value="session-admin">Session Admin</option>}
               <option value="stakeholder">Stakeholder</option>
               <option value="none">No Role</option>
             </select>
@@ -1745,10 +2061,26 @@ export default function UsersManagementScreen() {
           </div>
         </div>
 
-        {/* View Toggle - System Admin vs Session Admin */}
+        {/* View Toggle - Session Admin vs System Admin */}
         {(isSystemAdmin || isSessionAdmin) && (
           <div className="mt-8 flex justify-center">
             <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => {
+                  if (isSessionAdmin || isSystemAdmin) {
+                    setViewMode('session-admin');
+                  }
+                }}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                  viewMode === 'session-admin'
+                    ? 'bg-white text-[#2d4660] shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+                title="Session Admin View"
+              >
+                <Shield className="h-4 w-4 inline mr-2" />
+                Session Admin
+              </button>
               <button
                 onClick={() => {
                   if (isSystemAdmin) {
@@ -1765,22 +2097,6 @@ export default function UsersManagementScreen() {
               >
                 <Crown className="h-4 w-4 inline mr-2" />
                 System Admin
-              </button>
-              <button
-                onClick={() => {
-                  if (isSessionAdmin || isSystemAdmin) {
-                    setViewMode('session-admin');
-                  }
-                }}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                  viewMode === 'session-admin'
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-                title="Session Admin View"
-              >
-                <Shield className="h-4 w-4 inline mr-2" />
-                Session Admin
               </button>
             </div>
           </div>
@@ -2199,7 +2515,7 @@ export default function UsersManagementScreen() {
                             type="checkbox"
                             checked={newUserData.isSystemAdmin}
                             onChange={(e) => setNewUserData({ ...newUserData, isSystemAdmin: e.target.checked })}
-                            className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                            className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 accent-green-600"
                           />
                           <span className="ml-3 text-sm text-gray-700">
                             Grant system administrator privileges
@@ -2237,29 +2553,59 @@ export default function UsersManagementScreen() {
                     
                     {accordionOpen.sessionAdmin && (
                       <div className="mt-3 ml-6 space-y-3">
-                        <p className="text-xs text-gray-500">
-                          Select sessions where this user will be an admin
-                        </p>
-                        {allSessions.length === 0 ? (
-                          <p className="text-sm text-gray-400">No sessions available</p>
-                        ) : (
-                          <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
-                            {allSessions.map((session) => (
-                              <label
-                                key={session.id}
-                                className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={newUserData.sessionAdminIds.includes(session.id)}
-                                  onChange={() => toggleSessionAdmin(session.id)}
-                                  className="w-4 h-4 text-[#173B65] border-gray-300 rounded focus:ring-[#2D4660]"
-                                />
-                                <span className="ml-3 text-sm text-gray-700">
-                                  {session.title || session.name || 'Unnamed Session'}
-                                </span>
-                              </label>
-                            ))}
+                        {/* Product Selection */}
+                        <div>
+                          <ProductSelect
+                            products={products}
+                            value={selectedProductIdForSessionAdmin}
+                            onChange={(productId) => {
+                              setSelectedProductIdForSessionAdmin(productId);
+                              // Clear selected sessions when product changes
+                              setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
+                            }}
+                            label="Product *"
+                          />
+                        </div>
+
+                        {/* Session Selection - Only show after product is selected */}
+                        {selectedProductIdForSessionAdmin && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Sessions * (Current and Future)
+                            </label>
+                            {filteredSessionsForSessionAdmin.length === 0 ? (
+                              <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                            ) : (
+                              <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                                {filteredSessionsForSessionAdmin.map((session) => (
+                                  <label
+                                    key={session.id}
+                                    className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={newUserData.sessionAdminIds.includes(session.id)}
+                                      onChange={() => toggleSessionAdmin(session.id)}
+                                      className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                                      style={{ accentColor: '#16a34a' }}
+                                    />
+                                    <div className="ml-3 flex-1">
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {session.title || session.name || 'Unnamed Session'}
+                                      </div>
+                                      <div className="text-xs text-gray-500 mt-0.5">
+                                        {formatSessionDateRange(session)}
+                                      </div>
+                                      <div className="text-xs mt-0.5">
+                                        <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                          {getSessionStatus(session).text}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2281,29 +2627,59 @@ export default function UsersManagementScreen() {
                       )}
                     </div>
                     <div className="space-y-3">
-                      <p className="text-xs text-gray-500">
-                        Select sessions where this user will be a stakeholder (voting access)
-                      </p>
-                      {allSessions.length === 0 ? (
-                        <p className="text-sm text-gray-400">No sessions available</p>
-                      ) : (
-                        <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
-                          {allSessions.map((session) => (
-                            <label
-                              key={session.id}
-                              className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                onChange={() => toggleStakeholder(session.id)}
-                                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-[#2D4660]"
-                              />
-                              <span className="ml-3 text-sm text-gray-700">
-                                {session.title || session.name || 'Unnamed Session'}
-                              </span>
-                            </label>
-                          ))}
+                      {/* Product Selection */}
+                      <div>
+                        <ProductSelect
+                          products={products}
+                          value={selectedProductId}
+                          onChange={(productId) => {
+                            setSelectedProductId(productId);
+                            // Clear selected sessions when product changes
+                            setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+                          }}
+                          label="Product *"
+                        />
+                      </div>
+
+                      {/* Session Selection - Only show after product is selected */}
+                      {selectedProductId && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Sessions * (Current and Future)
+                          </label>
+                          {filteredSessionsForProduct.length === 0 ? (
+                            <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                          ) : (
+                            <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                              {filteredSessionsForProduct.map((session) => (
+                                <label
+                                  key={session.id}
+                                  className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={newUserData.stakeholderSessionIds.includes(session.id)}
+                                    onChange={() => toggleStakeholder(session.id)}
+                                    className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                                    style={{ accentColor: '#16a34a' }}
+                                  />
+                                  <div className="ml-3 flex-1">
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {session.title || session.name || 'Unnamed Session'}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-0.5">
+                                      {formatSessionDateRange(session)}
+                                    </div>
+                                    <div className="text-xs mt-0.5">
+                                      <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                        {getSessionStatus(session).text}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2332,29 +2708,59 @@ export default function UsersManagementScreen() {
                     
                     {accordionOpen.stakeholder && (
                       <div className="mt-3 ml-6 space-y-3">
-                        <p className="text-xs text-gray-500">
-                          Select sessions where this user will be a stakeholder (voting access)
-                        </p>
-                        {allSessions.length === 0 ? (
-                          <p className="text-sm text-gray-400">No sessions available</p>
-                        ) : (
-                          <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
-                            {allSessions.map((session) => (
-                              <label
-                                key={session.id}
-                                className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                  onChange={() => toggleStakeholder(session.id)}
-                                  className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-[#2D4660]"
-                                />
-                                <span className="ml-3 text-sm text-gray-700">
-                                  {session.title || session.name || 'Unnamed Session'}
-                                </span>
-                              </label>
-                            ))}
+                        {/* Product Selection */}
+                        <div>
+                          <ProductSelect
+                            products={products}
+                            value={selectedProductId}
+                            onChange={(productId) => {
+                              setSelectedProductId(productId);
+                              // Clear selected sessions when product changes
+                              setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+                            }}
+                            label="Product *"
+                          />
+                        </div>
+
+                        {/* Session Selection - Only show after product is selected */}
+                        {selectedProductId && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Sessions * (Current and Future)
+                            </label>
+                            {filteredSessionsForProduct.length === 0 ? (
+                              <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                            ) : (
+                              <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                                {filteredSessionsForProduct.map((session) => (
+                                  <label
+                                    key={session.id}
+                                    className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={newUserData.stakeholderSessionIds.includes(session.id)}
+                                      onChange={() => toggleStakeholder(session.id)}
+                                      className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                                      style={{ accentColor: '#16a34a' }}
+                                    />
+                                    <div className="ml-3 flex-1">
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {session.title || session.name || 'Unnamed Session'}
+                                      </div>
+                                      <div className="text-xs text-gray-500 mt-0.5">
+                                        {formatSessionDateRange(session)}
+                                      </div>
+                                      <div className="text-xs mt-0.5">
+                                        <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                          {getSessionStatus(session).text}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2374,7 +2780,7 @@ export default function UsersManagementScreen() {
                 </button>
                 <button
                   onClick={handleAddUser}
-                  disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim()}
+                  disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim() || (viewMode === 'session-admin' && (!selectedProductId || newUserData.stakeholderSessionIds.length === 0))}
                   className="flex-1 px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   {isAddingUser ? (
@@ -2383,11 +2789,114 @@ export default function UsersManagementScreen() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
-                      Creating User...
+                      {(() => {
+                        if (newUserData.isSystemAdmin) return 'Adding System Admin...';
+                        if (newUserData.sessionAdminIds.length > 0) return 'Adding Session Admin...';
+                        if (newUserData.stakeholderSessionIds.length > 0) return 'Adding Stakeholder...';
+                        return 'Creating User...';
+                      })()}
                     </>
                   ) : (
-                    'Create User'
+                    (() => {
+                      if (newUserData.isSystemAdmin) return 'Add System Admin';
+                      if (newUserData.sessionAdminIds.length > 0) return 'Add Session Admin';
+                      if (newUserData.stakeholderSessionIds.length > 0) return 'Add Stakeholder';
+                      return 'Create User';
+                    })()
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      {showSuccessModal && successModalData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              {/* Header */}
+              <div className="flex items-start mb-4">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                  <CheckCircle className="h-6 w-6 text-green-600" />
+                </div>
+                <div className="ml-4 flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">
+                    {successModalData.userType} Created Successfully!
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    The user account has been created and roles have been assigned.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowSuccessModal(false);
+                    setSuccessModalData(null);
+                  }}
+                  className="flex-shrink-0 ml-4 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  aria-label="Close modal"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* User Info */}
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Email Address</div>
+                    <div className="text-sm font-medium text-gray-900">{successModalData.email}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Temporary Password</div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 px-3 py-2 bg-white border border-gray-300 rounded-md font-mono text-sm text-gray-900">
+                        {successModalData.password}
+                      </code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(successModalData.password);
+                        }}
+                        className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors text-sm"
+                        title="Copy password"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Warning */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-yellow-800">
+                      Important: Save This Password
+                    </h3>
+                    <div className="mt-1 text-sm text-yellow-700">
+                      Please save this password and share it with the user securely. They will need it to log in for the first time.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Button */}
+              <div className="flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowSuccessModal(false);
+                    setSuccessModalData(null);
+                  }}
+                  className="px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
+                >
+                  Done
                 </button>
               </div>
             </div>

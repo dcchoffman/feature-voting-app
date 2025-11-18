@@ -1322,7 +1322,12 @@ export default function SessionSelectionScreen() {
                             {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) */}
                             {hasAdminAccess && viewMode !== 'stakeholder' && (
                               <div
-                                className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
+                                className="absolute z-20 bottom-[-20px] left-1/2 translate-x-[-50%] md:bottom-auto md:left-auto md:translate-x-0"
+                                style={{
+                                  right: '-20px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)'
+                                }}
                               >
                                 <button
                                   onClick={(e) => {
@@ -1534,7 +1539,12 @@ export default function SessionSelectionScreen() {
                               {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
                               {isSingleSessionProduct && hasAdminAccess && viewMode !== 'stakeholder' && (
                                 <div
-                                  className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
+                                  className="absolute z-20 bottom-[-20px] left-1/2 translate-x-[-50%] md:bottom-auto md:left-auto md:translate-x-0"
+                                  style={{
+                                    right: '-20px',
+                                    top: '50%',
+                                    transform: 'translateY(-50%)'
+                                  }}
                                 >
                                   <button
                                     onClick={(e) => {
@@ -1937,7 +1947,12 @@ export default function SessionSelectionScreen() {
                                 {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) */}
                                 {(isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
                                   <div
-                                    className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
+                                    className="absolute z-20 bottom-[-20px] left-1/2 translate-x-[-50%] md:bottom-auto md:left-auto md:translate-x-0"
+                                    style={{
+                                      right: '-20px',
+                                      top: '50%',
+                                      transform: 'translateY(-50%)'
+                                    }}
                                   >
                                     <button
                                       onClick={(e) => {
@@ -2089,7 +2104,12 @@ export default function SessionSelectionScreen() {
                                   {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
                                   {isSingleSessionProduct && (isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
                                     <div
-                                      className="absolute z-20 md:right-[-20px] md:top-1/2 md:translate-y-[-50%] bottom-[-20px] left-1/2 translate-x-[-50%] md:translate-x-0 md:left-auto"
+                                      className="absolute z-20 bottom-[-20px] left-1/2 translate-x-[-50%] md:bottom-auto md:left-auto md:translate-x-0"
+                                      style={{
+                                        right: '-20px',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)'
+                                      }}
                                     >
                                       <button
                                         onClick={(e) => {

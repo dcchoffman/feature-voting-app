@@ -9,9 +9,13 @@ import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
 import { sendInvitationEmail } from '../services/emailService';
+import { isPastDate } from '../utils/date';
+import { getDisplayProductName } from '../utils/productDisplay';
+import { getProductColor } from '../utils/productColors';
+import type { Product, VotingSession } from '../types';
 import { 
   ChevronLeft, UserPlus, Trash2, CheckCircle, X, AlertCircle,
-  Mail, User, Clock, Settings, List, LogOut
+  Mail, User, Clock, Settings, List, LogOut, ChevronDown
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
@@ -23,6 +27,196 @@ interface Stakeholder {
   has_voted: boolean;
   voted_at: string | null;
   created_at: string;
+}
+
+// Product Select Component
+interface ProductSelectProps {
+  products: Product[];
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+  error?: boolean;
+}
+
+function ProductSelect({ products, value, onChange, label, error }: ProductSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedProduct = products.find(p => p.id === value);
+  const selectedColors = selectedProduct ? getProductColor(selectedProduct.name, selectedProduct.color_hex ?? null) : null;
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full px-3 py-2 border rounded-md bg-white cursor-pointer flex items-center justify-between hover:border-gray-400 ${
+          error ? 'border-red-500' : 'border-gray-300'
+        }`}
+      >
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {selectedProduct && selectedColors && (
+            <div
+              className="w-4 h-4 rounded flex-shrink-0"
+              style={{ backgroundColor: selectedColors.background }}
+            />
+          )}
+          <span className={`text-sm truncate ${!value ? 'text-gray-400' : 'text-gray-900'}`}>
+            {selectedProduct ? selectedProduct.name : 'Select a Product'}
+          </span>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform flex-shrink-0 ${isOpen ? 'transform rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {products.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 text-center">No products available</div>
+          ) : (
+            products.map(product => {
+              const colors = getProductColor(product.name, product.color_hex ?? null);
+              const isSelected = value === product.id;
+              return (
+                <div
+                  key={product.id}
+                  onClick={() => {
+                    onChange(product.id);
+                    setIsOpen(false);
+                  }}
+                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
+                    isSelected ? 'bg-gray-50' : ''
+                  }`}
+                >
+                  <div
+                    className="w-4 h-4 rounded flex-shrink-0"
+                    style={{ backgroundColor: colors.background }}
+                  />
+                  <span className="text-sm text-gray-900 flex-1">{product.name}</span>
+                  {isSelected && <CheckCircle className="h-4 w-4 text-gray-400 flex-shrink-0" />}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Session MultiSelect Component
+interface SessionMultiSelectProps {
+  sessions: VotingSession[];
+  selectedSessionIds: string[];
+  onSelectionChange: (sessionIds: string[]) => void;
+  label?: string;
+}
+
+function SessionMultiSelect({ sessions, selectedSessionIds, onSelectionChange, label }: SessionMultiSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleSession = (sessionId: string) => {
+    if (selectedSessionIds.includes(sessionId)) {
+      onSelectionChange(selectedSessionIds.filter(id => id !== sessionId));
+    } else {
+      onSelectionChange([...selectedSessionIds, sessionId]);
+    }
+  };
+
+  const removeSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelectionChange(selectedSessionIds.filter(id => id !== sessionId));
+  };
+
+  const selectedSessions = sessions.filter(s => selectedSessionIds.includes(s.id));
+  const displayText = selectedSessions.length > 0 
+    ? `${selectedSessions.length} session${selectedSessions.length !== 1 ? 's' : ''} selected`
+    : 'Select sessions...';
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full min-h-[42px] px-3 py-2 border border-gray-300 rounded-md bg-white cursor-pointer flex items-center justify-between hover:border-gray-400"
+      >
+        <div className="flex-1 flex flex-wrap gap-1 items-center">
+          {selectedSessions.length === 0 ? (
+            <span className="text-sm text-gray-400">{displayText}</span>
+          ) : (
+            <>
+              {selectedSessions.map(session => (
+                <span
+                  key={session.id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full"
+                >
+                  <span className="truncate max-w-[150px]">{session.title || session.name || 'Unnamed Session'}</span>
+                  <button
+                    onClick={(e) => removeSession(session.id, e)}
+                    className="hover:bg-green-200 rounded-full p-0.5"
+                    type="button"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {sessions.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 text-center">
+              No current or future sessions found for this product.
+            </div>
+          ) : (
+            sessions.map(session => {
+              const isSelected = selectedSessionIds.includes(session.id);
+              return (
+                <div
+                  key={session.id}
+                  onClick={() => toggleSession(session.id)}
+                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between ${
+                    isSelected ? 'bg-green-50' : ''
+                  }`}
+                >
+                  <span className="text-sm text-gray-900">{session.title || session.name || 'Unnamed Session'}</span>
+                  {isSelected && (
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function StakeholderManagementScreen() {
@@ -55,6 +249,11 @@ export default function StakeholderManagementScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [availableSessions, setAvailableSessions] = useState<VotingSession[]>([]);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [productLookup, setProductLookup] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -77,7 +276,62 @@ export default function StakeholderManagementScreen() {
       return;
     }
     loadStakeholders();
+    loadProducts();
   }, [currentSession, navigate]);
+
+  const loadProducts = async () => {
+    try {
+      const productsList = await db.getProducts();
+      const allSessionsList = await db.getAllSessions();
+      const now = new Date();
+      
+      // Filter products to only show those with active or upcoming sessions
+      const productsWithSessions = productsList.filter(product => {
+        return allSessionsList.some(session => {
+          if (session.product_id !== product.id) return false;
+          const endDate = new Date(session.end_date);
+          return endDate >= now; // Only current and future sessions
+        });
+      });
+      
+      setProducts(productsWithSessions);
+      const lookup: Record<string, string> = {};
+      productsWithSessions.forEach(p => {
+        lookup[p.id] = p.name;
+      });
+      setProductLookup(lookup);
+    } catch (error) {
+      console.error('Error loading products:', error);
+    }
+  };
+
+  const loadSessionsForProduct = async (productId: string) => {
+    try {
+      const allSessions = await db.getAllSessions();
+      const now = new Date();
+      const filtered = allSessions.filter(session => {
+        // Filter by product
+        if (session.product_id !== productId) return false;
+        // Only show current and future sessions (not past)
+        const endDate = new Date(session.end_date);
+        return endDate >= now;
+      });
+      setAvailableSessions(filtered);
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setAvailableSessions([]);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedProductId) {
+      loadSessionsForProduct(selectedProductId);
+      setSelectedSessionIds([]);
+    } else {
+      setAvailableSessions([]);
+      setSelectedSessionIds([]);
+    }
+  }, [selectedProductId]);
 
   const loadStakeholders = async () => {
     if (!currentSession) return;
@@ -98,6 +352,28 @@ export default function StakeholderManagementScreen() {
     return re.test(email);
   };
 
+  const getSessionStatus = (session: VotingSession): { text: string; color: string } => {
+    const now = new Date();
+    const startDate = new Date(session.start_date);
+    const endDate = new Date(session.end_date);
+    
+    if (session.is_active && now >= startDate && now <= endDate) {
+      return { text: 'Active', color: 'text-green-600' };
+    } else if (now < startDate) {
+      return { text: 'Upcoming', color: 'text-blue-600' };
+    } else {
+      return { text: 'Ended', color: 'text-gray-500' };
+    }
+  };
+
+  const formatSessionDateRange = (session: VotingSession): string => {
+    const start = new Date(session.start_date);
+    const end = new Date(session.end_date);
+    const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${startStr} - ${endStr}`;
+  };
+
   const handleAddStakeholder = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -112,45 +388,58 @@ export default function StakeholderManagementScreen() {
     } else if (!validateEmail(formData.email)) {
       newErrors.email = 'Invalid email address';
     }
-    
-    // Check for duplicate email
-    if (stakeholders.some(s => s.user_email.toLowerCase() === formData.email.toLowerCase())) {
-      newErrors.email = 'This stakeholder is already added';
+
+    if (!selectedProductId) {
+      newErrors.product = 'Please select a product';
+    }
+
+    if (selectedSessionIds.length === 0) {
+      newErrors.sessions = 'Please select at least one session';
     }
     
     setErrors(newErrors);
     
     if (Object.keys(newErrors).length > 0) return;
     
-    if (!currentSession) return;
-    
     setIsSubmitting(true);
     try {
-      await db.addSessionStakeholder({
-        session_id: currentSession.id,
-        user_name: formData.name,
-        user_email: formData.email,
-        has_voted: false
-      });
-      // Send invite email via Edge Function (fallback to mailto)
-      try {
-        const inviteUrl = `${window.location.origin}/login?session=${currentSession.session_code}`;
-        await sendInvitationEmail({
-          to: formData.email,
-          subject: `You're invited to vote: ${currentSession.title}`,
-          text: `Hi,\n\nYou've been invited to vote in \"${currentSession.title}\".\n\nOpen: ${inviteUrl}\n\nBest regards,\n${currentUser?.name || ''}`,
-          html: `<p>Hi,</p><p>You've been invited to vote in <strong>${currentSession.title}</strong>.</p><p><a href="${inviteUrl}">Open the Feature Voting System</a></p><p>Best regards,<br/>${currentUser?.name || ''}</p>`
+      // Add stakeholder to all selected sessions
+      for (const sessionId of selectedSessionIds) {
+        await db.addSessionStakeholder({
+          session_id: sessionId,
+          user_name: formData.name,
+          user_email: formData.email,
+          has_voted: false
         });
-      } catch {
-        try {
-          const mailto = db.buildSessionInviteMailto(currentSession as any, formData.email, currentUser?.name || '');
-          window.location.href = mailto;
-        } catch {}
+      }
+
+      // Send invite emails for all selected sessions
+      for (const sessionId of selectedSessionIds) {
+        const session = availableSessions.find(s => s.id === sessionId);
+        if (session) {
+          try {
+            const inviteUrl = `${window.location.origin}/login?session=${session.session_code}`;
+            await sendInvitationEmail({
+              to: formData.email,
+              subject: `You're invited to vote: ${session.title}`,
+              text: `Hi,\n\nYou've been invited to vote in \"${session.title}\".\n\nOpen: ${inviteUrl}\n\nBest regards,\n${currentUser?.name || ''}`,
+              html: `<p>Hi,</p><p>You've been invited to vote in <strong>${session.title}</strong>.</p><p><a href="${inviteUrl}">Open the Feature Voting System</a></p><p>Best regards,<br/>${currentUser?.name || ''}</p>`
+            });
+          } catch {
+            try {
+              const mailto = db.buildSessionInviteMailto(session as any, formData.email, currentUser?.name || '');
+              window.location.href = mailto;
+            } catch {}
+          }
+        }
       }
       
       await loadStakeholders();
       setFormData({ name: '', email: '' });
+      setSelectedProductId('');
+      setSelectedSessionIds([]);
       setShowAddForm(false);
+      setErrors({});
     } catch (error) {
       console.error('Error adding stakeholder:', error);
       setErrors({ submit: 'Failed to add stakeholder. Please try again.' });
@@ -414,13 +703,15 @@ export default function StakeholderManagementScreen() {
       {/* Add Stakeholder Modal */}
       {showAddForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-medium text-[#2d4660]">Add Stakeholder</h3>
               <button
                 onClick={() => {
                   setShowAddForm(false);
                   setFormData({ name: '', email: '' });
+                  setSelectedProductId('');
+                  setSelectedSessionIds([]);
                   setErrors({});
                 }}
                 className="text-gray-400 hover:text-gray-500"
@@ -472,6 +763,75 @@ export default function StakeholderManagementScreen() {
                 )}
               </div>
 
+              <div>
+                <ProductSelect
+                  products={products}
+                  value={selectedProductId}
+                  onChange={setSelectedProductId}
+                  label="Product *"
+                  error={!!errors.product}
+                />
+                {errors.product && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {errors.product}
+                  </p>
+                )}
+              </div>
+
+              {selectedProductId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Sessions * (Current and Future)
+                  </label>
+                  {availableSessions.length === 0 ? (
+                    <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                      {availableSessions.map(session => (
+                        <label
+                          key={session.id}
+                          className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedSessionIds.includes(session.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedSessionIds(prev => [...prev, session.id]);
+                              } else {
+                                setSelectedSessionIds(prev => prev.filter(id => id !== session.id));
+                              }
+                            }}
+                            className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                            style={{ accentColor: '#16a34a' }}
+                          />
+                          <div className="ml-3 flex-1">
+                            <div className="text-sm font-medium text-gray-900">
+                              {session.title}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {formatSessionDateRange(session)}
+                            </div>
+                            <div className="text-xs mt-0.5">
+                              <span className={`font-medium ${getSessionStatus(session).color}`}>
+                                {getSessionStatus(session).text}
+                              </span>
+                            </div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {errors.sessions && (
+                    <p className="mt-1 text-sm text-red-600 flex items-center">
+                      <AlertCircle className="h-4 w-4 mr-1" />
+                      {errors.sessions}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {errors.submit && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                   <p className="text-sm text-red-800 flex items-center">
@@ -487,6 +847,8 @@ export default function StakeholderManagementScreen() {
                   onClick={() => {
                     setShowAddForm(false);
                     setFormData({ name: '', email: '' });
+                    setSelectedProductId('');
+                    setSelectedSessionIds([]);
                     setErrors({});
                   }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"

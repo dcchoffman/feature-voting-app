@@ -88,8 +88,9 @@ export default function UnauthorizedScreen() {
           <img
             src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
-            className="mx-auto"
+            className="mx-auto cursor-pointer hover:opacity-80 transition-opacity"
             style={{ height: '80px', width: 'auto' }}
+            onClick={() => navigate('/sessions')}
           />
         </div>
 

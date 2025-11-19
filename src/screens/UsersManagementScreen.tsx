@@ -1674,8 +1674,9 @@ export default function UsersManagementScreen() {
           <img
             src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
-            className="-mt-4"
+            className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
             style={{ height: '96px', width: 'auto' }}
+            onClick={() => navigate('/sessions')}
           />
         </div>
         
@@ -1686,8 +1687,9 @@ export default function UsersManagementScreen() {
             <img
               src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
               alt="New Millennium Building Systems Logo"
-              className="mr-3 md:hidden flex-shrink-0"
+              className="mr-3 md:hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
               style={{ width: '36px', height: '36px' }}
+              onClick={() => navigate('/sessions')}
             />
             <button 
               onClick={() => {

@@ -2103,12 +2103,13 @@ export function AdminDashboard({
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
       {/* Desktop: Centered logo at top */}
-      <div className="hidden md:flex md:justify-center mb-2 cursor-pointer" onClick={() => navigate('/sessions')}>
+      <div className="hidden md:flex md:justify-center mb-2">
         <img
           src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
           alt="New Millennium Building Systems Logo"
-          className="-mt-4"
+          className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
+          onClick={() => navigate('/sessions')}
         />
       </div>
       

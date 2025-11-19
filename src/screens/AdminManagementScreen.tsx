@@ -202,8 +202,9 @@ export default function AdminManagementScreen() {
         <img
           src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
           alt="New Millennium Building Systems Logo"
-          className="-mt-4"
+          className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
+          onClick={() => navigate('/sessions')}
         />
       </div>
       

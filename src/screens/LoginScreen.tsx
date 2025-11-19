@@ -77,7 +77,8 @@ export default function LoginScreen() {
         <img
           src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
           alt="New Millennium Building Systems Logo"
-          className="mx-auto h-24 w-auto"
+          className="mx-auto h-24 w-auto cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={() => navigate('/sessions')}
         />
         <h2 className="mt-6 text-center text-3xl font-bold text-[#2d4660]">
           Feature Voting System

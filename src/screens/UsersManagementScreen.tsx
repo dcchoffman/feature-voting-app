@@ -11,16 +11,22 @@ import * as db from '../services/databaseService';
 import type { User, VotingSession, Product } from '../types';
 import type { UserRoleInfo } from '../services/databaseService';
 import { 
-  ChevronLeft, Users, Crown, Shield, User as UserIcon, 
-  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle
+  ChevronLeft, Users, Crown, Shield, ShieldCheck, User as UserIcon, 
+  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle, Info, Edit, Plus, Minus
 } from 'lucide-react';
 import { getProductColor } from '../utils/productColors';
 import { supabase } from '../supabaseClient';
 
+interface SessionWithAssignment extends VotingSession {
+  assignedAt?: string;
+  assignedBy?: string;
+  assignedByName?: string;
+}
+
 interface UserWithRoles extends User {
   roles: UserRoleInfo;
-  adminInSessions?: VotingSession[];
-  stakeholderInSessions?: VotingSession[];
+  adminInSessions?: SessionWithAssignment[];
+  stakeholderInSessions?: SessionWithAssignment[];
 }
 
 type RoleModalType = 'stakeholder' | 'session-admin' | 'remove-stakeholder' | null;
@@ -53,7 +59,7 @@ function ProductSelect({ products, value, onChange, label, error, onProductChang
   const selectedColors = selectedProduct ? getProductColor(selectedProduct.name, selectedProduct.color_hex ?? null) : null;
 
   return (
-    <div ref={dropdownRef} className="relative">
+    <div ref={dropdownRef} className="relative overflow-visible">
       {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
       
       <div
@@ -77,7 +83,7 @@ function ProductSelect({ products, value, onChange, label, error, onProductChang
       </div>
 
       {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+        <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
           {products.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500 text-center">No products available</div>
           ) : (
@@ -105,6 +111,139 @@ function ProductSelect({ products, value, onChange, label, error, onProductChang
                 </div>
               );
             })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Product Session Selector Component (Reusable)
+interface ProductSessionSelectorProps {
+  products: Product[];
+  sessions: VotingSession[];
+  selectedProductId: string;
+  onProductChange: (productId: string) => void;
+  useAllSessions: boolean;
+  onToggleAllSessions: (useAll: boolean) => void;
+  selectedSessionIds: string[];
+  onSessionToggle: (sessionId: string) => void;
+  getSessionStatus: (session: VotingSession) => { text: string; color: string };
+  formatSessionDateRange: (session: VotingSession) => string;
+  filterSessions: (sessions: VotingSession[], productId: string) => VotingSession[];
+}
+
+function ProductSessionSelector({
+  products,
+  sessions,
+  selectedProductId,
+  onProductChange,
+  useAllSessions,
+  onToggleAllSessions,
+  selectedSessionIds,
+  onSessionToggle,
+  getSessionStatus,
+  formatSessionDateRange,
+  filterSessions
+}: ProductSessionSelectorProps) {
+  const filteredSessions = selectedProductId ? filterSessions(sessions, selectedProductId) : [];
+
+  return (
+    <div className="space-y-3 overflow-visible">
+      {/* Product Selection */}
+      <div className="overflow-visible">
+        <ProductSelect
+          products={products}
+          value={selectedProductId}
+          onChange={(productId) => {
+            onProductChange(productId);
+            onToggleAllSessions(true);
+          }}
+          label="Product *"
+        />
+      </div>
+
+      {/* Session Selection Toggle - Only show after product is selected */}
+      {selectedProductId && (
+        <div className="space-y-3">
+          {/* Toggle: All Sessions / Select Sessions */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Session Selection *
+            </label>
+            <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+              <button
+                type="button"
+                onClick={() => onToggleAllSessions(false)}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                  !useAllSessions
+                    ? 'bg-white text-[#2d4660] shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Select Sessions
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleAllSessions(true);
+                }}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
+                  useAllSessions
+                    ? 'bg-white text-[#2d4660] shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                All Sessions
+              </button>
+            </div>
+            {useAllSessions && (
+              <p className="mt-2 text-xs text-gray-500">
+                User will be added to all current and future sessions for this product
+              </p>
+            )}
+          </div>
+
+          {/* Session Selection List - Only show if "Select Sessions" is chosen */}
+          {!useAllSessions && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Sessions * (Current and Future)
+              </label>
+              {filteredSessions.length === 0 ? (
+                <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
+              ) : (
+                <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
+                  {filteredSessions.map((session) => (
+                    <label
+                      key={session.id}
+                      className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedSessionIds.includes(session.id)}
+                        onChange={() => onSessionToggle(session.id)}
+                        className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
+                        style={{ accentColor: '#16a34a' }}
+                      />
+                      <div className="ml-3 flex-1">
+                        <div className="text-sm font-medium text-gray-900">
+                          {session.title || 'Unnamed Session'}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {formatSessionDateRange(session)}
+                        </div>
+                        <div className="text-xs mt-0.5">
+                          <span className={`font-medium ${getSessionStatus(session).color}`}>
+                            {getSessionStatus(session).text}
+                          </span>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -170,7 +309,7 @@ function SessionMultiSelect({ sessions, selectedSessionIds, onSelectionChange, l
                   key={session.id}
                   className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full"
                 >
-                  <span className="truncate max-w-[150px]">{session.title || session.name || 'Unnamed Session'}</span>
+                  <span className="truncate max-w-[150px]">{session.title || 'Unnamed Session'}</span>
                   <button
                     onClick={(e) => removeSession(session.id, e)}
                     className="hover:bg-green-200 rounded-full p-0.5"
@@ -203,7 +342,7 @@ function SessionMultiSelect({ sessions, selectedSessionIds, onSelectionChange, l
                     isSelected ? 'bg-green-50' : ''
                   }`}
                 >
-                  <span className="text-sm text-gray-900">{session.title || session.name || 'Unnamed Session'}</span>
+                  <span className="text-sm text-gray-900">{session.title || 'Unnamed Session'}</span>
                   {isSelected && (
                     <CheckCircle className="h-4 w-4 text-green-600" />
                   )}
@@ -231,6 +370,38 @@ export default function UsersManagementScreen() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const [expandedSessions, setExpandedSessions] = useState<{ userId: string; role: 'admin' | 'stakeholder' } | null>(null);
+  const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null); // Format: "userId-sessionId"
+  
+  // Helper function to get most recent active session
+  const getMostRecentActiveSession = <T extends VotingSession>(sessions: T[]): T | null => {
+    const now = new Date();
+    const activeSessions = sessions.filter(s => {
+      const startDate = s.start_date ? new Date(s.start_date) : null;
+      const endDate = s.end_date ? new Date(s.end_date) : null;
+      
+      if (startDate && now < startDate) return false; // Upcoming
+      if (endDate && now > endDate) return false; // Closed
+      if (startDate && now >= startDate && (!endDate || now <= endDate)) return true; // Active
+      return false;
+    });
+    
+    if (activeSessions.length === 0) return null;
+    
+    // Sort by start date (most recent first)
+    return activeSessions.sort((a, b) => {
+      const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+      const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+      return dateB - dateA;
+    })[0];
+  };
+  
+  // Protected email addresses - hide trash cans for these users
+  const protectedEmails = new Set([
+    'spencer.faull@newmill.com',
+    'chris.rodes@newmill.com',
+    'dave.hoffman@newmill.com'
+  ]);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const hasCheckedAccess = useRef(false);
@@ -245,11 +416,15 @@ export default function UsersManagementScreen() {
   const [roleModalType, setRoleModalType] = useState<RoleModalType>(null);
   const [selectedUserForRole, setSelectedUserForRole] = useState<UserWithRoles | null>(null);
   const [allSessions, setAllSessions] = useState<VotingSession[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [userSessionMemberships, setUserSessionMemberships] = useState<{
     adminSessions: string[];
     stakeholderSessions: string[];
   }>({ adminSessions: [], stakeholderSessions: [] });
+  
+  // Role modal product/session selection state
+  const [roleModalProductId, setRoleModalProductId] = useState<string>('');
+  const [roleModalUseAllSessions, setRoleModalUseAllSessions] = useState<boolean>(true);
+  const [roleModalSelectedSessionIds, setRoleModalSelectedSessionIds] = useState<string[]>([]);
   
   // Delete modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -285,6 +460,13 @@ export default function UsersManagementScreen() {
   const [successModalData, setSuccessModalData] = useState<{ email: string; password: string; userType: string } | null>(null);
   const [useAllSessionsForStakeholder, setUseAllSessionsForStakeholder] = useState<boolean>(true);
   const [useAllSessionsForSessionAdmin, setUseAllSessionsForSessionAdmin] = useState<boolean>(true);
+  
+  // Edit user modal state
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [userToEdit, setUserToEdit] = useState<UserWithRoles | null>(null);
+  const [editingUserName, setEditingUserName] = useState('');
+  const [editingUserEmail, setEditingUserEmail] = useState('');
+  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -335,6 +517,7 @@ export default function UsersManagementScreen() {
       document.removeEventListener('touchstart', handleOutside as any);
     };
   }, [openDropdown]);
+
 
   const loadSessions = async () => {
     try {
@@ -477,24 +660,33 @@ export default function UsersManagementScreen() {
           const roles = await db.getUserRoleInfo(user.id);
           
           // Check sessions - NEW APPROACH: Query session_admins table directly
-          const adminInSessions: VotingSession[] = [];
-          const stakeholderInSessions: VotingSession[] = [];
+          const adminInSessions: SessionWithAssignment[] = [];
+          const stakeholderInSessions: SessionWithAssignment[] = [];
           
           // If user has admin sessions, get them directly from the database
           if (roles.sessionAdminCount > 0) {
             try {
-              // Query the session_admins table to get session IDs where this user is admin
+              // Query the session_admins table to get session IDs and assignment metadata
               const { data: adminRelations, error } = await supabase
                 .from('session_admins')
-                .select('session_id')
+                .select('session_id, created_at')
                 .eq('user_id', user.id);
               
               if (error) {
                 console.error('Error fetching admin sessions:', error);
               } else if (adminRelations) {
-                // Match session IDs to actual session objects
+                // Match session IDs to actual session objects and add assignment metadata
                 const adminSessionIds = adminRelations.map(r => r.session_id);
-                adminInSessions.push(...sessions.filter(s => adminSessionIds.includes(s.id)));
+                const adminSessions = sessions.filter(s => adminSessionIds.includes(s.id));
+                adminInSessions.push(...adminSessions.map(session => {
+                  const relation = adminRelations.find(r => r.session_id === session.id);
+                  return {
+                    ...session,
+                    assignedAt: relation?.created_at,
+                    assignedBy: 'System', // Default since we don't have created_by in session_admins
+                    assignedByName: 'System'
+                  };
+                }));
               }
             } catch (err) {
               console.error('Error querying session_admins:', err);
@@ -504,15 +696,20 @@ export default function UsersManagementScreen() {
           // Check stakeholder status from pre-loaded data
           for (const session of sessions) {
             const stakeholders = sessionStakeholdersMap.get(session.id) || [];
-            const isStakeholder = stakeholders.some((s: any) => {
+            const stakeholderMatch = stakeholders.find((s: any) => {
               const emailMatch = s.user_email && user.email && 
                 s.user_email.toLowerCase() === user.email.toLowerCase();
               const idMatch = (s.user_id === user.id) || (s.id === user.id);
               return emailMatch || idMatch;
             });
             
-            if (isStakeholder) {
-              stakeholderInSessions.push(session);
+            if (stakeholderMatch) {
+              stakeholderInSessions.push({
+                ...session,
+                assignedAt: stakeholderMatch.created_at,
+                assignedBy: 'System', // Default since we don't have created_by in session_stakeholders
+                assignedByName: 'System'
+              });
             }
           }
           
@@ -753,13 +950,17 @@ export default function UsersManagementScreen() {
 
   // Ensure session-admin mode never exposes system-admin filter
   // Session admins can only filter by 'stakeholder' or 'none'
+  // When switching to system-admin, always default to 'all'
   useEffect(() => {
     if (viewMode === 'session-admin') {
       if (filterRole === 'system-admin' || filterRole === 'session-admin' || filterRole === 'all') {
         setFilterRole('stakeholder');
       }
+    } else if (viewMode === 'system-admin') {
+      // When switching to system-admin view, always reset filter to 'all'
+      setFilterRole('all');
     }
-  }, [viewMode, filterRole]);
+  }, [viewMode]);
 
   useEffect(() => {
     filterUsers();
@@ -792,9 +993,16 @@ export default function UsersManagementScreen() {
   const openRoleModal = async (user: UserWithRoles, roleType: RoleModalType) => {
     setSelectedUserForRole(user);
     setRoleModalType(roleType);
-    setSelectedSessionId('');
+    setRoleModalProductId('');
+    setRoleModalUseAllSessions(true);
+    setRoleModalSelectedSessionIds([]);
     setShowRoleModal(true);
     setOpenDropdown(null);
+    
+    // Load products if not already loaded
+    if (products.length === 0) {
+      await loadProducts();
+    }
     
     await loadUserSessionMemberships(user.id);
   };
@@ -803,22 +1011,69 @@ export default function UsersManagementScreen() {
     setShowRoleModal(false);
     setRoleModalType(null);
     setSelectedUserForRole(null);
-    setSelectedSessionId('');
+    setRoleModalProductId('');
+    setRoleModalUseAllSessions(true);
+    setRoleModalSelectedSessionIds([]);
     setUserSessionMemberships({ adminSessions: [], stakeholderSessions: [] });
   };
 
+  // Helper function to filter sessions by product (for role modal)
+  const filterSessionsForRoleModal = (sessions: VotingSession[], productId: string): VotingSession[] => {
+    if (!productId) return [];
+    const now = new Date();
+    return sessions.filter(session => {
+      // Filter by product
+      if (session.product_id !== productId) return false;
+      // Only show current and future sessions (not past)
+      const endDate = new Date(session.end_date);
+      return endDate >= now;
+    });
+  };
+
   const handleAddToSession = async () => {
-    if (!selectedUserForRole || !selectedSessionId || !roleModalType) return;
+    if (!selectedUserForRole || !roleModalType) return;
+    
+    // Validate product selection
+    if (!roleModalProductId) {
+      alert('Please select a product first.');
+      return;
+    }
+
+    // Get sessions to add/remove
+    let sessionsToProcess: string[] = [];
+    if (roleModalUseAllSessions) {
+      // Get all current and future sessions for the product
+      const filtered = filterSessionsForRoleModal(
+        getAvailableSessions(roleModalType),
+        roleModalProductId
+      );
+      sessionsToProcess = filtered.map(s => s.id);
+    } else {
+      // Use selected sessions
+      if (roleModalSelectedSessionIds.length === 0) {
+        alert('Please select at least one session.');
+        return;
+      }
+      sessionsToProcess = roleModalSelectedSessionIds;
+    }
+
+    if (sessionsToProcess.length === 0) {
+      alert('No sessions available for this product.');
+      return;
+    }
 
     try {
-      if (roleModalType === 'session-admin') {
-        await db.addSessionAdmin(selectedSessionId, selectedUserForRole.id);
-      } else if (roleModalType === 'stakeholder') {
-        // Use addSessionStakeholderByEmail which handles the stakeholder creation
-        await db.addSessionStakeholderByEmail(selectedSessionId, selectedUserForRole.email, selectedUserForRole.name);
-      } else if (roleModalType === 'remove-stakeholder') {
-        // Remove stakeholder using email
-        await db.removeSessionStakeholder(selectedSessionId, selectedUserForRole.email);
+      // Process each session
+      for (const sessionId of sessionsToProcess) {
+        if (roleModalType === 'session-admin') {
+          await db.addSessionAdmin(sessionId, selectedUserForRole.id);
+        } else if (roleModalType === 'stakeholder') {
+          // Use addSessionStakeholderByEmail which handles the stakeholder creation
+          await db.addSessionStakeholderByEmail(sessionId, selectedUserForRole.email, selectedUserForRole.name);
+        } else if (roleModalType === 'remove-stakeholder') {
+          // Remove stakeholder using email
+          await db.removeSessionStakeholder(sessionId, selectedUserForRole.email);
+        }
       }
       
       // Close modal first
@@ -831,7 +1086,7 @@ export default function UsersManagementScreen() {
       // Show more detailed error message
       const errorMessage = error?.message || error?.toString() || 'Unknown error';
       console.error('Full error details:', error);
-      alert(`Failed to ${roleModalType === 'remove-stakeholder' ? 'remove stakeholder from' : 'add user to'} session.\n\nError: ${errorMessage}\n\nPlease check the console for more details.`);
+      alert(`Failed to ${roleModalType === 'remove-stakeholder' ? 'remove stakeholder from' : 'add user to'} session(s).\n\nError: ${errorMessage}\n\nPlease check the console for more details.`);
     }
   };
 
@@ -1019,6 +1274,64 @@ export default function UsersManagementScreen() {
   const cancelDeleteUser = () => {
     setShowDeleteModal(false);
     setUserToDelete(null);
+  };
+
+  const handleUpdateUser = async () => {
+    if (!userToEdit) return;
+    
+    if (!editingUserName.trim()) {
+      alert('Name is required');
+      return;
+    }
+    
+    if (!editingUserEmail.trim()) {
+      alert('Email is required');
+      return;
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(editingUserEmail.trim())) {
+      alert('Please enter a valid email address');
+      return;
+    }
+    
+    setIsUpdatingUser(true);
+    
+    try {
+      // Update user in Supabase auth.users table (if admin API is available)
+      // Otherwise, update the users table directly
+      const { error: dbError } = await supabase
+        .from('users')
+        .update({
+          name: editingUserName.trim(),
+          email: editingUserEmail.trim().toLowerCase()
+        })
+        .eq('id', userToEdit.id);
+      
+      if (dbError) {
+        throw dbError;
+      }
+      
+      // Update local state
+      setUsers(prevUsers => 
+        prevUsers.map(u => 
+          u.id === userToEdit.id 
+            ? { ...u, name: editingUserName.trim(), email: editingUserEmail.trim().toLowerCase() }
+            : u
+        )
+      );
+      
+      setShowEditUserModal(false);
+      setUserToEdit(null);
+      setEditingUserName('');
+      setEditingUserEmail('');
+    } catch (error) {
+      console.error('Error updating user:', error);
+      alert('Failed to update user. Please try again.');
+    } finally {
+      setIsUpdatingUser(false);
+    }
   };
 
   const openAddUserModal = () => {
@@ -1283,28 +1596,28 @@ export default function UsersManagementScreen() {
   const getRoleBadge = (user: UserWithRoles) => {
     if (user.roles.isSystemAdmin) {
       return (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-          <Crown className="h-3 w-3 mr-1" />
+        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
+          <Crown className="h-3.5 w-3.5 mr-1" />
           System Admin
         </span>
       );
     } else if (user.roles.sessionAdminCount > 0) {
       return (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-[#173B65] text-white">
-          <Shield className="h-3 w-3 mr-1" />
+        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
+          <Shield className="h-3.5 w-3.5 mr-1" />
           Session Admin ({user.roles.sessionAdminCount})
         </span>
       );
     } else if (user.roles.stakeholderSessionCount > 0) {
       return (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-          <UserIcon className="h-3 w-3 mr-1" />
+        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#8B5A4A] text-white">
+          <UserIcon className="h-3.5 w-3.5 mr-1" />
           Stakeholder ({user.roles.stakeholderSessionCount})
         </span>
       );
     } else {
       return (
-        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
           No Role
         </span>
       );
@@ -1521,7 +1834,7 @@ export default function UsersManagementScreen() {
         </div>
 
         {/* Mobile: Card View */}
-        <div className="md:hidden space-y-3 relative z-10">
+        <div className="md:hidden space-y-3 relative z-10 overflow-visible">
           {filteredUsers.length === 0 ? (
             <div className="bg-white rounded-lg shadow-md p-8 text-center text-gray-500">
               {searchQuery || filterRole !== 'all' 
@@ -1530,7 +1843,7 @@ export default function UsersManagementScreen() {
             </div>
           ) : (
             filteredUsers.map((user) => (
-              <div key={user.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+              <div key={user.id} className="bg-white rounded-lg shadow-md overflow-visible">
                 {/* Card Header */}
                 <div className="p-4 border-b border-gray-100">
                   <div className="flex justify-between items-start mb-2">
@@ -1556,30 +1869,6 @@ export default function UsersManagementScreen() {
                       <p className="text-sm text-gray-500 truncate">{user.email}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {(viewMode === 'system-admin' || 
-                        (viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
-                         user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && (
-                        <button
-                          onClick={() => handleDeleteUser(user.id, user.name)}
-                          className={`p-2 rounded-md hover:bg-red-50 transition-colors ${
-                            user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id)) 
-                              ? 'opacity-50 cursor-not-allowed' 
-                              : ''
-                          }`}
-                          disabled={user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))}
-                          title={
-                            viewMode === 'session-admin'
-                              ? 'Remove stakeholder from all your sessions'
-                              : protectedUserIds.has(user.id)
-                              ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
-                              : user.id === currentUser?.id 
-                              ? 'Cannot delete your own account' 
-                              : 'Delete user'
-                          }
-                        >
-                          <Trash2 className="h-5 w-5 text-red-600" />
-                        </button>
-                      )}
                       <div 
                         className="relative"
                         ref={(el) => { dropdownRefs.current[user.id] = el; }}
@@ -1596,7 +1885,24 @@ export default function UsersManagementScreen() {
                         </button>
                         
                         {openDropdown === user.id && user.id !== currentUser?.id && (
-                          <div className="absolute right-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                          <div 
+                            className="fixed md:absolute md:right-0 md:mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]" 
+                            style={(() => {
+                              const ref = dropdownRefs.current[user.id];
+                              if (!ref) return {};
+                              const rect = ref.getBoundingClientRect();
+                              if (window.innerWidth < 768) {
+                                // Mobile: use fixed positioning
+                                return {
+                                  top: `${rect.bottom + 4}px`,
+                                  right: `${window.innerWidth - rect.right + 4}px`,
+                                  left: 'auto'
+                                };
+                              }
+                              // Desktop: use absolute positioning (default)
+                              return {};
+                            })()}
+                          >
                             <div className="py-1">
                               <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-200">
                                 Change User Role
@@ -1619,7 +1925,7 @@ export default function UsersManagementScreen() {
                                   ) : (
                                     <button
                                       onClick={() => handleToggleSystemAdmin(user.id, false)}
-                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-purple-50 text-purple-700"
+                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-[#C89212]/10 text-[#C89212]"
                                     >
                                       <Crown className="h-5 w-5 mr-3 flex-shrink-0" />
                                       <div>
@@ -1633,7 +1939,7 @@ export default function UsersManagementScreen() {
                                   {canAddToMoreSessions(user, 'session-admin') && (
                                     <button
                                       onClick={() => openRoleModal(user, 'session-admin')}
-                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-[#E8EDF2] text-[#2D4660] border-t border-gray-200"
+                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-[#576C71]/10 text-[#576C71] border-t border-gray-200"
                                     >
                                       <Shield className="h-5 w-5 mr-3 flex-shrink-0" />
                                       <div>
@@ -1649,7 +1955,7 @@ export default function UsersManagementScreen() {
                               {canAddToMoreSessions(user, 'stakeholder') && (
                                 <button
                                   onClick={() => openRoleModal(user, 'stakeholder')}
-                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-green-50 text-green-700 border-t border-gray-200"
+                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200"
                                 >
                                   <UserIcon className="h-5 w-5 mr-3 flex-shrink-0" />
                                   <div>
@@ -1687,6 +1993,73 @@ export default function UsersManagementScreen() {
                                   </div>
                                 </button>
                               )}
+
+                              {/* User Functions header */}
+                              {((viewMode === 'system-admin') || 
+                                ((viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
+                                  user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
+                                 !protectedEmails.has(user.email)) && (
+                                <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
+                                  User Functions
+                                </div>
+                              )}
+
+                              {/* Edit User - only for system admins - moved to bottom */}
+                              {viewMode === 'system-admin' && (
+                                <button
+                                  onClick={() => {
+                                    setUserToEdit(user);
+                                    setEditingUserName(user.name);
+                                    setEditingUserEmail(user.email);
+                                    setShowEditUserModal(true);
+                                    setOpenDropdown(null);
+                                  }}
+                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-[#1E5461]/10 text-[#1E5461] border-t border-gray-200"
+                                >
+                                  <Edit className="h-5 w-5 mr-3 flex-shrink-0" />
+                                  <div>
+                                    <div className="font-medium text-base">Edit User Profile</div>
+                                    <div className="text-xs text-gray-500">Update name and email</div>
+                                  </div>
+                                </button>
+                              )}
+
+                              {/* Delete User - moved to bottom */}
+                              {(viewMode === 'system-admin' || 
+                                (viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
+                                 user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
+                                !protectedEmails.has(user.email) && (
+                                <button
+                                  onClick={() => {
+                                    setOpenDropdown(null);
+                                    handleDeleteUser(user.id, user.name);
+                                  }}
+                                  className={`w-full px-4 py-3 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200 ${
+                                    user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))
+                                      ? 'opacity-50 cursor-not-allowed' 
+                                      : ''
+                                  }`}
+                                  disabled={user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))}
+                                >
+                                  <Trash2 className="h-5 w-5 mr-3 flex-shrink-0" />
+                                  <div>
+                                    <div className="font-medium text-base">
+                                      {viewMode === 'session-admin'
+                                        ? 'Remove Stakeholder'
+                                        : 'Delete User'}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {viewMode === 'session-admin'
+                                        ? 'Remove from all your sessions'
+                                        : user.id === currentUser?.id 
+                                        ? 'Cannot delete your own account'
+                                        : protectedUserIds.has(user.id)
+                                        ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
+                                        : 'Permanently delete this user'}
+                                    </div>
+                                  </div>
+                                </button>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1705,25 +2078,163 @@ export default function UsersManagementScreen() {
                     <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Sessions</div>
                     <div className="space-y-1">
                       {user.roles.sessionAdminCount > 0 && (
-                        <div 
-                          className="flex items-center text-sm cursor-help"
-                          title={user.adminInSessions && user.adminInSessions.length > 0 
-                            ? `Admin in: ${user.adminInSessions.map(s => s.title || s.name || 'Unnamed Session').join(', ')}` 
-                            : 'Loading session details...'}
-                        >
-                          <Shield className="h-4 w-4 mr-2 text-[#2D4660] flex-shrink-0" />
-                          <span className="text-gray-700">{user.roles.sessionAdminCount} as Admin</span>
+                        <div className="space-y-1">
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium" style={{ borderColor: '#576C71', color: '#576C71' }}>
+                            <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#576C71', color: '#576C71' }} />
+                            <span>{user.roles.sessionAdminCount} as Session Admin</span>
+                          </div>
+                          {user.adminInSessions && user.adminInSessions.length > 0 && (
+                            <>
+                              {(() => {
+                                const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
+                                // Always show at least one session - prefer active, otherwise first session
+                                const sessionToShow = mostRecentActive || user.adminInSessions[0];
+                                const hasMoreSessions = user.adminInSessions.length > 1;
+                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
+                                
+                                return (
+                                  <>
+                                    {sessionToShow && (
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await setCurrentSession(sessionToShow);
+                                          navigate('/admin');
+                                        }}
+                                        className="ml-6 text-left text-sm text-gray-700 hover:text-gray-900 hover:underline"
+                                      >
+                                        <div>{sessionToShow.title || 'Unnamed Session'}</div>
+                                        <div className="text-xs text-gray-500 mt-0.5">
+                                          {formatSessionDateRange(sessionToShow)}
+                                        </div>
+                                      </button>
+                                    )}
+                                    {hasMoreSessions && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isExpanded) {
+                                            setExpandedSessions(null);
+                                          } else {
+                                            setExpandedSessions({ userId: user.id, role: 'admin' });
+                                          }
+                                        }}
+                                        className="ml-6 text-xs text-gray-500 hover:text-gray-700 hover:underline mt-1 block flex items-center gap-1.5"
+                                        style={{ minWidth: '70px' }}
+                                      >
+                                        <span className="inline-flex items-center justify-center w-4 h-4 border border-gray-400 rounded text-gray-600">
+                                          {isExpanded ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+                                        </span>
+                                        {isExpanded ? 'Hide' : 'Show'}
+                                      </button>
+                                    )}
+                                    {isExpanded && (
+                                      <div className="ml-6 mt-1 space-y-1">
+                                        {user.adminInSessions
+                                          .filter(s => s.id !== sessionToShow?.id)
+                                          .map(session => (
+                                            <button
+                                              key={session.id}
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                await setCurrentSession(session);
+                                                navigate('/admin');
+                                              }}
+                                              className="block text-sm text-left text-gray-700 hover:text-gray-900 hover:underline w-full"
+                                            >
+                                              <div>{session.title || 'Unnamed Session'}</div>
+                                              <div className="text-xs text-gray-500 mt-0.5">
+                                                {formatSessionDateRange(session)}
+                                              </div>
+                                            </button>
+                                          ))}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </>
+                          )}
                         </div>
                       )}
                       {user.roles.stakeholderSessionCount > 0 && (
-                        <div 
-                          className="flex items-center text-sm cursor-help"
-                          title={user.stakeholderInSessions && user.stakeholderInSessions.length > 0 
-                            ? `Stakeholder in: ${user.stakeholderInSessions.map(s => s.title || s.name || 'Unnamed Session').join(', ')}` 
-                            : 'Loading session details...'}
-                        >
-                          <UserIcon className="h-4 w-4 mr-2 text-green-500 flex-shrink-0" />
-                          <span className="text-gray-700">{user.roles.stakeholderSessionCount} as Stakeholder</span>
+                        <div className="space-y-1">
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium" style={{ borderColor: '#8B5A4A', color: '#8B5A4A' }}>
+                            <UserIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#8B5A4A', color: '#8B5A4A' }} />
+                            <span>{user.roles.stakeholderSessionCount} as Stakeholder</span>
+                          </div>
+                          {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
+                            <>
+                              {(() => {
+                                const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
+                                // Always show at least one session - prefer active, otherwise first session
+                                const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
+                                const hasMoreSessions = user.stakeholderInSessions.length > 1;
+                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
+                                
+                                return (
+                                  <>
+                                    {sessionToShow && (
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await setCurrentSession(sessionToShow);
+                                          navigate('/admin');
+                                        }}
+                                        className="ml-6 text-left text-sm text-gray-700 hover:text-gray-900 hover:underline"
+                                      >
+                                        <div>{sessionToShow.title || 'Unnamed Session'}</div>
+                                        <div className="text-xs text-gray-500 mt-0.5">
+                                          {formatSessionDateRange(sessionToShow)}
+                                        </div>
+                                      </button>
+                                    )}
+                                    {hasMoreSessions && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isExpanded) {
+                                            setExpandedSessions(null);
+                                          } else {
+                                            setExpandedSessions({ userId: user.id, role: 'stakeholder' });
+                                          }
+                                        }}
+                                        className="ml-6 text-xs text-gray-500 hover:text-gray-700 hover:underline mt-1 block flex items-center gap-1.5"
+                                        style={{ minWidth: '70px' }}
+                                      >
+                                        <span className="inline-flex items-center justify-center w-4 h-4 border border-gray-400 rounded text-gray-600">
+                                          {isExpanded ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+                                        </span>
+                                        {isExpanded ? 'Hide' : 'Show'}
+                                      </button>
+                                    )}
+                                    {isExpanded && (
+                                      <div className="ml-6 mt-1 space-y-1">
+                                        {user.stakeholderInSessions
+                                          .filter(s => s.id !== sessionToShow?.id)
+                                          .map(session => (
+                                            <button
+                                              key={session.id}
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                await setCurrentSession(session);
+                                                navigate('/admin');
+                                              }}
+                                              className="block text-sm text-left text-gray-700 hover:text-gray-900 hover:underline w-full"
+                                            >
+                                              <div>{session.title || 'Unnamed Session'}</div>
+                                              <div className="text-xs text-gray-500 mt-0.5">
+                                                {formatSessionDateRange(session)}
+                                              </div>
+                                            </button>
+                                          ))}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </>
+                          )}
                         </div>
                       )}
                       {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
@@ -1732,21 +2243,107 @@ export default function UsersManagementScreen() {
                     </div>
                   </div>
 
-                  {/* Created Date */}
+                  {/* Created/Assigned Date */}
                   <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Created</div>
-                    <div className="flex items-center text-sm text-gray-700">
-                      <Calendar className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
-                      {user.created_at ? formatDate(user.created_at) : 'N/A'}
-                    </div>
-                  </div>
-
-                  {/* Created By */}
-                  <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Created By</div>
-                    <div className="flex items-center text-sm text-gray-700">
-                      <UserIcon className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
-                      {user.created_by_name || 'System'}
+                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Assigned</div>
+                    <div className="space-y-2">
+                      {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
+                        <div className="flex items-center text-sm text-gray-700">
+                          <Calendar className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
+                          <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
+                          <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
+                        </div>
+                      )}
+                      
+                      {user.adminInSessions && user.adminInSessions.length > 0 && (
+                        <div className="space-y-3">
+                          {(() => {
+                            const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
+                            const sessionToShow = mostRecentActive || user.adminInSessions[0];
+                            const hasMoreSessions = user.adminInSessions.length > 1;
+                            const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
+                            
+                            return (
+                              <>
+                                {sessionToShow && (
+                                  <div className="ml-5 space-y-1">
+                                    <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
+                                      <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                      <span>{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-500 ml-5">
+                                      by {sessionToShow.assignedByName || 'System'}
+                                    </div>
+                                  </div>
+                                )}
+                                {isExpanded && (
+                                  <div className="ml-5 mt-2 space-y-3">
+                                    {user.adminInSessions
+                                      .filter(s => s.id !== sessionToShow?.id)
+                                      .map(session => (
+                                        <div key={session.id} className="space-y-1">
+                                          <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
+                                            <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                            <span>{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-500 ml-5">
+                                            by {session.assignedByName || 'System'}
+                                          </div>
+                                        </div>
+                                      ))}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      
+                      {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
+                        <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-4 border-t border-gray-100 mt-4' : ''}>
+                          <div className="space-y-3">
+                            {(() => {
+                              const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
+                              const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
+                              const hasMoreSessions = user.stakeholderInSessions.length > 1;
+                              const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
+                              
+                              return (
+                                <>
+                                  {sessionToShow && (
+                                    <div className="ml-5 space-y-1">
+                                      <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
+                                        <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                        <span>{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
+                                      </div>
+                                      <div className="text-xs text-gray-500 ml-5">
+                                        by {sessionToShow.assignedByName || 'System'}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {isExpanded && (
+                                    <div className="ml-5 mt-2 space-y-3">
+                                      {user.stakeholderInSessions
+                                        .filter(s => s.id !== sessionToShow?.id)
+                                        .map(session => (
+                                          <div key={session.id} className="space-y-1">
+                                            <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
+                                              <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                              <span>{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
+                                            </div>
+                                            <div className="text-xs text-gray-500 ml-5">
+                                              by {session.assignedByName || 'System'}
+                                            </div>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1769,7 +2366,7 @@ export default function UsersManagementScreen() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Sessions
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
                     Created
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1790,11 +2387,11 @@ export default function UsersManagementScreen() {
                   filteredUsers.map((user) => (
                     <tr 
                       key={user.id} 
-                      className="hover:bg-gray-50"
+                      className="hover:bg-gray-50 relative"
                       onMouseEnter={() => setHoveredRow(user.id)}
                       onMouseLeave={() => setHoveredRow(null)}
                     >
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap align-top">
                         <div>
                           <div className="text-sm font-medium text-gray-900">
                             {user.name}
@@ -1817,10 +2414,10 @@ export default function UsersManagementScreen() {
                           <div className="text-sm text-gray-500">{user.email}</div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap align-top">
                         {getRoleBadge(user)}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
+                      <td className="px-6 py-4 text-sm text-gray-500 align-top relative overflow-visible">
                         <div className="space-y-2">
                           {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
                             <span className="text-gray-400">None</span>
@@ -1828,109 +2425,464 @@ export default function UsersManagementScreen() {
                           
                           {user.adminInSessions && user.adminInSessions.length > 0 && (
                             <div>
-                              <div className="flex items-center text-sm font-medium text-gray-700 mb-1.5">
-                                <Shield className="h-4 w-4 mr-1.5 text-[#173B65]" />
-                                Admin in {user.adminInSessions.length} session{user.adminInSessions.length !== 1 ? 's' : ''}:
-                              </div>
-                              <div className="space-y-1.5 ml-5">
-                                {user.adminInSessions.map(session => (
-                                  <div key={session.id} className="flex items-start">
-                                    <div className="text-xs text-gray-600">
-                                      <div className="font-medium text-gray-900">{session.title || session.name || 'Unnamed Session'}</div>
-                                      {session.created_at && (
-                                        <div className="flex items-center text-gray-500 mt-0.5">
-                                          <Calendar className="h-3 w-3 mr-1" />
-                                          {new Date(session.created_at).toLocaleDateString('en-US', { 
-                                            month: 'short', 
-                                            day: 'numeric', 
-                                            year: 'numeric' 
-                                          })}
-                                        </div>
+                              <div className="mb-2">
+                                {(() => {
+                                  const sessionCount = user.adminInSessions?.length || 0;
+                                  const hasMoreSessions = sessionCount > 1;
+                                  const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
+                                  const BadgeContent = () => (
+                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium group" style={{ borderColor: '#576C71', color: '#576C71' }}>
+                                      <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#576C71', color: '#576C71' }} />
+                                      <span>Session Admin in {sessionCount} session{sessionCount !== 1 ? 's' : ''}</span>
+                                      {hasMoreSessions && (
+                                        <span className="inline-flex items-baseline gap-0.5" style={{ color: '#576C71' }}>
+                                          {isExpanded ? (
+                                            <Minus 
+                                              className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
+                                              style={{ color: '#576C71' }}
+                                            />
+                                          ) : (
+                                            <Plus 
+                                              className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
+                                              style={{ color: '#576C71' }}
+                                            />
+                                          )}
+                                          <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
+                                        </span>
                                       )}
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                  
+                                  return hasMoreSessions ? (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isExpanded) {
+                                          setExpandedSessions(null);
+                                        } else {
+                                          setExpandedSessions({ userId: user.id, role: 'admin' });
+                                        }
+                                      }}
+                                      className="text-left"
+                                    >
+                                      <BadgeContent />
+                                    </button>
+                                  ) : (
+                                    <BadgeContent />
+                                  );
+                                })()}
                               </div>
+                              {(() => {
+                                const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
+                                // Always show at least one session - prefer active, otherwise first session
+                                const sessionToShow = mostRecentActive || user.adminInSessions[0];
+                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
+                                
+                                return (
+                                  <>
+                                    {sessionToShow && (
+                                      <div 
+                                        className="relative cursor-pointer"
+                                        style={{ marginLeft: '1.25rem', marginTop: '0.75rem' }}
+                                        onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
+                                        onMouseLeave={() => setHoveredSessionId(null)}
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await setCurrentSession(sessionToShow);
+                                          navigate('/admin');
+                                        }}
+                                      >
+                                        {hoveredSessionId === `${user.id}-${sessionToShow.id}` && (
+                                          <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
+                                            style={{ 
+                                              left: '-0.5rem', 
+                                              right: '-13rem',
+                                              top: '-0.375rem',
+                                              bottom: '-0.375rem',
+                                              boxShadow: '0 0 0 1px rgb(191 219 254)',
+                                              outline: 'none'
+                                            }}
+                                          />
+                                        )}
+                                        <div className="text-left text-sm text-gray-700 hover:text-gray-900 block relative z-10"
+                                          style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
+                                        >
+                                          <div style={{ height: '20px', lineHeight: '20px' }}>{sessionToShow.title || 'Unnamed Session'}</div>
+                                          <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
+                                            {formatSessionDateRange(sessionToShow)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {isExpanded && (
+                                      <div style={{ marginTop: '0.5rem' }}>
+                                        {user.adminInSessions
+                                          .filter(s => s.id !== sessionToShow?.id)
+                                          .map((session, index) => (
+                                            <div
+                                              key={session.id}
+                                              className="relative cursor-pointer"
+                                              style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem' }}
+                                              onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
+                                              onMouseLeave={() => setHoveredSessionId(null)}
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                await setCurrentSession(session);
+                                                navigate('/admin');
+                                              }}
+                                            >
+                                              {hoveredSessionId === `${user.id}-${session.id}` && (
+                                                <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
+                                                  style={{ 
+                                                    left: '-0.5rem', 
+                                                    right: '-13rem',
+                                                    top: '-0.375rem',
+                                                    bottom: '-0.375rem',
+                                                    boxShadow: '0 0 0 1px rgb(191 219 254)',
+                                                    outline: 'none'
+                                                  }}
+                                                />
+                                              )}
+                                              <div className="block text-sm text-left text-gray-700 hover:text-gray-900 relative z-10"
+                                                style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
+                                              >
+                                                <div style={{ height: '20px', lineHeight: '20px' }}>{session.title || 'Unnamed Session'}</div>
+                                                <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
+                                                  {formatSessionDateRange(session)}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           )}
                           
                           {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
-                            <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-2 border-t border-gray-100' : ''}>
-                              <div className="flex items-center text-sm font-medium text-gray-700 mb-1.5">
-                                <UserIcon className="h-4 w-4 mr-1.5 text-green-600" />
-                                Stakeholder in {user.stakeholderInSessions.length} session{user.stakeholderInSessions.length !== 1 ? 's' : ''}:
-                              </div>
-                              <div className="space-y-1.5 ml-5">
-                                {user.stakeholderInSessions.map(session => (
-                                  <div key={session.id} className="flex items-start">
-                                    <div className="text-xs text-gray-600">
-                                      <div className="font-medium text-gray-900">{session.title || session.name || 'Unnamed Session'}</div>
-                                      {session.created_at && (
-                                        <div className="flex items-center text-gray-500 mt-0.5">
-                                          <Calendar className="h-3 w-3 mr-1" />
-                                          {new Date(session.created_at).toLocaleDateString('en-US', { 
-                                            month: 'short', 
-                                            day: 'numeric', 
-                                            year: 'numeric' 
-                                          })}
+                            <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-4 border-t border-gray-100 mt-4' : ''}>
+                              <div>
+                                <div className="mb-2">
+                                  {(() => {
+                                    const sessionCount = user.stakeholderInSessions?.length || 0;
+                                    const hasMoreSessions = sessionCount > 1;
+                                    const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
+                                    const BadgeContent = () => (
+                                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium group" style={{ borderColor: '#8B5A4A', color: '#8B5A4A' }}>
+                                        <UserIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#8B5A4A', color: '#8B5A4A' }} />
+                                        <span>Stakeholder in {sessionCount} session{sessionCount !== 1 ? 's' : ''}</span>
+                                        {hasMoreSessions && (
+                                          <span className="inline-flex items-baseline gap-0.5" style={{ color: '#8B5A4A' }}>
+                                            {isExpanded ? (
+                                              <Minus 
+                                                className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
+                                                style={{ color: '#8B5A4A' }}
+                                              />
+                                            ) : (
+                                              <Plus 
+                                                className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
+                                                style={{ color: '#8B5A4A' }}
+                                              />
+                                            )}
+                                            <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                    
+                                    return hasMoreSessions ? (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isExpanded) {
+                                            setExpandedSessions(null);
+                                          } else {
+                                            setExpandedSessions({ userId: user.id, role: 'stakeholder' });
+                                          }
+                                        }}
+                                        className="text-left"
+                                      >
+                                        <BadgeContent />
+                                      </button>
+                                    ) : (
+                                      <BadgeContent />
+                                    );
+                                  })()}
+                                </div>
+                                {(() => {
+                                  const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
+                                  // Always show at least one session - prefer active, otherwise first session
+                                  const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
+                                  const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
+                                  
+                                  return (
+                                    <>
+                                      {sessionToShow && (
+                                        <div 
+                                          className="relative cursor-pointer"
+                                          style={{ marginLeft: '1.25rem', marginTop: '0.75rem' }}
+                                          onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
+                                          onMouseLeave={() => setHoveredSessionId(null)}
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            await setCurrentSession(sessionToShow);
+                                            navigate('/admin');
+                                          }}
+                                        >
+                                          {hoveredSessionId === `${user.id}-${sessionToShow.id}` && (
+                                            <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
+                                              style={{ 
+                                                left: '-0.5rem', 
+                                                right: '-13rem',
+                                                top: '-0.25rem',
+                                                bottom: '-0.25rem',
+                                                boxShadow: '0 0 0 1px rgb(191 219 254)',
+                                                outline: 'none'
+                                              }}
+                                            />
+                                          )}
+                                          <div className="text-left text-sm text-gray-700 hover:text-gray-900 hover:underline block relative z-10"
+                                            style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
+                                          >
+                                            <div style={{ height: '20px', lineHeight: '20px' }}>{sessionToShow.title || 'Unnamed Session'}</div>
+                                            <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
+                                              {formatSessionDateRange(sessionToShow)}
+                                            </div>
+                                          </div>
                                         </div>
                                       )}
-                                    </div>
-                                  </div>
-                                ))}
+                                      {isExpanded && (
+                                        <div style={{ marginTop: '0.5rem' }}>
+                                          {user.stakeholderInSessions
+                                            .filter(s => s.id !== sessionToShow?.id)
+                                            .map((session, index) => (
+                                              <div
+                                                key={session.id}
+                                                className="relative cursor-pointer"
+                                                style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem' }}
+                                                onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
+                                                onMouseLeave={() => setHoveredSessionId(null)}
+                                                onClick={async (e) => {
+                                                  e.stopPropagation();
+                                                  await setCurrentSession(session);
+                                                  navigate('/admin');
+                                                }}
+                                              >
+                                                {hoveredSessionId === `${user.id}-${session.id}` && (
+                                                  <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
+                                                    style={{ 
+                                                      left: '-0.5rem', 
+                                                      right: '-13rem',
+                                                      top: '-0.25rem',
+                                                      bottom: '-0.25rem',
+                                                      boxShadow: '0 0 0 1px rgb(191 219 254)',
+                                                      outline: 'none'
+                                                    }}
+                                                  />
+                                                )}
+                                                <div className="block text-sm text-left text-gray-700 hover:text-gray-900 hover:underline relative z-10"
+                                                  style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
+                                                >
+                                                  <div style={{ height: '20px', lineHeight: '20px' }}>{session.title || 'Unnamed Session'}</div>
+                                                  <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
+                                                    {formatSessionDateRange(session)}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </div>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        <div>
-                          <div className="flex items-center text-gray-700">
-                            <Calendar className="h-4 w-4 mr-1.5 text-gray-400" />
-                            {user.created_at ? formatDate(user.created_at) : 'N/A'}
-                          </div>
-                          <div className="flex items-center text-gray-500 text-xs mt-1">
-                            <UserIcon className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
-                            {user.created_by_name || 'System'}
-                          </div>
+                      <td className="px-6 py-4 text-sm text-gray-500 align-top w-48 relative overflow-visible">
+                        <div className="space-y-2">
+                          {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
+                            <div className="flex items-center text-gray-700 whitespace-nowrap">
+                              <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
+                              <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
+                              <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
+                            </div>
+                          )}
+                          
+                          {user.adminInSessions && user.adminInSessions.length > 0 && (
+                            <div>
+                              {/* User creation date - positioned to align with badge */}
+                              <div className="flex items-center text-gray-700 whitespace-nowrap" style={{ marginBottom: '0.5rem', height: '30px' }}>
+                                <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
+                                <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
+                                <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
+                              </div>
+                              {(() => {
+                                const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
+                                const sessionToShow = mostRecentActive || user.adminInSessions[0];
+                                const hasMoreSessions = user.adminInSessions.length > 1;
+                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
+                                
+                                return (
+                                  <>
+                                    {sessionToShow && (
+                                      <div 
+                                        className="relative cursor-pointer"
+                                        style={{ marginLeft: '1.25rem', marginTop: '0.5rem', marginBottom: '0.25rem' }}
+                                        onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
+                                        onMouseLeave={() => setHoveredSessionId(null)}
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await setCurrentSession(sessionToShow);
+                                          navigate('/admin');
+                                        }}
+                                      >
+                                        <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
+                                          <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
+                                            <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                            <span className="text-xs text-gray-700 whitespace-nowrap">{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
+                                            by {sessionToShow.assignedByName || 'System'}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {isExpanded && (
+                                      <div style={{ marginTop: '0.5rem' }}>
+                                        {user.adminInSessions
+                                          .filter(s => s.id !== sessionToShow?.id)
+                                          .map((session, index) => (
+                                            <div 
+                                              key={session.id} 
+                                              className="relative cursor-pointer"
+                                              style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem', marginBottom: '0.25rem' }}
+                                              onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
+                                              onMouseLeave={() => setHoveredSessionId(null)}
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                await setCurrentSession(session);
+                                                navigate('/admin');
+                                              }}
+                                            >
+                                              <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
+                                                <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
+                                                  <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                                  <span className="text-xs text-gray-700 whitespace-nowrap">{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
+                                                </div>
+                                                <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
+                                                  by {session.assignedByName || 'System'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          )}
+                          
+                          {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
+                            <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-4 border-t border-gray-100 mt-4' : ''}>
+                              <div>
+                                {/* User creation date - only show if no admin sessions (to avoid duplication) */}
+                                {(!user.adminInSessions || user.adminInSessions.length === 0) && (
+                                  <div className="flex items-center text-gray-700 whitespace-nowrap" style={{ marginBottom: '0.5rem', height: '30px' }}>
+                                    <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
+                                    <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
+                                    <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
+                                  </div>
+                                )}
+                                {/* Invisible spacer to match Stakeholder badge height + mb-2 when admin sessions exist */}
+                                {user.adminInSessions && user.adminInSessions.length > 0 && (
+                                  <div style={{ height: '26px', marginBottom: '0.5rem', visibility: 'hidden' }}>
+                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium">
+                                      <UserIcon className="h-3.5 w-3.5" />
+                                      <span>Stakeholder</span>
+                                    </div>
+                                  </div>
+                                )}
+                                {(() => {
+                                  const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
+                                  const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
+                                  const hasMoreSessions = user.stakeholderInSessions.length > 1;
+                                  const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
+                                  
+                                  return (
+                                    <>
+                                      {sessionToShow && (
+                                        <div 
+                                          className="relative cursor-pointer"
+                                          style={{ marginLeft: '1.25rem', marginTop: '0.5rem', marginBottom: '0.25rem' }}
+                                          onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
+                                          onMouseLeave={() => setHoveredSessionId(null)}
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            await setCurrentSession(sessionToShow);
+                                            navigate('/admin');
+                                          }}
+                                        >
+                                        <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
+                                          <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
+                                            <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                            <span className="text-xs text-gray-700 whitespace-nowrap">{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
+                                            by {sessionToShow.assignedByName || 'System'}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {isExpanded && (
+                                      <div style={{ marginTop: '0.5rem' }}>
+                                        {user.stakeholderInSessions
+                                          .filter(s => s.id !== sessionToShow?.id)
+                                          .map((session, index) => (
+                                              <div 
+                                                key={session.id} 
+                                                className="relative cursor-pointer"
+                                                style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem', marginBottom: '0.25rem' }}
+                                                onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
+                                                onMouseLeave={() => setHoveredSessionId(null)}
+                                                onClick={async (e) => {
+                                                  e.stopPropagation();
+                                                  await setCurrentSession(session);
+                                                  navigate('/admin');
+                                                }}
+                                              >
+                                                <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
+                                                  <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
+                                                    <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
+                                                    <span className="text-xs text-gray-700 whitespace-nowrap">{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
+                                                  </div>
+                                                  <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
+                                                    by {session.assignedByName || 'System'}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                         <div className="flex items-center justify-end gap-2">
-                          {(viewMode === 'system-admin' || 
-                            (viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
-                             user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && (
-                            <button
-                              onClick={() => handleDeleteUser(user.id, user.name)}
-                              className={`p-2 rounded-md hover:bg-red-50 transition-all md:transition-opacity ${
-                                user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))
-                                  ? 'opacity-50 cursor-not-allowed' 
-                                  : hoveredRow === user.id 
-                                    ? 'opacity-100 visible' 
-                                    : 'md:opacity-0 md:invisible opacity-100 visible'
-                              }`}
-                              disabled={user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))}
-                              title={
-                                viewMode === 'session-admin'
-                                  ? 'Remove stakeholder from all your sessions'
-                                  : protectedUserIds.has(user.id)
-                                  ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
-                                  : user.id === currentUser?.id 
-                                  ? 'Cannot delete your own account' 
-                                  : 'Delete user'
-                              }
-                            >
-                              <Trash2 className="h-5 w-5 text-red-600" />
-                            </button>
-                          )}
-
                           <div 
                             className={`relative inline-block transition-all md:transition-opacity ${
-                              user.id === currentUser?.id 
-                                ? 'opacity-50' 
-                                : hoveredRow === user.id 
-                                  ? 'opacity-100 visible' 
-                                  : 'md:opacity-0 md:invisible opacity-100 visible'
+                              hoveredRow === user.id 
+                                ? user.id === currentUser?.id ? 'opacity-50 visible' : 'opacity-100 visible'
+                                : 'md:opacity-0 md:invisible opacity-100 visible'
                             }`}
                             ref={(el) => { dropdownRefs.current[user.id] = el; }}
                           >
@@ -1971,7 +2923,7 @@ export default function UsersManagementScreen() {
                                       ) : (
                                         <button
                                           onClick={() => handleToggleSystemAdmin(user.id, false)}
-                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-purple-50 text-purple-700"
+                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-[#C89212]/10 text-[#C89212]"
                                         >
                                           <Crown className="h-4 w-4 mr-3" />
                                           <div>
@@ -1984,7 +2936,7 @@ export default function UsersManagementScreen() {
                                       {canAddToMoreSessions(user, 'session-admin') && (
                                         <button
                                           onClick={() => openRoleModal(user, 'session-admin')}
-                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-[#E8EDF2] text-[#2D4660] border-t border-gray-200"
+                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-[#576C71]/10 text-[#576C71] border-t border-gray-200"
                                         >
                                           <Shield className="h-4 w-4 mr-3" />
                                           <div>
@@ -1999,7 +2951,7 @@ export default function UsersManagementScreen() {
                                   {canAddToMoreSessions(user, 'stakeholder') && (
                                     <button
                                       onClick={() => openRoleModal(user, 'stakeholder')}
-                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-green-50 text-green-700 border-t border-gray-200"
+                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200"
                                     >
                                       <UserIcon className="h-4 w-4 mr-3" />
                                       <div>
@@ -2036,6 +2988,73 @@ export default function UsersManagementScreen() {
                                       </div>
                                     </button>
                                   )}
+
+                                  {/* User Functions header */}
+                                  {((viewMode === 'system-admin') || 
+                                    ((viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
+                                      user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
+                                     !protectedEmails.has(user.email)) && (
+                                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
+                                      User Functions
+                                    </div>
+                                  )}
+
+                                  {/* Edit User - only for system admins - moved to bottom */}
+                                  {viewMode === 'system-admin' && (
+                                    <button
+                                      onClick={() => {
+                                        setUserToEdit(user);
+                                        setEditingUserName(user.name);
+                                        setEditingUserEmail(user.email);
+                                        setShowEditUserModal(true);
+                                        setOpenDropdown(null);
+                                      }}
+                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-[#1E5461]/10 text-[#1E5461] border-t border-gray-200"
+                                    >
+                                      <Edit className="h-4 w-4 mr-3" />
+                                      <div>
+                                        <div className="font-medium">Edit User Profile</div>
+                                        <div className="text-xs text-gray-500">Update name and email</div>
+                                      </div>
+                                    </button>
+                                  )}
+
+                                  {/* Delete User - moved to bottom */}
+                                  {(viewMode === 'system-admin' || 
+                                    (viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
+                                     user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
+                                    !protectedEmails.has(user.email) && (
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdown(null);
+                                        handleDeleteUser(user.id, user.name);
+                                      }}
+                                      className={`w-full px-4 py-2 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200 ${
+                                        user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))
+                                          ? 'opacity-50 cursor-not-allowed' 
+                                          : ''
+                                      }`}
+                                      disabled={user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))}
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-3" />
+                                      <div>
+                                        <div className="font-medium">
+                                          {viewMode === 'session-admin'
+                                            ? 'Remove Stakeholder'
+                                            : 'Delete User'}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          {viewMode === 'session-admin'
+                                            ? 'Remove from all your sessions'
+                                            : user.id === currentUser?.id 
+                                            ? 'Cannot delete your own account'
+                                            : protectedUserIds.has(user.id)
+                                            ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
+                                            : 'Permanently delete this user'}
+                                        </div>
+                                      </div>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -2056,15 +3075,15 @@ export default function UsersManagementScreen() {
                 <span className="text-gray-600">Total Users: <strong>{users.length}</strong></span>
               </div>
               <div className="flex items-center">
-                <Crown className="h-4 w-4 mr-2 text-purple-500" />
+                <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
                 <span className="text-gray-600">System Admins: <strong>{users.filter(u => u.roles.isSystemAdmin).length}</strong></span>
               </div>
               <div className="flex items-center">
-                <Shield className="h-4 w-4 mr-2 text-[#2D4660]" />
+                <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
                 <span className="text-gray-600">Session Admins: <strong>{users.filter(u => u.roles.sessionAdminCount > 0).length}</strong></span>
               </div>
               <div className="flex items-center">
-                <UserIcon className="h-4 w-4 mr-2 text-green-500" />
+                <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
                 <span className="text-gray-600">Stakeholders: <strong>{users.filter(u => u.roles.stakeholderSessionCount > 0).length}</strong></span>
               </div>
             </div>
@@ -2082,21 +3101,21 @@ export default function UsersManagementScreen() {
               </div>
             </div>
             <div className="flex items-center">
-              <Crown className="h-5 w-5 mr-2 text-purple-500 flex-shrink-0" />
+              <Crown className="h-5 w-5 mr-2 text-[#C89212] flex-shrink-0" />
               <div>
                 <div className="text-xs text-gray-500">Sys Admins</div>
                 <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.isSystemAdmin).length}</div>
               </div>
             </div>
             <div className="flex items-center">
-              <Shield className="h-5 w-5 mr-2 text-[#2D4660] flex-shrink-0" />
+              <Shield className="h-5 w-5 mr-2 text-[#576C71] flex-shrink-0" />
               <div>
                 <div className="text-xs text-gray-500">Session Admins</div>
                 <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.sessionAdminCount > 0).length}</div>
               </div>
             </div>
             <div className="flex items-center">
-              <UserIcon className="h-5 w-5 mr-2 text-green-500 flex-shrink-0" />
+              <UserIcon className="h-5 w-5 mr-2 text-[#8B5A4A] flex-shrink-0" />
               <div>
                 <div className="text-xs text-gray-500">Stakeholders</div>
                 <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.stakeholderSessionCount > 0).length}</div>
@@ -2198,88 +3217,98 @@ export default function UsersManagementScreen() {
 
       {/* Role Assignment Modal */}
       {showRoleModal && selectedUserForRole && roleModalType && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-            <div className="p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-2">
-                {roleModalType === 'session-admin' 
-                  ? 'Add Session Admin' 
-                  : roleModalType === 'remove-stakeholder'
-                  ? 'Remove Stakeholder'
-                  : 'Add Stakeholder'}
-              </h2>
-              <p className="text-sm text-gray-600 mb-4">
-                {roleModalType === 'remove-stakeholder' ? (
-                  <>Select a session to remove <strong>{selectedUserForRole.name}</strong> as a stakeholder.</>
-                ) : (
-                  <>Select a session to add <strong>{selectedUserForRole.name}</strong> as {roleModalType === 'session-admin' ? 'an admin' : 'a stakeholder'}.</>
-                )}
-              </p>
-
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Choose Session
-                </label>
-                <select
-                  value={selectedSessionId}
-                  onChange={(e) => setSelectedSessionId(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent"
-                >
-                  <option value="">-- Select a session --</option>
-                  {getAvailableSessions(roleModalType).map((session) => {
-                    const sessionTitle = session.title || session.name || session.session_name || 'Unnamed Session';
-                    const createdDate = session.created_at ? new Date(session.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
-                    const displayName = createdDate ? `${sessionTitle} (${createdDate})` : sessionTitle;
-                    
-                    return (
-                      <option key={session.id} value={session.id}>
-                        {displayName}
-                      </option>
-                    );
-                  })}
-                </select>
-                
-                {/* Debug/Status info */}
-                {allSessions.length === 0 && (
-                  <p className="mt-2 text-sm text-red-500">
-                    No sessions found in the system. Create a session first.
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+          onClick={closeRoleModal}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-xl w-full my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 overflow-visible">
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">
+                    {roleModalType === 'session-admin' 
+                      ? 'Add Session Admin' 
+                      : roleModalType === 'remove-stakeholder'
+                      ? 'Remove Stakeholder'
+                      : 'Add Stakeholder'}
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    {roleModalType === 'remove-stakeholder' ? (
+                      <>Select sessions to remove <strong>{selectedUserForRole.name}</strong> as a stakeholder.</>
+                    ) : (
+                      <>Select sessions to add <strong>{selectedUserForRole.name}</strong> as {roleModalType === 'session-admin' ? 'an admin' : 'a stakeholder'}.</>
+                    )}
                   </p>
-                )}
-                
-                {allSessions.length > 0 && getAvailableSessions(roleModalType).length === 0 && (
-                  <p className="mt-2 text-sm text-gray-500">
-                    {roleModalType === 'remove-stakeholder' 
-                      ? 'This user is not a stakeholder in any sessions you manage.'
-                      : `This user is already ${roleModalType === 'session-admin' ? 'an admin' : 'a stakeholder'} in all ${allSessions.length} session(s).`}
-                  </p>
-                )}
-                
-                {allSessions.length > 0 && getAvailableSessions(roleModalType).length > 0 && (
-                  <p className="mt-2 text-sm text-gray-500">
-                    {getAvailableSessions(roleModalType).length} session(s) available
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-3">
+                </div>
                 <button
                   onClick={closeRoleModal}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="ml-4 p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
+                  aria-label="Close modal"
                 >
-                  Cancel
+                  <X className="h-5 w-5" />
                 </button>
+              </div>
+
+              <div className="mb-6">
+                <ProductSessionSelector
+                  products={products}
+                  sessions={getAvailableSessions(roleModalType)}
+                  selectedProductId={roleModalProductId}
+                  onProductChange={(productId) => {
+                    setRoleModalProductId(productId);
+                    setRoleModalSelectedSessionIds([]);
+                    setRoleModalUseAllSessions(true);
+                  }}
+                  useAllSessions={roleModalUseAllSessions}
+                  onToggleAllSessions={(useAll) => {
+                    setRoleModalUseAllSessions(useAll);
+                    if (useAll) {
+                      setRoleModalSelectedSessionIds([]);
+                    }
+                  }}
+                  selectedSessionIds={roleModalSelectedSessionIds}
+                  onSessionToggle={(sessionId) => {
+                    if (roleModalSelectedSessionIds.includes(sessionId)) {
+                      setRoleModalSelectedSessionIds(roleModalSelectedSessionIds.filter(id => id !== sessionId));
+                    } else {
+                      setRoleModalSelectedSessionIds([...roleModalSelectedSessionIds, sessionId]);
+                    }
+                  }}
+                  getSessionStatus={getSessionStatus}
+                  formatSessionDateRange={formatSessionDateRange}
+                  filterSessions={filterSessionsForRoleModal}
+                />
+              </div>
+
+              <div className="flex justify-end mt-6">
                 <button
                   onClick={handleAddToSession}
-                  disabled={!selectedSessionId}
-                  className={`flex-1 px-4 py-2.5 rounded-lg transition-colors ${
-                    selectedSessionId
+                  disabled={!roleModalProductId || (!roleModalUseAllSessions && roleModalSelectedSessionIds.length === 0)}
+                  className={`px-6 py-2.5 rounded-lg transition-colors ${
+                    roleModalProductId && (roleModalUseAllSessions || roleModalSelectedSessionIds.length > 0)
                       ? roleModalType === 'remove-stakeholder'
                         ? 'bg-red-600 text-white hover:bg-red-700'
                         : 'bg-[#4f6d8e] text-white hover:bg-[#3d5670]'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   }`}
                 >
-                  {roleModalType === 'remove-stakeholder' ? 'Remove from Session' : 'Add to Session'}
+                  {(() => {
+                    const sessionCount = roleModalUseAllSessions 
+                      ? (filterSessionsForRoleModal(getAvailableSessions(roleModalType), roleModalProductId || '').length)
+                      : roleModalSelectedSessionIds.length;
+                    const isPlural = sessionCount > 1;
+                    
+                    if (roleModalType === 'remove-stakeholder') {
+                      return `Remove from Session${isPlural ? 's' : ''}`;
+                    } else if (roleModalType === 'session-admin') {
+                      return `Add to Session${isPlural ? 's' : ''} as Session Admin`;
+                    } else {
+                      return `Add to Session${isPlural ? 's' : ''} as a Stakeholder`;
+                    }
+                  })()}
                 </button>
               </div>
             </div>
@@ -2290,7 +3319,7 @@ export default function UsersManagementScreen() {
       {/* Delete User Confirmation Modal */}
       {showDeleteModal && userToDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
+          <div className="bg-white rounded-lg shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               {/* Header */}
               <div className="flex items-start mb-4">
@@ -2322,19 +3351,19 @@ export default function UsersManagementScreen() {
                   <div className="text-xs font-semibold text-gray-500 uppercase">Current Roles</div>
                   {userToDelete.roles.isSystemAdmin && (
                     <div className="flex items-center text-sm">
-                      <Crown className="h-4 w-4 mr-2 text-purple-500" />
+                      <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
                       <span className="text-gray-700">System Admin</span>
                     </div>
                   )}
                   {userToDelete.roles.sessionAdminCount > 0 && (
                     <div className="flex items-center text-sm">
-                      <Shield className="h-4 w-4 mr-2 text-[#2D4660]" />
+                      <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
                       <span className="text-gray-700">Session Admin in {userToDelete.roles.sessionAdminCount} session{userToDelete.roles.sessionAdminCount !== 1 ? 's' : ''}</span>
                     </div>
                   )}
                   {userToDelete.roles.stakeholderSessionCount > 0 && (
                     <div className="flex items-center text-sm">
-                      <UserIcon className="h-4 w-4 mr-2 text-green-500" />
+                      <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
                       <span className="text-gray-700">Stakeholder in {userToDelete.roles.stakeholderSessionCount} session{userToDelete.roles.stakeholderSessionCount !== 1 ? 's' : ''}</span>
                     </div>
                   )}
@@ -2357,13 +3386,13 @@ export default function UsersManagementScreen() {
                     {userToDelete.adminInSessions && userToDelete.adminInSessions.length > 0 && (
                       <div className="mb-3">
                         <div className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center">
-                          <Shield className="h-3.5 w-3.5 mr-1.5 text-[#173B65]" />
+                          <Shield className="h-3.5 w-3.5 mr-1.5 text-[#576C71]" />
                           Admin Sessions ({userToDelete.adminInSessions.length})
                         </div>
                         <div className="space-y-1 ml-5">
                           {userToDelete.adminInSessions.map(session => (
                             <div key={session.id} className="text-sm text-gray-700">
-                              • {session.title || session.name || 'Unnamed Session'}
+                              • {session.title || 'Unnamed Session'}
                             </div>
                           ))}
                         </div>
@@ -2372,13 +3401,13 @@ export default function UsersManagementScreen() {
                     {userToDelete.stakeholderInSessions && userToDelete.stakeholderInSessions.length > 0 && (
                       <div>
                         <div className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center">
-                          <UserIcon className="h-3.5 w-3.5 mr-1.5 text-green-600" />
+                          <UserIcon className="h-3.5 w-3.5 mr-1.5 text-[#8B5A4A]" />
                           Stakeholder Sessions ({userToDelete.stakeholderInSessions.length})
                         </div>
                         <div className="space-y-1 ml-5">
                           {userToDelete.stakeholderInSessions.map(session => (
                             <div key={session.id} className="text-sm text-gray-700">
-                              • {session.title || session.name || 'Unnamed Session'}
+                              • {session.title || 'Unnamed Session'}
                             </div>
                           ))}
                         </div>
@@ -2451,14 +3480,14 @@ export default function UsersManagementScreen() {
           onClick={closeAddUserModal}
         >
           <div 
-            className="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8"
+            className="bg-white rounded-lg shadow-xl max-w-3xl w-full my-8 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6">
               {/* Header */}
               <div className="flex items-start mb-6">
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-                  <Users className="h-6 w-6 text-green-600" />
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#8B5A4A]/10 flex items-center justify-center">
+                  <Users className="h-6 w-6 text-[#8B5A4A]" />
                 </div>
                 <div className="ml-4 flex-1">
                   <h2 className="text-xl font-bold text-gray-900 mb-1">
@@ -2544,7 +3573,7 @@ export default function UsersManagementScreen() {
                       className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
                     >
                       <div className="flex items-center">
-                        <Crown className="h-4 w-4 mr-2 text-purple-500" />
+                        <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
                         <span className="text-sm font-medium text-gray-700">System Administrator</span>
                       </div>
                       <ChevronDown 
@@ -2559,7 +3588,7 @@ export default function UsersManagementScreen() {
                             type="checkbox"
                             checked={newUserData.isSystemAdmin}
                             onChange={(e) => setNewUserData({ ...newUserData, isSystemAdmin: e.target.checked })}
-                            className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 accent-green-600"
+                            className="w-4 h-4 text-[#C89212] border-gray-300 rounded focus:ring-[#C89212] accent-green-600"
                           />
                           <span className="ml-3 text-sm text-gray-700">
                             Grant system administrator privileges
@@ -2582,10 +3611,10 @@ export default function UsersManagementScreen() {
                       className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
                     >
                       <div className="flex items-center">
-                        <Shield className="h-4 w-4 mr-2 text-[#2D4660]" />
+                        <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
                         <span className="text-sm font-medium text-gray-700">Session Admin</span>
                         {newUserData.sessionAdminIds.length > 0 && (
-                          <span className="ml-2 px-2 py-0.5 bg-[#E8EDF2] text-[#173B65] text-xs rounded-full">
+                          <span className="ml-2 px-2 py-0.5 bg-[#576C71]/10 text-[#576C71] text-xs rounded-full">
                             {newUserData.sessionAdminIds.length}
                           </span>
                         )}
@@ -2680,7 +3709,7 @@ export default function UsersManagementScreen() {
                                         />
                                         <div className="ml-3 flex-1">
                                           <div className="text-sm font-medium text-gray-900">
-                                            {session.title || session.name || 'Unnamed Session'}
+                                            {session.title || 'Unnamed Session'}
                                           </div>
                                           <div className="text-xs text-gray-500 mt-0.5">
                                             {formatSessionDateRange(session)}
@@ -2709,10 +3738,10 @@ export default function UsersManagementScreen() {
                   // For Session Admins: Show directly without accordion
                   <div className="border-t border-gray-200 pt-4">
                     <div className="flex items-center mb-3">
-                      <UserIcon className="h-4 w-4 mr-2 text-green-500" />
+                      <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
                       <span className="text-sm font-medium text-gray-700">Add as Stakeholder</span>
                       {newUserData.stakeholderSessionIds.length > 0 && (
-                        <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                        <span className="ml-2 px-2 py-0.5 bg-[#8B5A4A]/10 text-[#8B5A4A] text-xs rounded-full">
                           {newUserData.stakeholderSessionIds.length}
                         </span>
                       )}
@@ -2801,7 +3830,7 @@ export default function UsersManagementScreen() {
                                       />
                                       <div className="ml-3 flex-1">
                                         <div className="text-sm font-medium text-gray-900">
-                                          {session.title || session.name || 'Unnamed Session'}
+                                          {session.title || 'Unnamed Session'}
                                         </div>
                                         <div className="text-xs text-gray-500 mt-0.5">
                                           {formatSessionDateRange(session)}
@@ -2831,10 +3860,10 @@ export default function UsersManagementScreen() {
                       className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
                     >
                       <div className="flex items-center">
-                        <UserIcon className="h-4 w-4 mr-2 text-green-500" />
+                        <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
                         <span className="text-sm font-medium text-gray-700">Stakeholder</span>
                         {newUserData.stakeholderSessionIds.length > 0 && (
-                          <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                          <span className="ml-2 px-2 py-0.5 bg-[#8B5A4A]/10 text-[#8B5A4A] text-xs rounded-full">
                             {newUserData.stakeholderSessionIds.length}
                           </span>
                         )}
@@ -2929,7 +3958,7 @@ export default function UsersManagementScreen() {
                                         />
                                         <div className="ml-3 flex-1">
                                           <div className="text-sm font-medium text-gray-900">
-                                            {session.title || session.name || 'Unnamed Session'}
+                                            {session.title || 'Unnamed Session'}
                                           </div>
                                           <div className="text-xs text-gray-500 mt-0.5">
                                             {formatSessionDateRange(session)}
@@ -2965,7 +3994,7 @@ export default function UsersManagementScreen() {
                 </button>
                 <button
                   onClick={handleAddUser}
-                  disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim() || (viewMode === 'session-admin' && (!selectedProductId || (!useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))) || (viewMode === 'system-admin' && accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin && !useAllSessionsForSessionAdmin && newUserData.sessionAdminIds.length === 0) || (viewMode === 'system-admin' && accordionOpen.stakeholder && selectedProductId && !useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0)}
+                  disabled={Boolean(isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim() || (viewMode === 'session-admin' && (!selectedProductId || (!useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))) || (viewMode === 'system-admin' && accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin && !useAllSessionsForSessionAdmin && newUserData.sessionAdminIds.length === 0) || (viewMode === 'system-admin' && accordionOpen.stakeholder && selectedProductId && !useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))}
                   className="flex-1 px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   {isAddingUser ? (
@@ -2996,10 +4025,102 @@ export default function UsersManagementScreen() {
         </div>
       )}
 
+      {/* Edit User Modal */}
+      {showEditUserModal && userToEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              {/* Header */}
+              <div className="flex items-start mb-4">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                  <Edit className="h-6 w-6 text-blue-600" />
+                </div>
+                <div className="ml-4 flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">
+                    Edit User
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    Update user name and email address
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowEditUserModal(false);
+                    setUserToEdit(null);
+                    setEditingUserName('');
+                    setEditingUserEmail('');
+                  }}
+                  className="flex-shrink-0 ml-4 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  aria-label="Close modal"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Form */}
+              <div className="space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Full Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editingUserName}
+                    onChange={(e) => setEditingUserName(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+                    placeholder="John Doe"
+                    disabled={isUpdatingUser}
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email Address <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={editingUserEmail}
+                    onChange={(e) => setEditingUserEmail(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+                    placeholder="john.doe@newmill.com"
+                    disabled={isUpdatingUser}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowEditUserModal(false);
+                    setUserToEdit(null);
+                    setEditingUserName('');
+                    setEditingUserEmail('');
+                  }}
+                  className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  disabled={isUpdatingUser}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdateUser}
+                  disabled={isUpdatingUser || !editingUserName.trim() || !editingUserEmail.trim()}
+                  className="px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isUpdatingUser ? 'Updating...' : 'Update User'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Success Modal */}
       {showSuccessModal && successModalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               {/* Header */}
               <div className="flex items-start mb-4">

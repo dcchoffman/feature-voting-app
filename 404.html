@@ -6,20 +6,27 @@
     <title>Feature Voting System - New Millennium</title>
     <script>
       // GitHub Pages 404 handler for SPA routing
-      // Redirect to index.html to let React Router handle the routing
+      // This file is a fallback - the actual 404.html should be in dist/ and deployed
+      // If this is being served, redirect to index.html
       var path = window.location.pathname;
       var search = window.location.search;
       var hash = window.location.hash;
       
-      // Extract path after /feature-voting-app
-      var appPath = path.replace(/^\/feature-voting-app\/?/, '') || '/';
+      // Preserve the full path and redirect to index.html
+      // React Router will handle the routing
+      var basePath = '/feature-voting-app';
+      var appPath = path.replace(new RegExp('^' + basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), '') || '/';
       
-      // Redirect to index.html with the full path
-      window.location.replace('/feature-voting-app/' + appPath + search + hash);
+      // Redirect to index.html which will load the React app
+      window.location.replace(basePath + '/index.html#' + appPath + search + hash);
     </script>
   </head>
   <body>
     <p>Redirecting...</p>
+    <noscript>
+      <p>Please enable JavaScript to use this application.</p>
+      <a href="/feature-voting-app/">Go to home page</a>
+    </noscript>
   </body>
 </html>
 

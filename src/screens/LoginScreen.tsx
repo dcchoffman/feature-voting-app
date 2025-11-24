@@ -11,6 +11,7 @@ import * as db from '../services/databaseService';
 import { LogIn } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import desktopLogo from '../../New-Millennium-color-logo1.png';
+import microsoftLogo from '../assets/microsoft.svg';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -283,7 +284,7 @@ export default function LoginScreen() {
               ) : (
                 <>
                   <img 
-                    src="/microsoft.svg"
+                    src={microsoftLogo}
                     alt="Microsoft"
                     style={{ width: '21px', height: '21px', marginRight: '12px', flexShrink: 0 }}
                   />

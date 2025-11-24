@@ -127,11 +127,18 @@ export default function LoginScreen() {
         ? '/feature-voting-app' 
         : '';
       
+      // Construct the full redirect URL
+      const redirectTo = `${window.location.origin}${basename}/sessions`;
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'azure',
         options: {
-          redirectTo: `${window.location.origin}${basename}/sessions`,
-          scopes: 'email openid profile User.ReadBasic.All'
+          redirectTo: redirectTo,
+          scopes: 'email openid profile User.ReadBasic.All',
+          queryParams: {
+            // Force the redirect_to parameter to be the production URL
+            redirect_to: redirectTo
+          }
         }
       });
       

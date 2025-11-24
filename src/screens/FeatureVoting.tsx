@@ -852,7 +852,7 @@ function ResultsScreen({
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden cursor-pointer hover:opacity-80 transition-opacity"
             style={{ width: '40px', height: '40px' }}
@@ -1666,7 +1666,7 @@ function AlreadyVotedScreen({
         <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}
@@ -2107,7 +2107,7 @@ const VotingScreen = React.memo(function VotingScreen({
         <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}
@@ -2536,6 +2536,8 @@ function FeatureVotingSystem({
   const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   const hasProcessedCallback = useRef(false);
+  const isLoadingDataRef = useRef(false);
+  const lastLoadedSessionIdRef = useRef<string | null>(null);
 
   // Calculate effective votes per user based on auto-votes setting
   const effectiveVotesPerUser = useMemo(() => {
@@ -2771,14 +2773,49 @@ useEffect(() => {
     async function loadData() {
       if (!currentSession) return;
       
+      if (isLoadingDataRef.current && lastLoadedSessionIdRef.current === currentSession.id) {
+        // Data load already in progress, skip duplicate call
+        return;
+      }
+
+      lastLoadedSessionIdRef.current = currentSession.id;
+      isLoadingDataRef.current = true;
+
       try {
-        console.log('Loading data from Supabase for session:', currentSession.id);
         setIsLoading(true);
         
-        const featuresWithVotes = await buildFeaturesWithVotes();
-        console.log(`Loaded ${featuresWithVotes.length} features from database`);
+        // Build features with votes inline
+        const [featuresData, votesData] = await Promise.all([
+          db.getFeatures(currentSession.id),
+          db.getVotes(currentSession.id)
+        ]);
+
+        const featuresWithVotes = featuresData.map(feature => {
+          const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+          const voters = featureVotes.map(v => ({
+            userId: v.user_id,
+            name: v.user_name,
+            email: v.user_email,
+            voteCount: v.vote_count
+          }));
+          const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+
+          return {
+            id: feature.id,
+            title: feature.title,
+            description: feature.description,
+            epic: feature.epic,
+            state: feature.state,
+            areaPath: feature.area_path,
+            tags: feature.tags || [],
+            azureDevOpsId: feature.azure_devops_id,
+            azureDevOpsUrl: feature.azure_devops_url,
+            votes: totalVotes,
+            voters
+          };
+        });
+        
         setFeatures(featuresWithVotes);
-        console.log(`Features with votes loaded:`, featuresWithVotes.map(f => f.title));
         
         setVotingSession({
           title: currentSession.title,
@@ -2826,17 +2863,24 @@ useEffect(() => {
           });
         }
 
-        await loadFeatureSuggestions();
+        // Load feature suggestions inline
+        try {
+          const suggestions = await db.getFeatureSuggestions(currentSession.id);
+          setSuggestedFeatures(suggestions);
+        } catch (error) {
+          console.error('Error loading feature suggestions:', error);
+        }
       } catch (error) {
         console.error('Error loading data:', error);
         setFeatures([]);
       } finally {
         setIsLoading(false);
+        isLoadingDataRef.current = false;
       }
     }
     
     loadData();
-  }, [currentSession?.id, loadFeatureSuggestions, buildFeaturesWithVotes]);
+  }, [currentSession?.id]);
 
   useEffect(() => {
     async function loadFilterOptions() {
@@ -3615,10 +3659,6 @@ const handleDeleteSession = useCallback(async () => {
   }, [currentUser, currentSession, pendingUsedVotes, pendingVotes, votingSession.isActive, effectiveVotesPerUser]);
 
   const handleUpdateVotingSession = useCallback(async (updatedSession: VotingSession) => {
-    console.log('handleUpdateVotingSession called with:', updatedSession);
-    console.log('updatedSession.productId:', (updatedSession as any).productId);
-    console.log('updatedSession.product_id:', updatedSession.product_id);
-    
     const baseUpdates: Record<string, any> = {
       title: updatedSession.title,
       goal: updatedSession.goal,
@@ -3630,8 +3670,6 @@ const handleDeleteSession = useCallback(async () => {
       product_id: updatedSession.product_id ?? null,
       product_name: null // Products table is single source of truth - don't store product_name
     };
-    
-    console.log('baseUpdates.product_id:', baseUpdates.product_id);
 
     const metadataUpdates: Record<string, string | null> = {};
 
@@ -3654,25 +3692,17 @@ const handleDeleteSession = useCallback(async () => {
     assignField(updatedSession.reopenedAt, 'reopened_at');
 
     const fullUpdates = { ...baseUpdates, ...metadataUpdates };
-    
-    console.log('Full updates being sent to database:', fullUpdates);
-    console.log('product_id in fullUpdates:', fullUpdates.product_id);
 
     const runUpdate = async (updates: Record<string, any>) => {
-      console.log('runUpdate called with updates:', updates);
-      console.log('product_id in updates:', updates.product_id);
       if (currentSession?.id) {
-        console.log('Updating session by ID:', currentSession.id);
         await db.updateVotingSessionById(currentSession.id, updates);
       } else {
-        console.log('Updating session without ID');
         await db.updateVotingSession(updates);
       }
     };
 
     try {
       await runUpdate(fullUpdates);
-      console.log('Database update completed successfully');
 
       setVotingSession(updatedSession);
 

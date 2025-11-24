@@ -388,7 +388,7 @@ export default function StakeholderManagementScreen() {
     } else if (!validateEmail(formData.email)) {
       newErrors.email = 'Invalid email address';
     }
-
+    
     if (!selectedProductId) {
       newErrors.product = 'Please select a product';
     }
@@ -405,31 +405,31 @@ export default function StakeholderManagementScreen() {
     try {
       // Add stakeholder to all selected sessions
       for (const sessionId of selectedSessionIds) {
-        await db.addSessionStakeholder({
+      await db.addSessionStakeholder({
           session_id: sessionId,
-          user_name: formData.name,
-          user_email: formData.email,
-          has_voted: false
-        });
+        user_name: formData.name,
+        user_email: formData.email,
+        has_voted: false
+      });
       }
 
       // Send invite emails for all selected sessions
       for (const sessionId of selectedSessionIds) {
         const session = availableSessions.find(s => s.id === sessionId);
         if (session) {
-          try {
+      try {
             const inviteUrl = `${window.location.origin}/login?session=${session.session_code}`;
-            await sendInvitationEmail({
-              to: formData.email,
+        await sendInvitationEmail({
+          to: formData.email,
               subject: `You're invited to vote: ${session.title}`,
               text: `Hi,\n\nYou've been invited to vote in \"${session.title}\".\n\nOpen: ${inviteUrl}\n\nBest regards,\n${currentUser?.name || ''}`,
               html: `<p>Hi,</p><p>You've been invited to vote in <strong>${session.title}</strong>.</p><p><a href="${inviteUrl}">Open the Feature Voting System</a></p><p>Best regards,<br/>${currentUser?.name || ''}</p>`
-            });
-          } catch {
-            try {
+        });
+      } catch {
+        try {
               const mailto = db.buildSessionInviteMailto(session as any, formData.email, currentUser?.name || '');
-              window.location.href = mailto;
-            } catch {}
+          window.location.href = mailto;
+        } catch {}
           }
         }
       }
@@ -463,7 +463,28 @@ export default function StakeholderManagementScreen() {
   };
 
   const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
+    // Parse as local date to avoid timezone issues
+    const dateOnly = dateString.split('T')[0].split(' ')[0];
+    const parts = dateOnly.split('-');
+    
+    let date: Date;
+    if (parts.length === 3) {
+      // Parse as local date (month is 0-indexed)
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      date = new Date(year, month, day);
+      
+      // If there's a time component, add it back
+      const timeMatch = dateString.match(/T(\d{2}):(\d{2}):(\d{2})/);
+      if (timeMatch) {
+        date.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), parseInt(timeMatch[3], 10));
+      }
+    } else {
+      // Fallback to original behavior if format is unexpected
+      date = new Date(dateString);
+    }
+    
     return date.toLocaleDateString('en-US', { 
       year: 'numeric', 
       month: 'short', 
@@ -506,7 +527,7 @@ export default function StakeholderManagementScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}

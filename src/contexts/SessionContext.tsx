@@ -4,10 +4,11 @@
 // Location: src/contexts/SessionContext.tsx
 // ============================================
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
 import * as db from '../services/databaseService';
 import { isFallbackSystemAdmin } from '../utils/systemAdmins';
+import { supabase } from '../supabaseClient';
 import type { VotingSession, User, SessionContextType } from '../types';
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -25,26 +26,232 @@ export function SessionProvider({ children }: SessionProviderProps) {
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [roleCheckFailed, setRoleCheckFailed] = useState(false);
+  const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
+  const hasInitialized = useRef(false);
 
-  // Load user from localStorage on mount
+  const refreshSessions = useCallback(async (user?: User) => {
+    // Prevent infinite loops - don't refresh if already refreshing
+    if (isRefreshingSessions) {
+      return;
+    }
+
+    const userToUse = user || currentUser;
+    if (!userToUse) {
+      setSessions([]);
+      setCurrentSession(prev => {
+        if (prev) {
+          try {
+            localStorage.removeItem('voting_system_current_session');
+          } catch {}
+        }
+        return null;
+      });
+      return;
+    }
+
+    setIsRefreshingSessions(true);
+    try {
+      const fallbackStatus = isFallbackSystemAdmin(userToUse.email);
+      
+      let userSessions;
+      if (fallbackStatus) {
+        userSessions = await db.getAllSessions();
+      } else {
+        userSessions = await db.getSessionsForUser(userToUse.id);
+      }
+      
+      setSessions(userSessions);
+
+      setCurrentSession(prev => {
+        if (!prev) {
+          return prev;
+        }
+
+        const matchingSession = userSessions.find(s => s.id === prev.id);
+
+        if (!matchingSession) {
+          try {
+            localStorage.removeItem('voting_system_current_session');
+          } catch {}
+          return null;
+        }
+
+        if (matchingSession.id !== prev.id) {
+          // This should never happen, but keep the previous value.
+          return prev;
+        }
+
+        if (matchingSession !== prev) {
+          try {
+            localStorage.setItem('voting_system_current_session', matchingSession.id);
+          } catch {}
+          return matchingSession;
+        }
+
+        return prev;
+      });
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setSessions([]);
+    } finally {
+      setIsRefreshingSessions(false);
+    }
+  }, [currentUser, isRefreshingSessions]);
+
+  // Check for Supabase auth sessions (Azure AD)
   useEffect(() => {
-    const loadStoredUser = async () => {
-      const storedUser = localStorage.getItem('voting_system_user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          setCurrentUser(user);
-          await refreshSessions(user);
-        } catch (error) {
-          console.error('Error loading stored user:', error);
-          localStorage.removeItem('voting_system_user');
+    // Prevent running multiple times
+    if (hasInitialized.current) {
+      return;
+    }
+    hasInitialized.current = true;
+
+    // Safety timeout to always clear loading state
+    const safetyTimeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 5000); // 5 second safety timeout
+
+    const checkSupabaseAuth = async () => {
+      try {
+        // Check if we're in the middle of an OAuth callback
+        const isOAuthCallback = window.location.search.includes('code=') || 
+                                window.location.hash.includes('access_token') ||
+                                window.location.search.includes('error=');
+        
+        // If OAuth callback, wait a bit for Supabase to process it
+        if (isOAuthCallback) {
+          // Wait for onAuthStateChange to fire (handled below)
+          // But also check session after a short delay
+          setTimeout(async () => {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user) {
+                const email = session.user.email;
+                if (email) {
+                  const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || email.split('@')[0] || 'User';
+                  try {
+                    const user = await db.getOrCreateUser(email.toLowerCase(), name);
+                    setCurrentUser(user);
+                    await refreshSessions(user);
+                  } catch (error) {
+                    console.error('Error getting/creating user:', error);
+                    // Continue anyway - don't block the app
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Error in OAuth callback handler:', error);
+            } finally {
+              setIsLoading(false);
+              clearTimeout(safetyTimeout);
+            }
+          }, 1000);
+          return; // Don't set isLoading false yet, wait for the timeout
+        }
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          // User is authenticated via Supabase (Azure AD)
+          const email = session.user.email;
+          if (email) {
+            const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || email.split('@')[0] || 'User';
+            
+            // Get or create user in your database
+            try {
+              const user = await db.getOrCreateUser(email.toLowerCase(), name);
+              setCurrentUser(user);
+              await refreshSessions(user);
+            } catch (error) {
+              console.error('Error getting/creating user:', error);
+              // Continue anyway - don't block the app
+            }
+          }
+        } else {
+          // No Supabase session, check localStorage
+          const storedUser = localStorage.getItem('voting_system_user');
+          if (storedUser) {
+            try {
+              const user = JSON.parse(storedUser);
+              setCurrentUser(user);
+              // Try to refresh sessions, but don't block if it fails
+              try {
+                await refreshSessions(user);
+              } catch (error) {
+                console.error('Error refreshing sessions:', error);
+                // Continue anyway
+              }
+            } catch (error) {
+              console.error('Error loading stored user:', error);
+              localStorage.removeItem('voting_system_user');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking Supabase auth:', error);
+        // Fallback to localStorage
+        const storedUser = localStorage.getItem('voting_system_user');
+        if (storedUser) {
+          try {
+            const user = JSON.parse(storedUser);
+            setCurrentUser(user);
+            // Don't try to refresh sessions if we're in error state
+          } catch (err) {
+            console.error('Error loading stored user:', err);
+            localStorage.removeItem('voting_system_user');
+          }
+        }
+      } finally {
+        // Only set loading false if we're not in an OAuth callback
+        const isOAuthCallback = window.location.search.includes('code=') || 
+                                window.location.hash.includes('access_token') ||
+                                window.location.search.includes('error=');
+        if (!isOAuthCallback) {
+          setIsLoading(false);
+          clearTimeout(safetyTimeout);
         }
       }
-      setIsLoading(false);
     };
 
-    loadStoredUser();
-  }, []);
+    checkSupabaseAuth();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        const email = session.user.email;
+        if (email) {
+          const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || email.split('@')[0] || 'User';
+          const user = await db.getOrCreateUser(email.toLowerCase(), name);
+          setCurrentUser(user);
+          await refreshSessions(user);
+          setIsLoading(false); // Make sure loading is false after successful sign in
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setSessions([]);
+        setCurrentSession(null);
+        localStorage.removeItem('voting_system_user');
+        localStorage.removeItem('voting_system_current_session');
+        setIsLoading(false);
+      } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+        // Token refreshed, ensure user is still set
+        if (!currentUser && session.user.email) {
+          const email = session.user.email;
+          const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || email.split('@')[0] || 'User';
+          const user = await db.getOrCreateUser(email.toLowerCase(), name);
+          setCurrentUser(user);
+          await refreshSessions(user);
+        }
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(safetyTimeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   // Update user roles when session or user changes
   useEffect(() => {
@@ -106,63 +313,6 @@ export function SessionProvider({ children }: SessionProviderProps) {
     checkSystemAdminStatus();
   }, [currentUser]);
 
-  const refreshSessions = useCallback(async (user?: User) => {
-    const userToUse = user || currentUser;
-    if (!userToUse) {
-      setSessions([]);
-      setCurrentSession(prev => {
-        if (prev) {
-          try {
-            localStorage.removeItem('voting_system_current_session');
-          } catch {}
-        }
-        return null;
-      });
-      return;
-    }
-
-    try {
-      const fallbackStatus = isFallbackSystemAdmin(userToUse.email);
-      const userSessions = fallbackStatus
-        ? await db.getAllSessions()
-        : await db.getSessionsForUser(userToUse.id);
-
-      setSessions(userSessions);
-
-      setCurrentSession(prev => {
-        if (!prev) {
-          return prev;
-        }
-
-        const matchingSession = userSessions.find(s => s.id === prev.id);
-
-        if (!matchingSession) {
-          try {
-            localStorage.removeItem('voting_system_current_session');
-          } catch {}
-          return null;
-        }
-
-        if (matchingSession.id !== prev.id) {
-          // This should never happen, but keep the previous value.
-          return prev;
-        }
-
-        if (matchingSession !== prev) {
-          try {
-            localStorage.setItem('voting_system_current_session', matchingSession.id);
-          } catch {}
-          return matchingSession;
-        }
-
-        return prev;
-      });
-    } catch (error) {
-      console.error('Error loading sessions:', error);
-      setSessions([]);
-    }
-  }, [currentUser]);
-
   const handleSetCurrentUser = useCallback(async (user: User | null) => {
     setCurrentUser(user);
     setRoleCheckFailed(false); // Reset role check flag when user changes
@@ -216,6 +366,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
     isAdmin,
     isStakeholder,
     isSystemAdmin,
+    isLoading,
     setCurrentSession: handleSetCurrentSession,
     refreshSessions,
     setCurrentUser: handleSetCurrentUser,

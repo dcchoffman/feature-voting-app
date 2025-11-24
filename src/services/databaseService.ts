@@ -57,18 +57,87 @@ import type { FeatureSuggestion } from '../types/azure';
 // ============================================
 
 export async function getUserByEmail(email: string): Promise<User | null> {
-  const { data, error } = await supabase
+  try {
+    // Test if supabase client methods exist
+    if (!supabase || typeof supabase.from !== 'function') {
+      throw new Error('Supabase client is not properly initialized');
+    }
+    
+    // First, try a direct fetch to test if the API is reachable
+    const testUrl = `${(supabase as any).supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=*&limit=1`;
+    const testHeaders = {
+      'apikey': (supabase as any).supabaseKey,
+      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    };
+    
+    const directFetchPromise = fetch(testUrl, {
+      method: 'GET',
+      headers: testHeaders
+    }).then(async (response) => {
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[databaseService] Direct fetch error:', errorText);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+      const data = await response.json();
+      return { data: data.length > 0 ? data[0] : null, error: null };
+    }).catch((err) => {
+      console.error('[databaseService] Direct fetch exception:', err);
+      throw err;
+    });
+    
+    // Try direct fetch first with a shorter timeout
+    const directFetchWithTimeout = Promise.race([
+      directFetchPromise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Direct fetch timeout after 5 seconds')), 5000);
+      })
+    ]);
+    
+    try {
+      const directResult = await directFetchWithTimeout as any;
+      if (directResult.data) {
+        return directResult.data;
+      }
+    } catch (directErr: any) {
+      // Fall through to try Supabase client
+    }
+    
+    // Create the query - Supabase queries execute when awaited
+    const queryBuilder = supabase
     .from('users')
     .select('*')
     .eq('email', email)
     .single();
-  
+    
+    // Wrap in a promise with timeout
+    const queryWithTimeout = Promise.race([
+      queryBuilder,
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          console.error('[databaseService] ⚠️ TIMEOUT: Query did not complete after 10 seconds');
+          reject(new Error('Query timeout after 10 seconds'));
+        }, 10000);
+      })
+    ]);
+    
+    const result = await queryWithTimeout as any;
+    const { data, error } = result;
+    
   if (error) {
-    if (error.code === 'PGRST116') return null; // Not found
+      if (error.code === 'PGRST116') {
+        return null; // Not found
+      }
     throw error;
   }
   
   return data;
+  } catch (error: any) {
+    console.error('[databaseService] getUserByEmail error:', error);
+    throw error;
+  }
 }
 
 export async function createUser(user: { email: string; name: string; tenant_id?: string }): Promise<User> {
@@ -86,16 +155,24 @@ export async function createUser(user: { email: string; name: string; tenant_id?
     .select()
     .single();
   
-  if (error) throw error;
+  if (error) {
+    console.error('[databaseService] createUser error:', error);
+    throw error;
+  }
   return data;
 }
 
 export async function getOrCreateUser(email: string, name: string): Promise<User> {
+  try {
   let user = await getUserByEmail(email);
   if (!user) {
     user = await createUser({ email, name });
   }
   return user;
+  } catch (error) {
+    console.error('[databaseService] Error in getOrCreateUser:', error);
+    throw error;
+  }
 }
 
 export async function getAllUsers(): Promise<User[]> {
@@ -356,13 +433,32 @@ function normalizeSessionRows(rows: SessionRow[] | null | undefined): VotingSess
 }
 
 export async function getAllSessions(): Promise<VotingSession[]> {
-  const { data, error } = await supabase
-    .from('voting_sessions')
-    .select(SESSION_SELECT)
-    .order('created_at', { ascending: false });
+  try {
+    // Use direct fetch as workaround for Supabase client query execution issue
+    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/voting_sessions?select=${encodeURIComponent(SESSION_SELECT)}&order=created_at.desc`;
+    const apiHeaders = {
+      'apikey': (supabase as any).supabaseKey,
+      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+      'Content-Type': 'application/json',
+    };
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: apiHeaders
+    });
   
-  if (error) throw error;
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[databaseService] getAllSessions API error:', response.status, errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
   return normalizeSessionRows(data as SessionRow[]);
+  } catch (error) {
+    console.error('[databaseService] Exception in getAllSessions:', error);
+    throw error;
+  }
 }
 
 export async function getSessionById(id: string): Promise<VotingSession | null> {
@@ -396,6 +492,7 @@ export async function getSessionByCode(code: string): Promise<VotingSession | nu
 }
 
 export async function getSessionsForUser(userId: string): Promise<VotingSession[]> {
+  try {
   // Check if user is system admin first - system admins see ALL sessions
   const isSysAdmin = await isUserSystemAdmin(userId);
   if (isSysAdmin) {
@@ -403,48 +500,98 @@ export async function getSessionsForUser(userId: string): Promise<VotingSession[
   }
   
   // Get sessions where user is admin
-  const { data: adminSessions, error: adminError } = await supabase
-    .from('session_admins')
-    .select('session_id')
-    .eq('user_id', userId);
+    const adminApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_admins?user_id=eq.${userId}&select=session_id`;
+    const adminResponse = await fetch(adminApiUrl, {
+      method: 'GET',
+      headers: {
+        'apikey': (supabase as any).supabaseKey,
+        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
   
-  if (adminError) throw adminError;
-  
-  const adminSessionIds = adminSessions?.map(s => s.session_id) || [];
+    if (!adminResponse.ok) {
+      const errorText = await adminResponse.text();
+      console.error('[databaseService] Error loading session admins:', adminResponse.status, errorText);
+      throw new Error(`API error: ${adminResponse.status} - ${errorText}`);
+    }
+    
+    const adminSessions = await adminResponse.json();
+    const adminSessionIds = adminSessions?.map((s: any) => s.session_id) || [];
   
   // Get sessions where user is stakeholder (by email)
-  const user = await supabase
-    .from('users')
-    .select('email')
-    .eq('id', userId)
-    .single();
+    const userApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/users?id=eq.${userId}&select=email&limit=1`;
+    const userResponse = await fetch(userApiUrl, {
+      method: 'GET',
+      headers: {
+        'apikey': (supabase as any).supabaseKey,
+        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
   
-  if (user.error) throw user.error;
+    if (!userResponse.ok) {
+      const errorText = await userResponse.text();
+      console.error('[databaseService] Error getting user email:', userResponse.status, errorText);
+      throw new Error(`API error: ${userResponse.status} - ${errorText}`);
+    }
+    
+    const userData = await userResponse.json();
+    const userEmailValue = userData?.[0]?.email;
+    
+    if (!userEmailValue) {
+      console.error('[databaseService] User email not found');
+      throw new Error('User email not found');
+    }
+    
+    const stakeholderApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_stakeholders?user_email=eq.${encodeURIComponent(userEmailValue)}&select=session_id`;
+    const stakeholderResponse = await fetch(stakeholderApiUrl, {
+      method: 'GET',
+      headers: {
+        'apikey': (supabase as any).supabaseKey,
+        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
   
-  const { data: stakeholderSessions, error: stakeholderError } = await supabase
-    .from('session_stakeholders')
-    .select('session_id')
-    .eq('user_email', user.data.email);
-  
-  if (stakeholderError) throw stakeholderError;
-  
-  const stakeholderSessionIds = stakeholderSessions?.map(s => s.session_id) || [];
-  
+    if (!stakeholderResponse.ok) {
+      const errorText = await stakeholderResponse.text();
+      console.error('[databaseService] Error loading session stakeholders:', stakeholderResponse.status, errorText);
+      throw new Error(`API error: ${stakeholderResponse.status} - ${errorText}`);
+    }
+    
+    const stakeholderSessions = await stakeholderResponse.json();
+    const stakeholderSessionIds = stakeholderSessions?.map((s: any) => s.session_id) || [];
   // Combine and get unique session IDs
   const allSessionIds = [...new Set([...adminSessionIds, ...stakeholderSessionIds])];
   
-  if (allSessionIds.length === 0) return [];
-  
-  // Get all sessions
-  const { data: sessions, error: sessionsError } = await supabase
-    .from('voting_sessions')
-    .select(SESSION_SELECT)
-    .in('id', allSessionIds)
-    .order('created_at', { ascending: false });
-  
-  if (sessionsError) throw sessionsError;
-  
-  return normalizeSessionRows(sessions as SessionRow[]);
+    if (allSessionIds.length === 0) {
+      return [];
+    }
+    
+    // Get all sessions using direct fetch
+    const sessionsApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/voting_sessions?select=${encodeURIComponent(SESSION_SELECT)}&id=in.(${allSessionIds.join(',')})&order=created_at.desc`;
+    const sessionsResponse = await fetch(sessionsApiUrl, {
+      method: 'GET',
+      headers: {
+        'apikey': (supabase as any).supabaseKey,
+        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!sessionsResponse.ok) {
+      const errorText = await sessionsResponse.text();
+      console.error('[databaseService] Error loading voting sessions:', sessionsResponse.status, errorText);
+      throw new Error(`API error: ${sessionsResponse.status} - ${errorText}`);
+    }
+    
+    const sessions = await sessionsResponse.json();
+    return normalizeSessionRows(sessions as SessionRow[]);
+  } catch (error) {
+    console.error('[databaseService] Error in getSessionsForUser:', error);
+    throw error;
+  }
 }
 
 export async function getActiveSessionByProduct(productId: string | null): Promise<VotingSession | null> {
@@ -568,19 +715,26 @@ export async function isUserSessionAdmin(sessionId: string, userId: string): Pro
       return true;
     }
     
-    const { data, error } = await supabase
-      .from('session_admins')
-      .select('id')
-      .eq('session_id', sessionId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    // Use direct fetch as workaround for Supabase client query execution issue
+    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_admins?session_id=eq.${sessionId}&user_id=eq.${userId}&select=id&limit=1`;
+    const apiHeaders = {
+      'apikey': (supabase as any).supabaseKey,
+      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+      'Content-Type': 'application/json',
+    };
     
-    if (error) {
-      console.error('Error checking admin status:', error);
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: apiHeaders
+    });
+    
+    if (!response.ok) {
+      console.error('Error checking admin status:', response.status);
       return false;
     }
     
-    return !!data;
+    const data = await response.json();
+    return Array.isArray(data) && data.length > 0;
   } catch (err) {
     console.error('Caught exception checking admin:', err);
     return false;
@@ -672,19 +826,26 @@ export async function updateStakeholderVoteStatus(sessionId: string, email: stri
 
 export async function isUserSessionStakeholder(sessionId: string, email: string): Promise<boolean> {
   try {
-    const { data, error } = await supabase
-      .from('session_stakeholders')
-      .select('id')
-      .eq('session_id', sessionId)
-      .eq('user_email', email)
-      .maybeSingle();
+    // Use direct fetch as workaround for Supabase client query execution issue
+    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_stakeholders?session_id=eq.${sessionId}&user_email=eq.${encodeURIComponent(email)}&select=id&limit=1`;
+    const apiHeaders = {
+      'apikey': (supabase as any).supabaseKey,
+      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+      'Content-Type': 'application/json',
+    };
     
-    if (error) {
-      console.error('Error checking stakeholder status:', error);
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: apiHeaders
+    });
+    
+    if (!response.ok) {
+      console.error('Error checking stakeholder status:', response.status);
       return false;
     }
     
-    return !!data;
+    const data = await response.json();
+    return Array.isArray(data) && data.length > 0;
   } catch (err) {
     console.error('Caught exception checking stakeholder:', err);
     return false;
@@ -722,14 +883,26 @@ export async function removeStakeholder(sessionId: string, email: string): Promi
 // ============================================
 
 export async function getFeatures(sessionId: string) {
-  const { data, error } = await supabase
-    .from('features')
-    .select('*')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: false });
+  // Use direct fetch as workaround for Supabase client query execution issue
+  const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/features?session_id=eq.${sessionId}&select=*&order=created_at.desc`;
+  const apiHeaders = {
+    'apikey': (supabase as any).supabaseKey,
+    'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+    'Content-Type': 'application/json',
+  };
   
-  if (error) throw error;
-  return (data || []).filter(feature => {
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: apiHeaders
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API error: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
+  return (data || []).filter((feature: any) => {
     const isSuggestionState = feature.state === FEATURE_SUGGESTION_STATE;
     const hasSuggestionTag = Array.isArray(feature.tags) && feature.tags.includes(FEATURE_SUGGESTION_TAG);
     return !isSuggestionState && !hasSuggestionTag;
@@ -891,12 +1064,25 @@ export async function addSessionStatusNote(note: {
 // ============================================
 
 export async function getVotes(sessionId: string) {
-  const { data, error } = await supabase
-    .from('votes')
-    .select('*')
-    .eq('session_id', sessionId);
+  // Use direct fetch as workaround for Supabase client query execution issue
+  const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/votes?session_id=eq.${sessionId}&select=*`;
+  const apiHeaders = {
+    'apikey': (supabase as any).supabaseKey,
+    'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+    'Content-Type': 'application/json',
+  };
   
-  if (error) throw error;
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: apiHeaders
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API error: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
   return data || [];
 }
 
@@ -1366,18 +1552,26 @@ export async function removeSystemAdmin(userId: string) {
 
 export async function isUserSystemAdmin(userId: string): Promise<boolean> {
   try {
-    const { data, error } = await supabase
-      .from('system_admins')
-      .select('id')
-      .eq('user_id', userId)
-      .maybeSingle();
+    // Use direct fetch as workaround for Supabase client query execution issue
+    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/system_admins?user_id=eq.${userId}&select=id&limit=1`;
+    const apiHeaders = {
+      'apikey': (supabase as any).supabaseKey,
+      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+      'Content-Type': 'application/json',
+    };
     
-    if (error) {
-      console.error('Error checking system admin status:', error);
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: apiHeaders
+    });
+    
+    if (!response.ok) {
+      console.error('Error checking system admin status:', response.status);
       return false;
     }
     
-    return !!data;
+    const data = await response.json();
+    return Array.isArray(data) && data.length > 0;
   } catch (err) {
     console.error('Caught exception checking system admin:', err);
     return false;

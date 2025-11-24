@@ -170,7 +170,29 @@ export default function AdminManagementScreen() {
   };
 
   const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
+    // Parse as local date to avoid timezone issues
+    // Extract just the date part (YYYY-MM-DD) if there's a time component
+    const dateOnly = dateString.split('T')[0].split(' ')[0];
+    const parts = dateOnly.split('-');
+    
+    let date: Date;
+    if (parts.length === 3) {
+      // Parse as local date (month is 0-indexed)
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      date = new Date(year, month, day);
+      
+      // If there's a time component, add it back
+      const timeMatch = dateString.match(/T(\d{2}):(\d{2}):(\d{2})/);
+      if (timeMatch) {
+        date.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), parseInt(timeMatch[3], 10));
+      }
+    } else {
+      // Fallback to original behavior if format is unexpected
+      date = new Date(dateString);
+    }
+    
     return date.toLocaleDateString('en-US', { 
       year: 'numeric', 
       month: 'short', 
@@ -213,7 +235,7 @@ export default function AdminManagementScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}

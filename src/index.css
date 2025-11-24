@@ -20,3 +20,19 @@ body {
   min-height: 100vh;
   background-color: #f9fafb;
 }
+
+/* Microsoft Sign In Button - Override any conflicting styles */
+button.microsoft-signin-button {
+  background-color: #FFFFFF !important;
+  color: #5E5E5E !important;
+  border: 1px solid #8C8C8C !important;
+  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+button.microsoft-signin-button:hover:not(:disabled) {
+  background-color: #F5F5F5 !important;
+}

@@ -4,7 +4,8 @@
 // Location: src/contexts/TeamsContext.tsx
 // ============================================
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import * as microsoftTeams from '@microsoft/teams-js';
 
 interface TeamsContextType {
@@ -61,8 +62,6 @@ export const TeamsProvider: React.FC<TeamsProviderProps> = ({ children }) => {
 
           // Notify Teams that app is ready
           microsoftTeams.app.notifySuccess();
-        } else {
-          console.log('🌐 Running in browser (not Teams)');
         }
       } catch (error) {
         console.error('❌ Teams initialization error:', error);

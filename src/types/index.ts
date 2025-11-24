@@ -72,6 +72,7 @@ export interface SessionContextType {
   isAdmin: boolean;
   isStakeholder: boolean;
   isSystemAdmin: boolean;
+  isLoading: boolean;
   setCurrentSession: (session: VotingSession | null) => void;
   refreshSessions: (user?: User) => Promise<void>;
   setCurrentUser: (user: User | null) => Promise<void>;

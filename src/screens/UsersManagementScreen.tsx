@@ -4,18 +4,19 @@
 // Location: src/screens/UsersManagementScreen.tsx
 // ============================================
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
 import type { User, VotingSession, Product } from '../types';
 import type { UserRoleInfo } from '../services/databaseService';
 import { 
-  ChevronLeft, Users, Crown, Shield, ShieldCheck, User as UserIcon, 
+  ChevronLeft, Users, Crown, Shield, ShieldCheck, User as UserIcon,
   Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle, Info, Edit, Plus, Minus
 } from 'lucide-react';
 import { getProductColor } from '../utils/productColors';
 import { supabase } from '../supabaseClient';
+import { searchAzureAdUsers, type AzureAdUser } from '../services/azureAdUserService';
 
 interface SessionWithAssignment extends VotingSession {
   assignedAt?: string;
@@ -30,6 +31,14 @@ interface UserWithRoles extends User {
 }
 
 type RoleModalType = 'stakeholder' | 'session-admin' | 'remove-stakeholder' | null;
+
+const getInitialAzureSearchState = () => ({
+  searchTerm: '',
+  results: [] as AzureAdUser[],
+  isSearching: false,
+  showResults: false,
+  error: ''
+});
 
 // Product Select Component
 interface ProductSelectProps {
@@ -404,6 +413,7 @@ export default function UsersManagementScreen() {
   ]);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  const azureSearchRef = useRef<HTMLDivElement | null>(null);
   const hasCheckedAccess = useRef(false);
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isSessionAdmin, setIsSessionAdmin] = useState(false);
@@ -440,13 +450,14 @@ export default function UsersManagementScreen() {
   const [newUserData, setNewUserData] = useState({
     name: '',
     email: '',
-    password: '',
     isSystemAdmin: false,
     sessionAdminIds: [] as string[],
     stakeholderSessionIds: [] as string[]
   });
+  const [azureUserSearch, setAzureUserSearch] = useState(getInitialAzureSearchState());
+  const [showAzureSearchSection, setShowAzureSearchSection] = useState(true);
+  const [isAzureSignedIn, setIsAzureSignedIn] = useState<boolean | null>(null);
   const [accordionOpen, setAccordionOpen] = useState({
-    systemAdmin: false,
     sessionAdmin: false,
     stakeholder: false
   });
@@ -457,10 +468,63 @@ export default function UsersManagementScreen() {
   const [selectedProductIdForSessionAdmin, setSelectedProductIdForSessionAdmin] = useState<string>('');
   const [filteredSessionsForSessionAdmin, setFilteredSessionsForSessionAdmin] = useState<VotingSession[]>([]);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [successModalData, setSuccessModalData] = useState<{ email: string; password: string; userType: string } | null>(null);
+  const [successModalData, setSuccessModalData] = useState<{ email: string; userType: string } | null>(null);
   const [useAllSessionsForStakeholder, setUseAllSessionsForStakeholder] = useState<boolean>(true);
   const [useAllSessionsForSessionAdmin, setUseAllSessionsForSessionAdmin] = useState<boolean>(true);
-  
+
+  const sessionAdminActive =
+    Boolean(selectedProductIdForSessionAdmin) &&
+    (useAllSessionsForSessionAdmin || newUserData.sessionAdminIds.length > 0);
+
+  const stakeholderActive =
+    Boolean(selectedProductId) &&
+    (useAllSessionsForStakeholder || newUserData.stakeholderSessionIds.length > 0);
+
+  const sessionAdminProductName = products.find(p => p.id === selectedProductIdForSessionAdmin)?.name || '';
+
+  const stakeholderProductName = products.find(p => p.id === selectedProductId)?.name || '';
+
+  const formatSessionNames = (sessionIds: string[]) => {
+    const selected = sessionIds
+      .map(id => allSessions.find(session => session.id === id))
+      .filter((session): session is VotingSession => Boolean(session));
+    if (selected.length === 0) return '';
+    const titles = selected.map(session => session.title || 'Unnamed Session');
+    return titles.join(', ');
+  };
+
+  const sessionAdminSummary = sessionAdminActive
+    ? `${sessionAdminProductName || 'Selected Product'} · ${
+        useAllSessionsForSessionAdmin
+          ? 'All Sessions'
+          : formatSessionNames(newUserData.sessionAdminIds) || 'Sessions selected'
+      }`
+    : '';
+
+  const stakeholderSummary = stakeholderActive
+    ? `${stakeholderProductName || 'Selected Product'} · ${
+        useAllSessionsForStakeholder
+          ? 'All Sessions'
+          : formatSessionNames(newUserData.stakeholderSessionIds) || 'Sessions selected'
+      }`
+    : '';
+
+  const selectedRoleLabels = (() => {
+    const roles: string[] = [];
+    if (newUserData.isSystemAdmin) roles.push('System Admin');
+    if (sessionAdminActive) roles.push('Session Admin');
+    if (stakeholderActive) roles.push('Stakeholder');
+    return roles;
+  })();
+
+  const getRoleButtonLabel = (isLoading: boolean) => {
+    if (selectedRoleLabels.length === 0) {
+      return isLoading ? 'Creating User...' : 'Create User';
+    }
+    const label = selectedRoleLabels.join(' & ');
+    return isLoading ? `Adding ${label}...` : `Add ${label}`;
+  };
+
   // Edit user modal state
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [userToEdit, setUserToEdit] = useState<UserWithRoles | null>(null);
@@ -468,21 +532,40 @@ export default function UsersManagementScreen() {
   const [editingUserEmail, setEditingUserEmail] = useState('');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
 
-  const handleLogout = async () => {
+  const handleLogout = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
     try {
       await supabase.auth.signOut();
-    } catch {}
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+    
     try {
       setCurrentSession(null as any);
-    } catch {}
+    } catch (error) {
+      console.error('Error clearing session:', error);
+    }
+    
     setCurrentUser(null);
+    
     try {
       localStorage.removeItem('voting_system_current_session');
+      localStorage.removeItem('voting_system_user');
       localStorage.removeItem('azureDevOpsAuthInProgress');
       sessionStorage.removeItem('oauth_return_path');
       sessionStorage.removeItem('oauth_action');
-    } catch {}
+      sessionStorage.removeItem('oauth_error');
+    } catch (error) {
+      console.error('Error clearing storage:', error);
+    }
+    
     setMobileMenuOpen(false);
+    
+    // Navigate to login - React Router handles basename automatically
     navigate('/login', { replace: true });
   };
 
@@ -528,15 +611,15 @@ export default function UsersManagementScreen() {
     }
   };
 
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     try {
       const productsList = await db.getProducts();
-      const allSessionsList = await db.getAllSessions();
+      // Use already loaded allSessions instead of fetching again
       const now = new Date();
       
       // Filter products to only show those with active or upcoming sessions
       const productsWithSessions = productsList.filter(product => {
-        return allSessionsList.some(session => {
+        return allSessions.some(session => {
           if (session.product_id !== product.id) return false;
           const endDate = new Date(session.end_date);
           return endDate >= now; // Only current and future sessions
@@ -547,6 +630,21 @@ export default function UsersManagementScreen() {
     } catch (error) {
       console.error('Error loading products:', error);
     }
+  }, [allSessions]);
+
+  const clearSessionAdminSelections = () => {
+    setSelectedProductIdForSessionAdmin('');
+    setFilteredSessionsForSessionAdmin([]);
+    setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
+    setUseAllSessionsForSessionAdmin(true);
+    setAccordionOpen(prev => ({ ...prev, sessionAdmin: false }));
+  };
+
+  const clearStakeholderSelections = () => {
+    setSelectedProductId('');
+    setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
+    setUseAllSessionsForStakeholder(true);
+    setAccordionOpen(prev => ({ ...prev, stakeholder: false }));
   };
 
   const filterSessionsByProduct = (productId: string) => {
@@ -614,104 +712,102 @@ export default function UsersManagementScreen() {
   const loadUsers = async (sessions: VotingSession[]) => {
     setIsLoading(true);
     
-    // Check database schema for users table
-    console.log('=== CHECKING USERS TABLE SCHEMA ===');
     try {
-      const { data: sampleUser, error } = await supabase
-        .from('users')
-        .select('*')
-        .limit(1)
-        .single();
+      // Fetch all data in parallel
+      const [allUsers, allAdminRelations, allStakeholderRelations] = await Promise.all([
+        db.getAllUsers(),
+        // Fetch all session_admin relations at once
+        supabase
+          .from('session_admins')
+          .select('user_id, session_id, created_at')
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error fetching all admin relations:', error);
+              return [];
+            }
+            return data || [];
+          }),
+        // Fetch all session_stakeholder relations at once
+        // Note: session_stakeholders table uses user_email, not user_id
+        supabase
+          .from('session_stakeholders')
+          .select('user_email, session_id, created_at')
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error fetching all stakeholder relations:', error);
+              return [];
+            }
+            return data || [];
+          })
+      ]);
       
-      if (sampleUser) {
-        console.log('✓ Sample user record:', sampleUser);
-        console.log('✓ Available fields:', Object.keys(sampleUser));
-        console.log('✓ Has created_by?', 'created_by' in sampleUser);
-        console.log('✓ Has created_by_name?', 'created_by_name' in sampleUser);
-        console.log('✓ Has created_by_user_id?', 'created_by_user_id' in sampleUser);
-      } else {
-        console.log('✗ No users found or error:', error);
-      }
-    } catch (err) {
-      console.log('✗ Error checking schema:', err);
-    }
-    console.log('=== END SCHEMA CHECK ===\n');
-    
-    try {
-      const allUsers = await db.getAllUsers();
+      // Build maps for fast lookup
+      const adminRelationsByUser = new Map<string, Array<{ session_id: string; created_at: string }>>();
+      allAdminRelations.forEach(rel => {
+        if (!adminRelationsByUser.has(rel.user_id)) {
+          adminRelationsByUser.set(rel.user_id, []);
+        }
+        adminRelationsByUser.get(rel.user_id)!.push({
+          session_id: rel.session_id,
+          created_at: rel.created_at
+        });
+      });
       
-      // Pre-load all stakeholders for all sessions (reduces calls from N*M to M)
-      const sessionStakeholdersMap = new Map<string, any[]>();
-      await Promise.all(
-        sessions.map(async (session) => {
-          try {
-            const stakeholders = await db.getSessionStakeholders(session.id);
-            sessionStakeholdersMap.set(session.id, stakeholders);
-          } catch (err) {
-            console.error(`Error loading stakeholders for session ${session.id}:`, err);
-            sessionStakeholdersMap.set(session.id, []);
+      const stakeholderRelationsByUser = new Map<string, Array<{ session_id: string; created_at: string }>>();
+      allStakeholderRelations.forEach(rel => {
+        // session_stakeholders uses user_email, not user_id
+        const key = rel.user_email?.toLowerCase() || '';
+        if (key) {
+          if (!stakeholderRelationsByUser.has(key)) {
+            stakeholderRelationsByUser.set(key, []);
           }
-        })
-      );
+          stakeholderRelationsByUser.get(key)!.push({
+            session_id: rel.session_id,
+            created_at: rel.created_at
+          });
+        }
+      });
       
-      // Now process users with pre-loaded stakeholder data
+      // Create session lookup map
+      const sessionMap = new Map(sessions.map(s => [s.id, s]));
+      
+      // Process users with pre-loaded data
       const usersWithRoles = await Promise.all(
         allUsers.map(async (user) => {
           const roles = await db.getUserRoleInfo(user.id);
           
-          // Check sessions - NEW APPROACH: Query session_admins table directly
           const adminInSessions: SessionWithAssignment[] = [];
           const stakeholderInSessions: SessionWithAssignment[] = [];
           
-          // If user has admin sessions, get them directly from the database
-          if (roles.sessionAdminCount > 0) {
-            try {
-              // Query the session_admins table to get session IDs and assignment metadata
-              const { data: adminRelations, error } = await supabase
-                .from('session_admins')
-                .select('session_id, created_at')
-                .eq('user_id', user.id);
-              
-              if (error) {
-                console.error('Error fetching admin sessions:', error);
-              } else if (adminRelations) {
-                // Match session IDs to actual session objects and add assignment metadata
-                const adminSessionIds = adminRelations.map(r => r.session_id);
-                const adminSessions = sessions.filter(s => adminSessionIds.includes(s.id));
-                adminInSessions.push(...adminSessions.map(session => {
-                  const relation = adminRelations.find(r => r.session_id === session.id);
-                  return {
-                    ...session,
-                    assignedAt: relation?.created_at,
-                    assignedBy: 'System', // Default since we don't have created_by in session_admins
-                    assignedByName: 'System'
-                  };
-                }));
-              }
-            } catch (err) {
-              console.error('Error querying session_admins:', err);
-            }
-          }
-          
-          // Check stakeholder status from pre-loaded data
-          for (const session of sessions) {
-            const stakeholders = sessionStakeholdersMap.get(session.id) || [];
-            const stakeholderMatch = stakeholders.find((s: any) => {
-              const emailMatch = s.user_email && user.email && 
-                s.user_email.toLowerCase() === user.email.toLowerCase();
-              const idMatch = (s.user_id === user.id) || (s.id === user.id);
-              return emailMatch || idMatch;
-            });
-            
-            if (stakeholderMatch) {
-              stakeholderInSessions.push({
+          // Get admin sessions from pre-loaded data
+          const userAdminRelations = adminRelationsByUser.get(user.id) || [];
+          userAdminRelations.forEach(rel => {
+            const session = sessionMap.get(rel.session_id);
+            if (session) {
+              adminInSessions.push({
                 ...session,
-                assignedAt: stakeholderMatch.created_at,
-                assignedBy: 'System', // Default since we don't have created_by in session_stakeholders
+                assignedAt: rel.created_at,
+                assignedBy: 'System',
                 assignedByName: 'System'
               });
             }
-          }
+          });
+          
+          // Get stakeholder sessions from pre-loaded data
+          // session_stakeholders uses user_email, not user_id
+          const userEmailKey = user.email.toLowerCase();
+          const userStakeholderRelations = stakeholderRelationsByUser.get(userEmailKey) || [];
+          userStakeholderRelations.forEach(rel => {
+            const session = sessionMap.get(rel.session_id);
+            if (session) {
+              stakeholderInSessions.push({
+                ...session,
+                assignedAt: rel.created_at,
+                assignedBy: 'System',
+                assignedByName: 'System'
+              });
+            }
+          });
           
           return { ...user, roles, adminInSessions, stakeholderInSessions };
         })
@@ -750,28 +846,32 @@ export default function UsersManagementScreen() {
     
     setCheckingAccess(true);
     try {
-      const sysAdmin = await db.isUserSystemAdmin(currentUser.id);
-      setIsSystemAdmin(sysAdmin);
-      
-      // Get all sessions first
+      // Get all sessions first (needed for both system and session admins)
       const allSessionsCheck = await db.getAllSessions();
       
+      // Check system admin and session admin status in parallel
+      const [sysAdmin, adminRelations] = await Promise.all([
+        db.isUserSystemAdmin(currentUser.id),
+        // Fetch all session_admin relations for this user at once (much faster than N queries)
+        supabase
+          .from('session_admins')
+          .select('session_id')
+          .eq('user_id', currentUser.id)
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error fetching admin sessions:', error);
+              return [];
+            }
+            return (data || []).map(r => r.session_id);
+          })
+      ]);
+      
+      setIsSystemAdmin(sysAdmin);
+      
       // Check if user is a session admin
-      let sessionAdminSessions: string[] = [];
+      const sessionAdminSessions: string[] = adminRelations;
+      
       if (!sysAdmin) {
-        // Check which sessions the user admins
-        const adminChecks = await Promise.all(
-          allSessionsCheck.map(session => 
-            db.isUserSessionAdmin(session.id, currentUser.id)
-          )
-        );
-        
-        allSessionsCheck.forEach((session, index) => {
-          if (adminChecks[index]) {
-            sessionAdminSessions.push(session.id);
-          }
-        });
-        
         const hasSessionAdminAccess = sessionAdminSessions.length > 0;
         setIsSessionAdmin(hasSessionAdminAccess);
         setUserAdminSessions(sessionAdminSessions);
@@ -792,10 +892,11 @@ export default function UsersManagementScreen() {
       } else {
         // System admin: show all sessions
         setAllSessions(allSessionsCheck);
-        // Load original admin ID
-        await loadOriginalAdminId();
-        // Load all users
-        await loadUsers(allSessionsCheck);
+        // Load original admin ID and users in parallel
+        await Promise.all([
+          loadOriginalAdminId(),
+          loadUsers(allSessionsCheck)
+        ]);
       }
     } catch (error) {
       console.error('Error checking access:', error);
@@ -962,9 +1063,25 @@ export default function UsersManagementScreen() {
     }
   }, [viewMode]);
 
-  useEffect(() => {
+  // Memoize filterUsers to prevent unnecessary recalculations
+  const memoizedFilterUsers = useCallback(() => {
     filterUsers();
   }, [users, searchQuery, filterRole, viewMode, allSessions, currentUser]);
+  
+  useEffect(() => {
+    memoizedFilterUsers();
+  }, [memoizedFilterUsers]);
+
+  // Handle click outside for Azure AD search dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (azureSearchRef.current && !azureSearchRef.current.contains(event.target as Node)) {
+        setAzureUserSearch(prev => ({ ...prev, showResults: false }));
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const loadUserSessionMemberships = async (userId: string) => {
     try {
@@ -1065,13 +1182,13 @@ export default function UsersManagementScreen() {
     try {
       // Process each session
       for (const sessionId of sessionsToProcess) {
-        if (roleModalType === 'session-admin') {
+      if (roleModalType === 'session-admin') {
           await db.addSessionAdmin(sessionId, selectedUserForRole.id);
-        } else if (roleModalType === 'stakeholder') {
-          // Use addSessionStakeholderByEmail which handles the stakeholder creation
+      } else if (roleModalType === 'stakeholder') {
+        // Use addSessionStakeholderByEmail which handles the stakeholder creation
           await db.addSessionStakeholderByEmail(sessionId, selectedUserForRole.email, selectedUserForRole.name);
-        } else if (roleModalType === 'remove-stakeholder') {
-          // Remove stakeholder using email
+      } else if (roleModalType === 'remove-stakeholder') {
+        // Remove stakeholder using email
           await db.removeSessionStakeholder(sessionId, selectedUserForRole.email);
         }
       }
@@ -1335,20 +1452,22 @@ export default function UsersManagementScreen() {
   };
 
   const openAddUserModal = () => {
+    setMobileMenuOpen(false);
+    setShowAddUserModal(true);
     setNewUserData({
       name: '',
       email: '',
-      password: generatePassword(),
       isSystemAdmin: false,
       sessionAdminIds: [],
       stakeholderSessionIds: []
     });
+    setAzureUserSearch(getInitialAzureSearchState());
     setSelectedProductId('');
     setFilteredSessionsForProduct([]);
     setSelectedProductIdForSessionAdmin('');
     setFilteredSessionsForSessionAdmin([]);
     loadProducts();
-    setShowAddUserModal(true);
+    setShowAzureSearchSection(true);
   };
 
   const closeAddUserModal = () => {
@@ -1356,11 +1475,11 @@ export default function UsersManagementScreen() {
     setNewUserData({
       name: '',
       email: '',
-      password: '',
       isSystemAdmin: false,
       sessionAdminIds: [],
       stakeholderSessionIds: []
     });
+    setAzureUserSearch(getInitialAzureSearchState());
     setSelectedProductId('');
     setFilteredSessionsForProduct([]);
     setSelectedProductIdForSessionAdmin('');
@@ -1368,58 +1487,168 @@ export default function UsersManagementScreen() {
     setUseAllSessionsForStakeholder(true);
     setUseAllSessionsForSessionAdmin(true);
     setAccordionOpen({
-      systemAdmin: false,
       sessionAdmin: false,
       stakeholder: false
     });
+    setShowAzureSearchSection(true);
   };
 
-  const generatePassword = () => {
-    const length = 12;
-    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
-    let password = "";
-    for (let i = 0; i < length; i++) {
-      password += charset.charAt(Math.floor(Math.random() * charset.length));
+  // Check if user is signed in with Azure
+  useEffect(() => {
+    const checkAzureSignIn = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const isAzureProvider = session.user?.app_metadata?.provider === 'azure' || 
+                                 session.user?.identities?.some((id: any) => id.provider === 'azure');
+          setIsAzureSignedIn(isAzureProvider || false);
+        } else {
+          setIsAzureSignedIn(false);
+        }
+      } catch (error) {
+        console.error('Error checking Azure sign-in status:', error);
+        setIsAzureSignedIn(false);
+      }
+    };
+    
+    checkAzureSignIn();
+    
+    // Also listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        const isAzureProvider = session.user?.app_metadata?.provider === 'azure' || 
+                               session.user?.identities?.some((id: any) => id.provider === 'azure');
+        setIsAzureSignedIn(isAzureProvider || false);
+      } else {
+        setIsAzureSignedIn(false);
+      }
+    });
+    
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Handle Azure sign-in
+  const handleAzureSignIn = async () => {
+    try {
+      // Get the basename from the current pathname or default to '/feature-voting-app'
+      const basename = window.location.pathname.startsWith('/feature-voting-app') 
+        ? '/feature-voting-app' 
+        : '';
+      
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          redirectTo: `${window.location.origin}${basename}/users`,
+          scopes: 'email openid profile User.ReadBasic.All'
+        }
+      });
+      
+      if (error) {
+        console.error('Azure sign-in error:', error);
+        setAzureUserSearch(prev => ({ 
+          ...prev, 
+          error: 'Failed to sign in with Microsoft. Please try again.' 
+        }));
+      }
+      // If successful, user will be redirected to Azure, then back to /users
+    } catch (err) {
+      console.error('Azure sign-in error:', err);
+      setAzureUserSearch(prev => ({ 
+        ...prev, 
+        error: 'Failed to sign in with Microsoft. Please try again.' 
+      }));
     }
-    return password;
+  };
+
+  // Search Azure AD users
+  const handleAzureUserSearch = async (searchTerm: string) => {
+    setAzureUserSearch(prev => ({ ...prev, searchTerm, isSearching: true, showResults: false, error: '' }));
+    
+    if (!searchTerm || searchTerm.trim().length < 2) {
+      setAzureUserSearch(prev => ({ ...prev, results: [], isSearching: false, error: '' }));
+      return;
+    }
+
+    try {
+      const results = await searchAzureAdUsers(searchTerm);
+      setAzureUserSearch(prev => ({ 
+        ...prev, 
+        results, 
+        isSearching: false, 
+        showResults: results.length > 0,
+        error: ''
+      }));
+    } catch (error: any) {
+      console.error('Error searching Azure AD users:', error);
+      const errorMessage = error?.message || 'Failed to search company users. Please try again.';
+      setAzureUserSearch(prev => ({ 
+        ...prev, 
+        results: [], 
+        isSearching: false, 
+        showResults: false,
+        error: errorMessage
+      }));
+    }
+  };
+
+  // Select an Azure AD user
+  const selectAzureUser = (user: AzureAdUser) => {
+    // Format name as "First Name Last Name" instead of "Last Name, First Name"
+    let formattedName = '';
+    if (user.givenName && user.surname) {
+      formattedName = `${user.givenName} ${user.surname}`;
+    } else if (user.displayName) {
+      // If displayName is "Last, First", convert it to "First Last"
+      const displayName = user.displayName.trim();
+      if (displayName.includes(',')) {
+        const parts = displayName.split(',').map(p => p.trim());
+        if (parts.length === 2) {
+          formattedName = `${parts[1]} ${parts[0]}`;
+        } else {
+          formattedName = displayName;
+        }
+      } else {
+        formattedName = displayName;
+      }
+    } else {
+      formattedName = user.mail || user.userPrincipalName || '';
+    }
+    
+    setNewUserData({
+      ...newUserData,
+      name: formattedName,
+      email: user.mail || user.userPrincipalName
+    });
+    setAzureUserSearch(getInitialAzureSearchState());
+    setShowAzureSearchSection(false);
   };
 
   const handleAddUser = async () => {
-    if (!newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim()) {
-      alert('Please fill in all required fields (Name, Email, Password)');
+    if (!newUserData.name.trim() || !newUserData.email.trim()) {
+      alert('Please fill in all required fields (Name, Email)');
       return;
     }
 
     setIsAddingUser(true);
     try {
-      // Create user in Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newUserData.email,
-        password: newUserData.password,
-        options: {
-          data: {
-            name: newUserData.name
-          }
-        }
-      });
-
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('User creation failed');
-
-      const newUserId = authData.user.id;
-
-      // Insert into users table with creator info
-      const { error: dbError } = await supabase
+      // Create user directly in users table (they'll use Azure AD for authentication)
+      const { data: newUser, error: dbError } = await supabase
         .from('users')
         .insert({
-          id: newUserId,
-          name: newUserData.name,
-          email: newUserData.email,
+          name: newUserData.name.trim(),
+          email: newUserData.email.trim().toLowerCase(),
           created_by: currentUser?.id,
           created_by_name: currentUser?.name
-        });
+        })
+        .select()
+        .single();
 
       if (dbError) throw dbError;
+      if (!newUser) throw new Error('User creation failed');
+
+      const newUserId = newUser.id;
 
       // Add system admin role if selected (only in system-admin mode)
       if (viewMode === 'system-admin' && newUserData.isSystemAdmin) {
@@ -1440,11 +1669,11 @@ export default function UsersManagementScreen() {
             }
           } else {
             // Add to selected sessions only
-            for (const sessionId of newUserData.sessionAdminIds) {
-              try {
-                await db.addSessionAdmin(sessionId, newUserId);
-              } catch (err) {
-                console.error('Error adding session admin role:', err);
+        for (const sessionId of newUserData.sessionAdminIds) {
+          try {
+            await db.addSessionAdmin(sessionId, newUserId);
+          } catch (err) {
+            console.error('Error adding session admin role:', err);
               }
             }
           }
@@ -1475,7 +1704,7 @@ export default function UsersManagementScreen() {
           if (useAllSessionsForStakeholder) {
             // Add to all current sessions for the product
             sessionsToAdd = filteredSessionsForProduct.map(s => s.id);
-          } else {
+      } else {
             // Add to selected sessions only
             sessionsToAdd = newUserData.stakeholderSessionIds;
           }
@@ -1532,7 +1761,6 @@ export default function UsersManagementScreen() {
       // Show success modal
       setSuccessModalData({
         email: newUserData.email,
-        password: newUserData.password,
         userType: userType
       });
       setShowSuccessModal(true);
@@ -1563,7 +1791,26 @@ export default function UsersManagementScreen() {
   };
 
   const formatDate = (dateString: string): string => {
+    // Parse as local date to avoid timezone issues
+    const dateOnly = dateString.split('T')[0].split(' ')[0];
+    const parts = dateOnly.split('-');
+    
+    if (parts.length !== 3) {
+      // Fallback to original behavior if format is unexpected
     const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric'
+      });
+    }
+    
+    // Parse as local date (month is 0-indexed)
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const date = new Date(year, month, day);
+    
     return date.toLocaleDateString('en-US', { 
       year: 'numeric', 
       month: 'short', 
@@ -1685,7 +1932,7 @@ export default function UsersManagementScreen() {
           <div className="flex items-center flex-1 min-w-0">
             {/* Mobile: small logo */}
             <img
-              src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+              src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
               alt="New Millennium Building Systems Logo"
               className="mr-3 md:hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
               style={{ width: '36px', height: '36px' }}
@@ -1736,7 +1983,11 @@ export default function UsersManagementScreen() {
                 My Sessions
               </button>
               <button
-                onClick={handleLogout}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleLogout(e);
+                }}
                 className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
                 <LogOut className="h-4 w-4 mr-2" />
@@ -1785,7 +2036,12 @@ export default function UsersManagementScreen() {
                     <span className="text-base">My Sessions</span>
                   </button>
                   <button
-                    onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMobileMenuOpen(false);
+                      handleLogout(e);
+                    }}
                     className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
                   >
                     <LogOut className="h-5 w-5 mr-3 text-gray-700" />
@@ -2003,7 +2259,7 @@ export default function UsersManagementScreen() {
                                  !protectedEmails.has(user.email)) && (
                                 <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
                                   User Functions
-                                </div>
+                            </div>
                               )}
 
                               {/* Edit User - only for system admins - moved to bottom */}
@@ -2022,7 +2278,7 @@ export default function UsersManagementScreen() {
                                   <div>
                                     <div className="font-medium text-base">Edit User Profile</div>
                                     <div className="text-xs text-gray-500">Update name and email</div>
-                                  </div>
+                          </div>
                                 </button>
                               )}
 
@@ -2250,11 +2506,11 @@ export default function UsersManagementScreen() {
                     <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Assigned</div>
                     <div className="space-y-2">
                       {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
-                        <div className="flex items-center text-sm text-gray-700">
-                          <Calendar className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
+                    <div className="flex items-center text-sm text-gray-700">
+                      <Calendar className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
                           <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
                           <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
-                        </div>
+                    </div>
                       )}
                       
                       {user.adminInSessions && user.adminInSessions.length > 0 && (
@@ -2272,7 +2528,7 @@ export default function UsersManagementScreen() {
                                     <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
                                       <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
                                       <span>{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                                    </div>
+                  </div>
                                     <div className="text-xs text-gray-500 ml-5">
                                       by {sessionToShow.assignedByName || 'System'}
                                     </div>
@@ -2317,7 +2573,7 @@ export default function UsersManagementScreen() {
                                       <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
                                         <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
                                         <span>{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                                      </div>
+                    </div>
                                       <div className="text-xs text-gray-500 ml-5">
                                         by {sessionToShow.assignedByName || 'System'}
                                       </div>
@@ -2452,7 +2708,7 @@ export default function UsersManagementScreen() {
                                           <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
                                         </span>
                                       )}
-                                    </div>
+                              </div>
                                   );
                                   
                                   return hasMoreSessions ? (
@@ -2473,7 +2729,7 @@ export default function UsersManagementScreen() {
                                     <BadgeContent />
                                   );
                                 })()}
-                              </div>
+                                        </div>
                               {(() => {
                                 const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
                                 // Always show at least one session - prefer active, otherwise first session
@@ -2552,10 +2808,10 @@ export default function UsersManagementScreen() {
                                                 <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
                                                   {formatSessionDateRange(session)}
                                                 </div>
-                                              </div>
-                                            </div>
-                                          ))}
-                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                                     )}
                                   </>
                                 );
@@ -2591,7 +2847,7 @@ export default function UsersManagementScreen() {
                                             <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
                                           </span>
                                         )}
-                                      </div>
+                              </div>
                                     );
                                     
                                     return hasMoreSessions ? (
@@ -2612,7 +2868,7 @@ export default function UsersManagementScreen() {
                                       <BadgeContent />
                                     );
                                   })()}
-                                </div>
+                                        </div>
                                 {(() => {
                                   const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
                                   // Always show at least one session - prefer active, otherwise first session
@@ -2691,9 +2947,9 @@ export default function UsersManagementScreen() {
                                                   <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
                                                     {formatSessionDateRange(session)}
                                                   </div>
-                                                </div>
-                                              </div>
-                                            ))}
+                                    </div>
+                                  </div>
+                                ))}
                                         </div>
                                       )}
                                     </>
@@ -2715,13 +2971,13 @@ export default function UsersManagementScreen() {
                           )}
                           
                           {user.adminInSessions && user.adminInSessions.length > 0 && (
-                            <div>
+                        <div>
                               {/* User creation date - positioned to align with badge */}
                               <div className="flex items-center text-gray-700 whitespace-nowrap" style={{ marginBottom: '0.5rem', height: '30px' }}>
                                 <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
                                 <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
                                 <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
-                              </div>
+                          </div>
                               {(() => {
                                 const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
                                 const sessionToShow = mostRecentActive || user.adminInSessions[0];
@@ -2746,10 +3002,10 @@ export default function UsersManagementScreen() {
                                           <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
                                             <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
                                             <span className="text-xs text-gray-700 whitespace-nowrap">{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                                          </div>
+                          </div>
                                           <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
                                             by {sessionToShow.assignedByName || 'System'}
-                                          </div>
+                        </div>
                                         </div>
                                       </div>
                                     )}
@@ -2884,7 +3140,7 @@ export default function UsersManagementScreen() {
                             className={`relative inline-block transition-all md:transition-opacity ${
                               hoveredRow === user.id 
                                 ? user.id === currentUser?.id ? 'opacity-50 visible' : 'opacity-100 visible'
-                                : 'md:opacity-0 md:invisible opacity-100 visible'
+                                  : 'md:opacity-0 md:invisible opacity-100 visible'
                             }`}
                             ref={(el) => { dropdownRefs.current[user.id] = el; }}
                           >
@@ -2998,7 +3254,7 @@ export default function UsersManagementScreen() {
                                      !protectedEmails.has(user.email)) && (
                                     <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
                                       User Functions
-                                    </div>
+                                </div>
                                   )}
 
                                   {/* Edit User - only for system admins - moved to bottom */}
@@ -3017,7 +3273,7 @@ export default function UsersManagementScreen() {
                                       <div>
                                         <div className="font-medium">Edit User Profile</div>
                                         <div className="text-xs text-gray-500">Update name and email</div>
-                                      </div>
+                              </div>
                                     </button>
                                   )}
 
@@ -3230,21 +3486,21 @@ export default function UsersManagementScreen() {
             <div className="p-6 overflow-visible">
               <div className="flex items-start justify-between mb-2">
                 <div className="flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-2">
-                    {roleModalType === 'session-admin' 
-                      ? 'Add Session Admin' 
-                      : roleModalType === 'remove-stakeholder'
-                      ? 'Remove Stakeholder'
-                      : 'Add Stakeholder'}
-                  </h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-2">
+                {roleModalType === 'session-admin' 
+                  ? 'Add Session Admin' 
+                  : roleModalType === 'remove-stakeholder'
+                  ? 'Remove Stakeholder'
+                  : 'Add Stakeholder'}
+              </h2>
                   <p className="text-sm text-gray-600">
-                    {roleModalType === 'remove-stakeholder' ? (
+                {roleModalType === 'remove-stakeholder' ? (
                       <>Select sessions to remove <strong>{selectedUserForRole.name}</strong> as a stakeholder.</>
-                    ) : (
+                ) : (
                       <>Select sessions to add <strong>{selectedUserForRole.name}</strong> as {roleModalType === 'session-admin' ? 'an admin' : 'a stakeholder'}.</>
-                    )}
-                  </p>
-                </div>
+                )}
+              </p>
+              </div>
                 <button
                   onClick={closeRoleModal}
                   className="ml-4 p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
@@ -3513,7 +3769,137 @@ export default function UsersManagementScreen() {
 
               {/* Form */}
               <div className="space-y-4">
-                {/* Name */}
+                {/* Azure AD User Search */}
+                {showAzureSearchSection ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Search Company Users (Optional)
+                    </label>
+                    {isAzureSignedIn === false ? (
+                      /* Show sign-in button if not signed in with Azure */
+                      <div className="border border-gray-300 rounded-lg p-4 bg-blue-50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900 mb-1">
+                              Sign in with Microsoft to search company users
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              You need to sign in with your Microsoft account to use the company user search feature.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleAzureSignIn}
+                            className="ml-4 flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                          >
+                            <img 
+                              src="/microsoft.svg"
+                              alt="Microsoft"
+                              style={{ width: '21px', height: '21px', marginRight: '8px' }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">Sign in</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Show search input if signed in with Azure */
+                      <>
+                        <div className="relative" ref={azureSearchRef}>
+                          <div className="flex gap-2">
+                            <div className="flex-1 relative">
+                              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                              <input
+                                type="text"
+                                value={azureUserSearch.searchTerm}
+                                onChange={(e) => {
+                                  const term = e.target.value;
+                                  setAzureUserSearch(prev => ({ ...prev, searchTerm: term }));
+                                  handleAzureUserSearch(term);
+                                }}
+                                onFocus={() => {
+                                  if (azureUserSearch.results.length > 0) {
+                                    setAzureUserSearch(prev => ({ ...prev, showResults: true }));
+                                  }
+                                }}
+                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+                                placeholder="Search by name or email (min 2 characters)..."
+                              />
+                              {azureUserSearch.isSearching && (
+                                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#2D4660]"></div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        
+                          {/* Search Results Dropdown */}
+                          {azureUserSearch.showResults && azureUserSearch.results.length > 0 && (
+                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                              {azureUserSearch.results.map((user) => (
+                                <button
+                                  key={user.id}
+                                  type="button"
+                                  onClick={() => selectAzureUser(user)}
+                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                                >
+                                  <div className="font-medium text-gray-900">{user.displayName}</div>
+                                  <div className="text-sm text-gray-500">{user.mail || user.userPrincipalName}</div>
+                                  {user.jobTitle && (
+                                    <div className="text-xs text-gray-400 mt-0.5">{user.jobTitle}</div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {azureUserSearch.error && (
+                            <div className="absolute z-10 w-full mt-1 bg-red-50 border border-red-200 rounded-lg shadow-lg p-4 text-sm text-red-700">
+                              <div className="font-medium mb-1">Search Error</div>
+                              <div className="mb-2">{azureUserSearch.error}</div>
+                              {azureUserSearch.error.includes('User.ReadBasic.All') && (
+                                <div className="mt-2 p-2 bg-red-100 rounded text-xs text-red-800">
+                                  <div className="font-medium mb-1">To fix this:</div>
+                                  <ol className="list-decimal list-inside space-y-1 ml-2">
+                                    <li>Go to Azure Portal → App registrations → Your app</li>
+                                    <li>API permissions → Add permission → Microsoft Graph → Delegated permissions</li>
+                                    <li>Add "User.ReadBasic.All" or "User.Read.All"</li>
+                                    <li>Click "Grant admin consent" (requires admin)</li>
+                                  </ol>
+                                </div>
+                              )}
+                              <div className="mt-2 text-xs text-red-600">
+                                You can still enter the email manually below.
+                              </div>
+                            </div>
+                          )}
+                          {azureUserSearch.searchTerm.length >= 2 && !azureUserSearch.isSearching && azureUserSearch.results.length === 0 && !azureUserSearch.error && (
+                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 text-sm text-gray-500 text-center">
+                              No users found. You can still enter the email manually below.
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                    <p className="mt-1 text-xs text-gray-500">
+                      Search for users in your organization by name or email, or enter manually below
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <button
+                      type="button"
+                      className="text-sm font-semibold text-[#2D4660] hover:underline focus:outline-none"
+                      onClick={() => {
+                        setShowAzureSearchSection(true);
+                        setAzureUserSearch(getInitialAzureSearchState());
+                      }}
+                    >
+                      Search Company Users again
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Full Name <span className="text-red-500">*</span>
@@ -3527,7 +3913,6 @@ export default function UsersManagementScreen() {
                   />
                 </div>
 
-                {/* Email */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Email Address <span className="text-red-500">*</span>
@@ -3540,91 +3925,101 @@ export default function UsersManagementScreen() {
                     placeholder="john.doe@newmill.com"
                   />
                 </div>
-
-                {/* Password */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Temporary Password <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newUserData.password}
-                      onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent font-mono text-sm"
-                      placeholder="Auto-generated password"
-                    />
-                    <button
-                      onClick={() => setNewUserData({ ...newUserData, password: generatePassword() })}
-                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors whitespace-nowrap"
-                    >
-                      Regenerate
-                    </button>
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Save this password to share with the user securely
-                  </p>
                 </div>
 
-                {/* System Admin Accordion - Only for System Admins */}
+                {/* System Admin checkbox (system-admin mode only) */}
                 {viewMode === 'system-admin' && (
                   <div className="border-t border-gray-200 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setAccordionOpen({ ...accordionOpen, systemAdmin: !accordionOpen.systemAdmin })}
-                      className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
-                    >
-                      <div className="flex items-center">
-                        <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                          <Crown
+                            className="h-4 w-4 text-[#C89212] transition-transform"
+                            style={{
+                              transform: newUserData.isSystemAdmin ? 'scale(2)' : 'scale(1)',
+                              transformOrigin: 'center'
+                            }}
+                          />
+                        </span>
                         <span className="text-sm font-medium text-gray-700">System Administrator</span>
                       </div>
-                      <ChevronDown 
-                        className={`h-4 w-4 text-gray-500 transition-transform ${accordionOpen.systemAdmin ? 'rotate-180' : ''}`}
-                      />
-                    </button>
-                    
-                    {accordionOpen.systemAdmin && (
-                      <div className="mt-3 ml-6 space-y-3">
-                        <label className="flex items-center cursor-pointer">
                           <input
+                        id="systemAdminCheckbox"
                             type="checkbox"
                             checked={newUserData.isSystemAdmin}
                             onChange={(e) => setNewUserData({ ...newUserData, isSystemAdmin: e.target.checked })}
-                            className="w-4 h-4 text-[#C89212] border-gray-300 rounded focus:ring-[#C89212] accent-green-600"
-                          />
-                          <span className="ml-3 text-sm text-gray-700">
-                            Grant system administrator privileges
+                        className="sr-only"
+                      />
+                      <span
+                        className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                        style={{
+                          borderColor: '#C89212',
+                          backgroundColor: newUserData.isSystemAdmin ? '#C89212' : '#ffffff'
+                        }}
+                      >
+                        {newUserData.isSystemAdmin && (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="w-4 h-4"
+                            stroke="#ffffff"
+                            strokeWidth="3"
+                            fill="none"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="4 12 10 18 20 6" />
+                          </svg>
+                        )}
                           </span>
                         </label>
-                        <p className="text-xs text-gray-500">
-                          Full access to all sessions and user management
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
 
                 {/* Session Admin Accordion - Only for System Admins */}
                 {viewMode === 'system-admin' && (
                   <div className="border-t border-gray-200 pt-4">
+                    <div className="w-full flex items-center gap-2 py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors">
                     <button
                       type="button"
-                      onClick={() => setAccordionOpen({ ...accordionOpen, sessionAdmin: !accordionOpen.sessionAdmin })}
-                      className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
-                    >
-                      <div className="flex items-center">
-                        <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
-                        <span className="text-sm font-medium text-gray-700">Session Admin</span>
-                        {newUserData.sessionAdminIds.length > 0 && (
-                          <span className="ml-2 px-2 py-0.5 bg-[#576C71]/10 text-[#576C71] text-xs rounded-full">
-                            {newUserData.sessionAdminIds.length}
+                        className="flex items-center gap-2 text-sm font-medium text-gray-700 flex-1 text-left"
+                        onClick={() =>
+                          setAccordionOpen(prev => ({
+                            sessionAdmin: !prev.sessionAdmin,
+                            stakeholder: false
+                          }))
+                        }
+                      >
+                        <span
+                          className="flex items-center justify-center"
+                          style={{
+                            transform: sessionAdminActive ? 'scale(1.2)' : 'scale(1)'
+                          }}
+                        >
+                          <Shield className="h-4 w-4 text-[#576C71]" />
                           </span>
+                        <span>Session Admin</span>
+                        {sessionAdminActive && sessionAdminSummary && (
+                          <span className="ml-2 text-xs text-gray-500">{sessionAdminSummary}</span>
                         )}
-                      </div>
+                      </button>
+                      {sessionAdminActive && (
+                        <button
+                          type="button"
+                          onClick={clearSessionAdminSelections}
+                          className="px-3 py-1 rounded-full border text-xs font-semibold transition-colors hover:bg-[#576C71]/10"
+                          style={{
+                            borderColor: '#576C71',
+                            color: '#576C71',
+                            backgroundColor: '#f6fbfb'
+                          }}
+                        >
+                          Reset
+                        </button>
+                      )}
                       <ChevronDown 
                         className={`h-4 w-4 text-gray-500 transition-transform ${accordionOpen.sessionAdmin ? 'rotate-180' : ''}`}
                       />
-                    </button>
+                    </div>
                     
                     {accordionOpen.sessionAdmin && (
                       <div className="mt-3 ml-6 space-y-3">
@@ -3635,7 +4030,6 @@ export default function UsersManagementScreen() {
                             value={selectedProductIdForSessionAdmin}
                             onChange={(productId) => {
                               setSelectedProductIdForSessionAdmin(productId);
-                              // Clear selected sessions when product changes
                               setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
                               setUseAllSessionsForSessionAdmin(true);
                             }}
@@ -3643,10 +4037,9 @@ export default function UsersManagementScreen() {
                           />
                         </div>
 
-                        {/* Session Selection Toggle - Only show after product is selected */}
+                        {/* Session Selection toggle */}
                         {selectedProductIdForSessionAdmin && (
                           <div className="space-y-3">
-                            {/* Toggle: All Sessions / Select Sessions */}
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                 Session Selection *
@@ -3654,9 +4047,7 @@ export default function UsersManagementScreen() {
                               <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setUseAllSessionsForSessionAdmin(false);
-                                  }}
+                                  onClick={() => setUseAllSessionsForSessionAdmin(false)}
                                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
                                     !useAllSessionsForSessionAdmin
                                       ? 'bg-white text-[#2d4660] shadow-sm'
@@ -3687,7 +4078,6 @@ export default function UsersManagementScreen() {
                               )}
                             </div>
 
-                            {/* Session Selection List - Only show if "Select Sessions" is chosen */}
                             {!useAllSessionsForSessionAdmin && (
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3695,35 +4085,35 @@ export default function UsersManagementScreen() {
                                 </label>
                                 {filteredSessionsForSessionAdmin.length === 0 ? (
                                   <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                                ) : (
+                        ) : (
                                   <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                                    {filteredSessionsForSessionAdmin.map((session) => (
-                                      <label
-                                        key={session.id}
+                                    {filteredSessionsForSessionAdmin.map(session => (
+                              <label
+                                key={session.id}
                                         className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={newUserData.sessionAdminIds.includes(session.id)}
-                                          onChange={() => toggleSessionAdmin(session.id)}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={newUserData.sessionAdminIds.includes(session.id)}
+                                  onChange={() => toggleSessionAdmin(session.id)}
                                           className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
                                           style={{ accentColor: '#16a34a' }}
-                                        />
+                                />
                                         <div className="ml-3 flex-1">
-                                          <div className="text-sm font-medium text-gray-900">
-                                            {session.title || 'Unnamed Session'}
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="text-sm font-medium text-gray-900">
+                                              {session.title || 'Unnamed Session'}
+                                            </div>
+                                            <span className={`text-xs font-medium ${getSessionStatus(session).color}`}>
+                                              {getSessionStatus(session).text}
+                                </span>
                                           </div>
                                           <div className="text-xs text-gray-500 mt-0.5">
                                             {formatSessionDateRange(session)}
                                           </div>
-                                          <div className="text-xs mt-0.5">
-                                            <span className={`font-medium ${getSessionStatus(session).color}`}>
-                                              {getSessionStatus(session).text}
-                                            </span>
-                                          </div>
                                         </div>
-                                      </label>
-                                    ))}
+                              </label>
+                            ))}
                                   </div>
                                 )}
                               </div>
@@ -3816,20 +4206,20 @@ export default function UsersManagementScreen() {
                               </label>
                               {filteredSessionsForProduct.length === 0 ? (
                                 <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                              ) : (
+                      ) : (
                                 <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
                                   {filteredSessionsForProduct.map((session) => (
-                                    <label
-                                      key={session.id}
+                            <label
+                              key={session.id}
                                       className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                        onChange={() => toggleStakeholder(session.id)}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={newUserData.stakeholderSessionIds.includes(session.id)}
+                                onChange={() => toggleStakeholder(session.id)}
                                         className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
                                         style={{ accentColor: '#16a34a' }}
-                                      />
+                              />
                                       <div className="ml-3 flex-1">
                                         <div className="text-sm font-medium text-gray-900">
                                           {session.title || 'Unnamed Session'}
@@ -3840,11 +4230,11 @@ export default function UsersManagementScreen() {
                                         <div className="text-xs mt-0.5">
                                           <span className={`font-medium ${getSessionStatus(session).color}`}>
                                             {getSessionStatus(session).text}
-                                          </span>
+                              </span>
                                         </div>
                                       </div>
-                                    </label>
-                                  ))}
+                            </label>
+                          ))}
                                 </div>
                               )}
                             </div>
@@ -3856,24 +4246,48 @@ export default function UsersManagementScreen() {
                 ) : (
                   // For System Admins: Show in accordion
                   <div className="border-t border-gray-200 pt-4">
+                    <div className="w-full flex items-center gap-2 py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors">
                     <button
                       type="button"
-                      onClick={() => setAccordionOpen({ ...accordionOpen, stakeholder: !accordionOpen.stakeholder })}
-                      className="w-full flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors"
+                      className="flex items-center gap-2 text-sm font-medium text-gray-700 flex-1 text-left"
+                      onClick={() =>
+                        setAccordionOpen(prev => ({
+                          stakeholder: !prev.stakeholder,
+                          sessionAdmin: false
+                        }))
+                      }
                     >
-                      <div className="flex items-center">
-                        <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
-                        <span className="text-sm font-medium text-gray-700">Stakeholder</span>
-                        {newUserData.stakeholderSessionIds.length > 0 && (
-                          <span className="ml-2 px-2 py-0.5 bg-[#8B5A4A]/10 text-[#8B5A4A] text-xs rounded-full">
-                            {newUserData.stakeholderSessionIds.length}
+                      <span
+                        className="flex items-center justify-center"
+                        style={{
+                          transform: stakeholderActive ? 'scale(1.2)' : 'scale(1)'
+                        }}
+                      >
+                        <UserIcon className="h-4 w-4 text-[#8B5A4A]" />
                           </span>
+                      <span>Stakeholder</span>
+                      {stakeholderActive && stakeholderSummary && (
+                        <span className="ml-2 text-xs text-gray-500">{stakeholderSummary}</span>
                         )}
-                      </div>
+                    </button>
+                    {stakeholderActive && (
+                      <button
+                        type="button"
+                        onClick={clearStakeholderSelections}
+                        className="px-3 py-1 rounded-full border text-xs font-semibold transition-colors hover:bg-[#8B5A4A]/10"
+                        style={{
+                          borderColor: '#8B5A4A',
+                          color: '#8B5A4A',
+                          backgroundColor: '#fcf8f4'
+                        }}
+                      >
+                        Reset
+                      </button>
+                    )}
                       <ChevronDown 
                         className={`h-4 w-4 text-gray-500 transition-transform ${accordionOpen.stakeholder ? 'rotate-180' : ''}`}
                       />
-                    </button>
+                  </div>
                     
                     {accordionOpen.stakeholder && (
                       <div className="mt-3 ml-6 space-y-3">
@@ -3944,35 +4358,35 @@ export default function UsersManagementScreen() {
                                 </label>
                                 {filteredSessionsForProduct.length === 0 ? (
                                   <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                                ) : (
+                        ) : (
                                   <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
                                     {filteredSessionsForProduct.map((session) => (
-                                      <label
-                                        key={session.id}
+                              <label
+                                key={session.id}
                                         className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                          onChange={() => toggleStakeholder(session.id)}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={newUserData.stakeholderSessionIds.includes(session.id)}
+                                  onChange={() => toggleStakeholder(session.id)}
                                           className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
                                           style={{ accentColor: '#16a34a' }}
-                                        />
+                                />
                                         <div className="ml-3 flex-1">
-                                          <div className="text-sm font-medium text-gray-900">
-                                            {session.title || 'Unnamed Session'}
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="text-sm font-medium text-gray-900">
+                                              {session.title || 'Unnamed Session'}
+                                            </div>
+                                            <span className={`text-xs font-medium ${getSessionStatus(session).color}`}>
+                                              {getSessionStatus(session).text}
+                                </span>
                                           </div>
                                           <div className="text-xs text-gray-500 mt-0.5">
                                             {formatSessionDateRange(session)}
                                           </div>
-                                          <div className="text-xs mt-0.5">
-                                            <span className={`font-medium ${getSessionStatus(session).color}`}>
-                                              {getSessionStatus(session).text}
-                                            </span>
-                                          </div>
                                         </div>
-                                      </label>
-                                    ))}
+                              </label>
+                            ))}
                                   </div>
                                 )}
                               </div>
@@ -3986,18 +4400,28 @@ export default function UsersManagementScreen() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 mt-6 pt-6 border-t border-gray-200">
-                <button
-                  onClick={closeAddUserModal}
-                  disabled={isAddingUser}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
+              <div className="mt-6 pt-6 border-t border-gray-200 flex justify-end">
                 <button
                   onClick={handleAddUser}
-                  disabled={Boolean(isAddingUser || !newUserData.name.trim() || !newUserData.email.trim() || !newUserData.password.trim() || (viewMode === 'session-admin' && (!selectedProductId || (!useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))) || (viewMode === 'system-admin' && accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin && !useAllSessionsForSessionAdmin && newUserData.sessionAdminIds.length === 0) || (viewMode === 'system-admin' && accordionOpen.stakeholder && selectedProductId && !useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))}
-                  className="flex-1 px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  disabled={Boolean(
+                    isAddingUser ||
+                      !newUserData.name.trim() ||
+                      !newUserData.email.trim() ||
+                      (viewMode === 'session-admin' &&
+                        (!selectedProductId ||
+                          (!useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))) ||
+                      (viewMode === 'system-admin' &&
+                        accordionOpen.sessionAdmin &&
+                        selectedProductIdForSessionAdmin &&
+                        !useAllSessionsForSessionAdmin &&
+                        newUserData.sessionAdminIds.length === 0) ||
+                      (viewMode === 'system-admin' &&
+                        accordionOpen.stakeholder &&
+                        selectedProductId &&
+                        !useAllSessionsForStakeholder &&
+                        newUserData.stakeholderSessionIds.length === 0)
+                  )}
+                  className="px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   {isAddingUser ? (
                     <>
@@ -4005,20 +4429,10 @@ export default function UsersManagementScreen() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
-                      {(() => {
-                        if (newUserData.isSystemAdmin) return 'Adding System Admin...';
-                        if (newUserData.sessionAdminIds.length > 0) return 'Adding Session Admin...';
-                        if (newUserData.stakeholderSessionIds.length > 0) return 'Adding Stakeholder...';
-                        return 'Creating User...';
-                      })()}
+                      {getRoleButtonLabel(true)}
                     </>
                   ) : (
-                    (() => {
-                      if (newUserData.isSystemAdmin) return 'Add System Admin';
-                      if (newUserData.sessionAdminIds.length > 0) return 'Add Session Admin';
-                      if (newUserData.stakeholderSessionIds.length > 0) return 'Add Stakeholder';
-                      return 'Create User';
-                    })()
+                    getRoleButtonLabel(false)
                   )}
                 </button>
               </div>
@@ -4156,40 +4570,19 @@ export default function UsersManagementScreen() {
                     <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Email Address</div>
                     <div className="text-sm font-medium text-gray-900">{successModalData.email}</div>
                   </div>
-                  <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Temporary Password</div>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 px-3 py-2 bg-white border border-gray-300 rounded-md font-mono text-sm text-gray-900">
-                        {successModalData.password}
-                      </code>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(successModalData.password);
-                        }}
-                        className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors text-sm"
-                        title="Copy password"
-                      >
-                        Copy
-                      </button>
-                    </div>
-                  </div>
                 </div>
               </div>
 
-              {/* Warning */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+              {/* Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                 <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-yellow-800">
-                      Important: Save This Password
-                    </h3>
-                    <div className="mt-1 text-sm text-yellow-700">
-                      Please save this password and share it with the user securely. They will need it to log in for the first time.
+                  <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="ml-2">
+                    <div className="text-sm font-semibold text-blue-800 mb-1">
+                      User Authentication
+                    </div>
+                    <div className="text-xs text-blue-700">
+                      The user will sign in using their company Azure AD credentials. No password is needed.
                     </div>
                   </div>
                 </div>

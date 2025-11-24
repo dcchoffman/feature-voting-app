@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import { supabase } from '../supabaseClient';
 import * as db from '../services/databaseService';
@@ -11,13 +11,16 @@ import type { Product } from '../types';
 import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
-  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Star, Sparkles, Pencil
+  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star
 } from 'lucide-react';
 
 export default function SessionSelectionScreen() {
-  const { currentUser, setCurrentSession, refreshSessions, setCurrentUser } = useSession();
+  const { currentUser, setCurrentSession, refreshSessions, setCurrentUser, isLoading: contextLoading } = useSession();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(true);
+  const [waitingForAuth, setWaitingForAuth] = useState(false);
+  const sessionsLoadedRef = useRef(false);
   const [userSessions, setUserSessions] = useState<any[]>([]);
   const [sessionRoles, setSessionRoles] = useState<Record<string, { isAdmin: boolean; isStakeholder: boolean }>>({});
   const [featureCounts, setFeatureCounts] = useState<Record<string, number>>({});
@@ -36,7 +39,7 @@ export default function SessionSelectionScreen() {
     votesPerUser: 10,
     useAutoVotes: true,
     startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
   const [createSessionErrors, setCreateSessionErrors] = useState<Record<string, string>>({});
   const [isCreatingSession, setIsCreatingSession] = useState(false);
@@ -59,6 +62,7 @@ export default function SessionSelectionScreen() {
   const [expandedProductGroups, setExpandedProductGroups] = useState<Set<string>>(new Set());
   const [pendingProductName, setPendingProductName] = useState<string | null>(null);
   const [hoveredPlusButton, setHoveredPlusButton] = useState<string | null>(null);
+  const [modalOpenedFromCirclePlus, setModalOpenedFromCirclePlus] = useState(false);
   const [hoveredThirdCard, setHoveredThirdCard] = useState<string | null>(null);
   const [hoveredProductTab, setHoveredProductTab] = useState<string | null>(null);
   const [hoveredSessionCard, setHoveredSessionCard] = useState<string | null>(null);
@@ -68,6 +72,31 @@ export default function SessionSelectionScreen() {
   const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
   const [showEditProductColorPicker, setShowEditProductColorPicker] = useState(false);
   const [editTempColor, setEditTempColor] = useState<string>('#2D4660');
+
+  // Handle OAuth errors from Azure AD redirect
+  useEffect(() => {
+    const errorParam = searchParams.get('error');
+    const errorDescription = searchParams.get('error_description');
+    const errorCode = searchParams.get('error_code');
+    
+    if (errorParam) {
+      // Redirect to login with error message
+      const basename = window.location.pathname.startsWith('/feature-voting-app') 
+        ? '/feature-voting-app' 
+        : '';
+      
+      let errorMessage = 'Authentication failed.';
+      if (errorCode === 'unexpected_failure' && errorDescription?.includes('email')) {
+        errorMessage = 'Azure AD did not return your email address. Please ensure your Azure AD app has the correct API permissions (User.Read or email) and that your account has an email address.';
+      } else if (errorDescription) {
+        errorMessage = decodeURIComponent(errorDescription);
+      }
+      
+      // Store error in sessionStorage to show on login page
+      sessionStorage.setItem('oauth_error', errorMessage);
+      navigate(`${basename}/login`, { replace: true });
+    }
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     const loadModalProducts = async () => {
@@ -91,19 +120,18 @@ export default function SessionSelectionScreen() {
         const results = await db.getProductsForTenant(tenantId);
         
         // Log for debugging - ensure we're getting all products
-        console.log(`Loaded ${results.length} products from products table for tenant ${tenantId}`);
-        console.log('Products:', results.map(p => p.name));
         
         // Use all products from the database - they should all be included in the dropdown
         // No filtering, no additional logic - just use what's in the products table
         const uniqueProducts = results;
         
         setModalProducts(uniqueProducts);
-        // Only set default product if no product is already selected
-        // Also validate that the selected product exists in the results
+        // Only set default product if modal was opened from circle+ button
+        // If opened from top button, always start with empty selection
         setSelectedProductId(prev => {
-          if (prev) {
-            // If a product is pre-selected, verify it exists in the loaded products
+          // If modal was opened from circle+ button, preserve the pre-selected product
+          if (modalOpenedFromCirclePlus && prev) {
+            // Verify it exists in the loaded products
             const exists = uniqueProducts.some(p => p.id === prev);
             if (exists) {
               return prev;
@@ -121,7 +149,9 @@ export default function SessionSelectionScreen() {
             }
           }
           
-          return uniqueProducts[0]?.id ?? '';
+          // If opened from top button, don't pre-select any product
+          // If opened from circle+, use the pre-selected product (already handled above)
+          return modalOpenedFromCirclePlus ? (prev || '') : '';
         });
         // Update productLookup with ALL products from the products table
         // This ensures session cards use product names from the products table (single source of truth)
@@ -160,6 +190,72 @@ export default function SessionSelectionScreen() {
     loadModalProducts();
   }, [showCreateSessionModal, currentUser]);
 
+  // Helper function to parse date string as local date (avoiding timezone issues)
+  // Handles both "2025-12-10" and "2025-12-10T23:59:59.000Z" formats
+  const parseLocalDate = (dateString: string): Date => {
+    // Date strings like "2025-12-10" are parsed as UTC by default
+    // We need to parse them as local dates to avoid timezone shifts
+    if (!dateString || typeof dateString !== 'string') {
+      console.error('[parseLocalDate] Invalid date string:', dateString);
+      return new Date(); // Fallback to today
+    }
+    
+    // Extract just the date part (YYYY-MM-DD) if there's a time component
+    const dateOnly = dateString.split('T')[0].split(' ')[0];
+    const parts = dateOnly.split('-');
+    if (parts.length !== 3) {
+      console.error('[parseLocalDate] Invalid date format:', dateString);
+      return new Date(); // Fallback to today
+    }
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    
+    if (isNaN(year) || isNaN(month) || isNaN(day)) {
+      console.error('[parseLocalDate] Invalid date components:', { year, month, day });
+      return new Date(); // Fallback to today
+    }
+    
+    // Create date at midnight in local timezone to ensure clean day boundaries
+    const date = new Date(year, month - 1, day, 0, 0, 0, 0); // month is 0-indexed in Date constructor
+    
+    // Validate the date is valid
+    if (isNaN(date.getTime())) {
+      console.error('[parseLocalDate] Invalid date created:', { year, month, day, dateString });
+      return new Date(); // Fallback to today
+    }
+    
+    return date;
+  };
+
+  // Helper function to safely format a date to YYYY-MM-DD string
+  const formatDateToISO = (date: Date): string => {
+    if (!date || isNaN(date.getTime())) {
+      console.error('[formatDateToISO] Invalid date:', date);
+      // Return today's date as fallback
+      const today = new Date();
+      return today.toISOString().split('T')[0];
+    }
+    // Format as YYYY-MM-DD in local timezone
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper function to add days to a date safely (working with local date components)
+  // This ensures that if end_date is Dec 10 at 11:59 PM, the next session starts Dec 11 at midnight
+  const addDaysToLocalDate = (date: Date, days: number): Date => {
+    // Get local date components to avoid timezone issues
+    // We always work with the date at midnight to ensure clean day boundaries
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+    // Create new date at midnight with added days (ensures we're at the start of the day)
+    const newDate = new Date(year, month, day + days, 0, 0, 0, 0);
+    return newDate;
+  };
+
   const generateSessionCode = (): string => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
@@ -176,7 +272,7 @@ export default function SessionSelectionScreen() {
       votesPerUser: 10,
       useAutoVotes: true,
       startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     });
     setCreateSessionErrors({});
     setNewProductName('');
@@ -190,6 +286,8 @@ export default function SessionSelectionScreen() {
     setTempColor('#2D4660');
     setPendingProductName(null);
     setAllowCreateProduct(true);
+    setModalOpenedFromCirclePlus(false);
+    setSelectedProductId(''); // Always reset to no selection
   };
 
   const validateCreateSessionForm = () => {
@@ -209,8 +307,9 @@ export default function SessionSelectionScreen() {
         errors.votesPerUser = 'Votes per user cannot exceed 100';
       }
     }
-    const start = new Date(createSessionForm.startDate);
-    const end = new Date(createSessionForm.endDate);
+    // Parse dates using local date parsing to avoid timezone issues
+    const start = parseLocalDate(createSessionForm.startDate);
+    const end = parseLocalDate(createSessionForm.endDate);
     if (end <= start) {
       errors.endDate = 'End date must be after start date';
     }
@@ -232,10 +331,21 @@ export default function SessionSelectionScreen() {
 
   const handleCreateSessionChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setCreateSessionForm(prev => ({
+    setCreateSessionForm(prev => {
+      const updated = {
       ...prev,
       [name]: name === 'votesPerUser' ? parseInt(value) || 0 : value
-    }));
+      };
+      
+      // If start date is changed, automatically update end date to be 2 weeks (14 days) later
+      if (name === 'startDate' && value) {
+        const startDate = parseLocalDate(value);
+        const endDate = addDaysToLocalDate(startDate, 14);
+        updated.endDate = formatDateToISO(endDate);
+      }
+      
+      return updated;
+    });
     if (createSessionErrors[name]) {
       setCreateSessionErrors(prev => {
         const next = { ...prev };
@@ -324,13 +434,6 @@ export default function SessionSelectionScreen() {
       const hasNewProductName = trimmedNewProductName.length > 0;
       const hasSelectedProduct = selectedProductId && selectedProductId.trim() !== '';
       
-      console.log('Product creation check:', {
-        pendingProduct,
-        newProductName: trimmedNewProductName,
-        hasNewProductName,
-        selectedProductId,
-        hasSelectedProduct
-      });
       
       // Determine product name and color to use
       let productNameToCreate: string | null = null;
@@ -340,18 +443,15 @@ export default function SessionSelectionScreen() {
         // User clicked "Create New Product" button
         productNameToCreate = pendingProduct.name;
         productColorToUse = pendingProduct.color;
-        console.log('Using pendingProduct:', productNameToCreate);
       } else if (hasNewProductName) {
         // User typed a new product name - create it regardless of selectedProductId
         // (selectedProductId should be cleared when typing, but we'll create anyway if name is entered)
         productNameToCreate = trimmedNewProductName;
         productColorToUse = newProductColor;
-        console.log('Using newProductName:', productNameToCreate);
       }
       
       // Create product if we have a name to create
       if (productNameToCreate) {
-        console.log('Will create/find product:', productNameToCreate);
         // Check if product name already exists
         const existingProduct = modalProducts.find(p => 
           p.name.toLowerCase().trim() === productNameToCreate.toLowerCase().trim()
@@ -359,18 +459,15 @@ export default function SessionSelectionScreen() {
         
         if (existingProduct) {
           // Product already exists, use it
-          console.log('Product already exists, using:', existingProduct.id);
           productIdToUse = existingProduct.id;
         } else if (tenantId) {
           // Create the new product automatically
-          console.log('Creating new product:', productNameToCreate);
           try {
             const created = await db.createProductForTenant(
               tenantId, 
               productNameToCreate, 
               productColorToUse || undefined
             );
-            console.log('Product created successfully:', created.id);
             productIdToUse = created.id;
             
             // Update local state for immediate display
@@ -401,29 +498,64 @@ export default function SessionSelectionScreen() {
         }
       }
 
-      // Check if there's already an active session for this product
+      // Check for duplicate sessions and active session conflicts
       if (productIdToUse) {
-        const existingActiveSession = await db.getActiveSessionByProduct(productIdToUse);
-        if (existingActiveSession) {
+        // First, check if there's already a session with the exact same dates for this product
+        // Compare date parts only (ignore time components)
+        const allSessionsForProduct = userSessions.filter(s => s.product_id === productIdToUse);
+        const newStartDateOnly = createSessionForm.startDate.split('T')[0];
+        const newEndDateOnly = createSessionForm.endDate.split('T')[0];
+        const duplicateSession = allSessionsForProduct.find(s => {
+          const existingStartDateOnly = s.start_date.split('T')[0];
+          const existingEndDateOnly = s.end_date.split('T')[0];
+          return existingStartDateOnly === newStartDateOnly && existingEndDateOnly === newEndDateOnly;
+        });
+        
+        if (duplicateSession) {
           const productName = productLookup[productIdToUse] || 'this product';
           setCreateSessionErrors(prev => ({
             ...prev,
-            submit: `There is already an active session for ${productName}. Each product can only have one active session at a time.`
+            submit: `A session with the same dates (${formatDate(createSessionForm.startDate)} - ${formatDate(createSessionForm.endDate)}) already exists for ${productName}. Please choose different dates.`
           }));
           setIsCreatingSession(false);
           return;
+        }
+        
+        // Check if there's already an active session for this product
+        // Allow creating a new session if it starts after the active session ends
+        const existingActiveSession = await db.getActiveSessionByProduct(productIdToUse);
+        if (existingActiveSession) {
+          // Parse dates using local date parsing to avoid timezone issues
+          const activeSessionEndDate = parseLocalDate(existingActiveSession.end_date);
+          const newSessionStartDate = parseLocalDate(createSessionForm.startDate);
+          
+          // Only block if the new session starts before or on the active session's end date
+          if (newSessionStartDate <= activeSessionEndDate) {
+            const productName = productLookup[productIdToUse] || 'this product';
+            setCreateSessionErrors(prev => ({
+              ...prev,
+              submit: `There is already an active session for ${productName}. The new session must start after ${formatDate(existingActiveSession.end_date)}.`
+            }));
+            setIsCreatingSession(false);
+            return;
+          }
+          // If new session starts after active session ends, allow it (it will be an upcoming session)
         }
       }
 
       // Products table is the single source of truth - only use product_id
       // product_name will be looked up from products table when needed
+      // Format dates with times: start at midnight (00:00:00), end at 11:59:59 PM (23:59:59)
+      const startDateWithTime = `${createSessionForm.startDate}T00:00:00`;
+      const endDateWithTime = `${createSessionForm.endDate}T23:59:59`;
+      
       const newSession = await db.createSession({
         title: createSessionForm.title,
         goal: createSessionForm.goal,
         votes_per_user: createSessionForm.votesPerUser,
         use_auto_votes: createSessionForm.useAutoVotes,
-        start_date: createSessionForm.startDate,
-        end_date: createSessionForm.endDate,
+        start_date: startDateWithTime,
+        end_date: endDateWithTime,
         is_active: true,
         session_code: code,
         access_type: 'invite-only',
@@ -431,7 +563,19 @@ export default function SessionSelectionScreen() {
         product_name: null // Products table is single source of truth - don't store product_name
       });
 
+      // Add session admin - if this fails, log it but don't block session creation
+      // The session was created successfully, so we continue
+      try {
       await db.addSessionAdmin(newSession.id, currentUser.id);
+      } catch (adminError: any) {
+        console.error('Error adding session admin (session was created successfully):', adminError);
+        // Log the error but don't throw - the session was created successfully
+        // The user can manually add themselves as admin if needed
+        if (adminError?.code === '42501') {
+          console.warn('RLS policy violation when adding session admin. The session was created but admin assignment failed.');
+          console.warn('This may require updating RLS policies for the session_admins table.');
+        }
+      }
       
       // Get the session with product information before refreshing
       const refreshedSession = await db.getSessionById(newSession.id);
@@ -496,18 +640,17 @@ export default function SessionSelectionScreen() {
     };
   }, [mobileMenuOpen]);
 
-  useEffect(() => {
+  const loadUserSessions = useCallback(async () => {
     if (!currentUser) {
-      navigate('/login');
+      console.log('[SessionSelectionScreen] No current user, skipping loadUserSessions');
       return;
     }
+    if (sessionsLoadedRef.current) {
+      console.log('[SessionSelectionScreen] Sessions already loading, skipping duplicate call');
+      return; // Already loaded or currently loading
+    }
 
-    loadUserSessions();
-  }, [currentUser]);
-
-  const loadUserSessions = async () => {
-    if (!currentUser) return;
-
+    sessionsLoadedRef.current = true; // Mark as loading to prevent duplicate calls
     setIsLoading(true);
     try {
       // Check if system admin (including fallback)
@@ -516,9 +659,12 @@ export default function SessionSelectionScreen() {
       setIsSystemAdmin(sysAdmin);
 
       // Get sessions - system admins see everything
-      const freshSessions = sysAdmin
-        ? await db.getAllSessions()
-        : await db.getSessionsForUser(currentUser.id);
+      let freshSessions;
+      if (sysAdmin) {
+        freshSessions = await db.getAllSessions();
+      } else {
+        freshSessions = await db.getSessionsForUser(currentUser.id);
+      }
 
       // Build lookup of product_id -> product_name/color for consistent display
       const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId ?? null;
@@ -548,21 +694,36 @@ export default function SessionSelectionScreen() {
       const counts: Record<string, number> = {};
       const votedStatus: Record<string, boolean> = {};
 
-      for (const session of freshSessions) {
+      for (let i = 0; i < freshSessions.length; i++) {
+        const session = freshSessions[i];
+        try {
         const [isAdmin, isStakeholder, features, votes] = await Promise.all([
           // System admins have admin access to all sessions
           sysAdmin ? Promise.resolve(true) : db.isUserSessionAdmin(session.id, currentUser.id),
           db.isUserSessionStakeholder(session.id, currentUser.email),
           db.getFeatures(session.id),
-          db.getVotes(session.id)
+            db.getVotes(session.id).catch(err => {
+              // If votes fail to load, just return empty array
+              console.warn(`Failed to load votes for session ${session.id}:`, err);
+              return [];
+            })
         ]);
+
 
         roles[session.id] = { isAdmin, isStakeholder };
         counts[session.id] = features.length;
         
         // Check if user has voted in this session
-        const hasVoted = votes.some(v => v.user_id === currentUser.id);
+        const hasVoted = votes.some((v: any) => v.user_id === currentUser.id);
         votedStatus[session.id] = hasVoted;
+        } catch (sessionError) {
+          // If one session fails, log it but continue with others
+          console.warn(`Error loading data for session ${session.id}:`, sessionError);
+          // Set default values for this session
+          roles[session.id] = { isAdmin: false, isStakeholder: false };
+          counts[session.id] = 0;
+          votedStatus[session.id] = false;
+        }
       }
 
       // Refresh the context with fresh sessions
@@ -574,12 +735,85 @@ export default function SessionSelectionScreen() {
       setVotingStatus(votedStatus);
       setProductLookup(productsMap);
       setProductColorLookup(productColorMap);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading sessions:', error);
+      // Don't redirect on network errors - just show empty state
+      // Network errors are usually temporary (connection issues, CORS, etc.)
+      if (error?.message?.includes('Failed to fetch') || error?.code === 'ERR_FAILED') {
+        console.warn('Network error loading sessions - will retry. This is usually temporary.');
+        // Set empty arrays so UI can still render
+        setUserSessions([]);
+        setSessionRoles({});
+        setFeatureCounts({});
+        setVotingStatus({});
+      } else {
+        // For other errors, still set empty state but log it
+        setUserSessions([]);
+        setSessionRoles({});
+        setFeatureCounts({});
+        setVotingStatus({});
+      }
+      // Reset the ref on error so we can retry
+      sessionsLoadedRef.current = false;
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentUser, refreshSessions]);
+
+  useEffect(() => {
+    // Wait for context to finish loading before checking for user
+    if (contextLoading) {
+      return;
+    }
+    
+    // Check if we're coming from an OAuth redirect
+    const isOAuthCallback = window.location.search.includes('code=') || 
+                            window.location.hash.includes('access_token') ||
+                            window.location.search.includes('error=');
+    
+    // If OAuth callback and no user yet, wait for auth state change
+    if (isOAuthCallback && !currentUser && !waitingForAuth) {
+      setWaitingForAuth(true);
+      // Give Supabase time to process the OAuth callback (onAuthStateChange will fire)
+      const timeout = setTimeout(() => {
+        setWaitingForAuth(false);
+        if (!currentUser) {
+          const basename = window.location.pathname.startsWith('/feature-voting-app') 
+            ? '/feature-voting-app' 
+            : '';
+          navigate(`${basename}/login`, { replace: true });
+        }
+      }, 3000); // Wait 3 seconds for OAuth processing
+      
+      return () => clearTimeout(timeout);
+    }
+    
+    // If we were waiting and now have a user, clear the waiting state
+    if (waitingForAuth && currentUser) {
+      setWaitingForAuth(false);
+    }
+    
+    // Don't redirect if we're waiting for auth
+    if (waitingForAuth) {
+      return;
+    }
+    
+    // Only redirect if we're sure there's no user AND we're not loading
+    // Don't redirect on network errors - user might be authenticated but network is down
+    if (!currentUser && !contextLoading) {
+      const basename = window.location.pathname.startsWith('/feature-voting-app') 
+        ? '/feature-voting-app' 
+        : '';
+      navigate(`${basename}/login`, { replace: true });
+      return;
+    }
+
+    // Only load sessions if we have a user and context is ready, and we haven't loaded yet
+    if (currentUser && !contextLoading && !sessionsLoadedRef.current) {
+      loadUserSessions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, contextLoading, navigate, waitingForAuth]);
 
   const getEffectiveVotesPerUser = (session: any): { votes: number; displayText: string; isAuto: boolean; formula: string } => {
     const featureCount = featureCounts[session.id] || 0;
@@ -635,11 +869,36 @@ export default function SessionSelectionScreen() {
       sessionStorage.removeItem('oauth_action');
     } catch {}
     setMobileMenuOpen(false);
-    navigate('/login', { replace: true });
+    // Use window.location for logout to ensure clean navigation and avoid basename doubling
+    const basename = window.location.pathname.startsWith('/feature-voting-app') 
+      ? '/feature-voting-app' 
+      : '';
+    window.location.href = `${basename}/login`;
   };
 
   const formatDate = (dateString: string): string => {
+    // Parse as local date to avoid timezone issues
+    // Extract just the date part (YYYY-MM-DD) if there's a time component
+    const dateOnly = dateString.split('T')[0].split(' ')[0];
+    const parts = dateOnly.split('-');
+    
+    if (parts.length !== 3) {
+      // Fallback to original behavior if format is unexpected
     const date = new Date(dateString);
+      const formatted = date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+      return formatted.replace(/\b(\d{4})\b/g, (match) => `'${match.slice(-2)}`);
+    }
+    
+    // Parse as local date (month is 0-indexed)
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    
+    const date = new Date(year, month, day);
     const formatted = date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -712,6 +971,7 @@ export default function SessionSelectionScreen() {
 
   const handleCloseCreateModal = () => {
     setShowCreateSessionModal(false);
+    setModalOpenedFromCirclePlus(false);
     resetCreateSessionForm();
   };
 
@@ -774,13 +1034,6 @@ export default function SessionSelectionScreen() {
     }
     groups[normalizedName].push(session);
   });
-  
-  // Debug logging to see what's being grouped
-  console.log('🔍 Product grouping:', Object.entries(groups).map(([name, sessions]) => ({
-    product: name,
-    count: sessions.length,
-    sessionTitles: sessions.map(s => s.title)
-  })));
   
   return groups;
 };
@@ -908,19 +1161,19 @@ export default function SessionSelectionScreen() {
     };
 
     return (
-      <div
+          <div
         className="absolute left-0 px-4 py-1 pr-8 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap group cursor-pointer"
-        style={{
-          top: '0',
-          left: '-1px',
-          transform: 'translateY(-100%)',
-          backgroundColor: productColors.background,
-          color: productColors.text,
-          borderColor: productColors.border,
-          borderWidth: '1px',
-          borderBottomWidth: '0',
-          boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
-          borderTopLeftRadius: '0.9rem',
+            style={{
+              top: '0',
+              left: '-1px',
+              transform: 'translateY(-100%)',
+              backgroundColor: productColors.background,
+              color: productColors.text,
+              borderColor: productColors.border,
+              borderWidth: '1px',
+              borderBottomWidth: '0',
+              boxShadow: '0 4px 8px rgba(16,24,40,0.06)',
+              borderTopLeftRadius: '0.9rem',
           borderTopRightRadius: '0.9rem',
           overflow: 'visible'
         }}
@@ -931,8 +1184,8 @@ export default function SessionSelectionScreen() {
         }}
         onMouseLeave={() => setHoveredProductTab(null)}
         onClick={viewMode !== 'stakeholder' && hasAdminAccess ? handleTabClick : undefined}
-      >
-        <BadgeCheck className="h-4 w-4 flex-shrink-0" />
+          >
+            <BadgeCheck className="h-4 w-4 flex-shrink-0" />
         <span className="overflow-hidden text-ellipsis flex-1 min-w-0">{productName}</span>
         {productId && hoveredProductTab === key && viewMode !== 'stakeholder' && hasAdminAccess && (
           <div className="absolute right-2 flex-shrink-0 opacity-80">
@@ -963,30 +1216,24 @@ export default function SessionSelectionScreen() {
           {/* Action Buttons */}
           <div className="flex justify-between items-start mb-4">
             <div>
-              <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
+              {/* Only show Vote! button for Active sessions (not Upcoming or Closed) */}
+              {status.text === 'Active' && (
+                <div className="relative inline-block" style={{ marginLeft: '-10px', marginTop: '-10px' }}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!isClosed) handleSelectSession(session);
+                      handleSelectSession(session);
                   }}
-                  disabled={isClosed}
-                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-                    isClosed
-                      ? 'bg-gray-200 text-gray-500'
-                      : 'bg-[#576C71] text-white hover:bg-[#1E5461]'
-                  }`}
-                  style={isClosed ? { cursor: 'not-allowed' } : {}}
+                    className="inline-flex items-center px-4 py-2 rounded-md text-sm font-semibold transition-colors text-white shadow-md"
+                    style={{ backgroundColor: '#1E6154' }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#1E6154'}
                 >
-                  <Vote className="h-3 w-3 mr-1" />
+                    <Vote className="h-4 w-4 mr-1.5" />
                   Vote!
                 </button>
-                {isClosed && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                    Session Closed
-                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
                   </div>
                 )}
-              </div>
             </div>
 
             <div className="flex items-center gap-1">
@@ -1084,13 +1331,13 @@ export default function SessionSelectionScreen() {
                   )}
                 </div>
                 {status.text !== 'Upcoming' && (
-                  <button
-                    onClick={(e) => handleViewResults(e, session)}
+                <button
+                  onClick={(e) => handleViewResults(e, session)}
                     className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#E0A814] transition-colors cursor-pointer flex-shrink-0"
-                  >
-                    <BarChart2 className="h-3 w-3 mr-1" />
-                    {status.text === 'Closed' ? 'Final Results' : 'Current Results'}
-                  </button>
+                >
+                  <BarChart2 className="h-3 w-3 mr-1" />
+                  {status.text === 'Closed' ? 'Final Results' : 'Current Results'}
+                </button>
                 )}
               </div>
             </div>
@@ -1125,6 +1372,18 @@ export default function SessionSelectionScreen() {
     );
   };
 
+  // Show loading screen during OAuth callback or initial load
+  if (contextLoading || waitingForAuth || (isLoading && !currentUser)) {
+    return (
+      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+          <p className="text-gray-600">Signing you in...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
       {/* Desktop: Centered logo at top */}
@@ -1143,7 +1402,7 @@ export default function SessionSelectionScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to title */}
           <img
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden cursor-pointer hover:opacity-80 transition-opacity"
             style={{ width: '40px', height: '40px' }}
@@ -1154,17 +1413,17 @@ export default function SessionSelectionScreen() {
             <p className="text-sm text-gray-600">
               Welcome, {currentUser?.name}
               {isSystemAdmin && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
                   System Admin
                 </span>
               )}
               {!isSystemAdmin && adminSessions.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
                   Session Admin
                 </span>
               )}
               {!isSystemAdmin && adminSessions.length === 0 && stakeholderOnlySessions.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#8B5A4A] text-white">
                   Stakeholder
                 </span>
               )}
@@ -1190,7 +1449,9 @@ export default function SessionSelectionScreen() {
               <>
                 <button
                   onClick={() => {
+                    setModalOpenedFromCirclePlus(false);
                     setAllowCreateProduct(true);
+                    setSelectedProductId(''); // Always start with no product selected
                     setShowCreateSessionModal(true);
                   }}
                   className="flex items-center px-4 py-2 bg-[#C89212] text-white rounded-lg hover:bg-[#6A4234] transition-colors"
@@ -1405,6 +1666,34 @@ export default function SessionSelectionScreen() {
                                     if (productName && productName !== 'No Product') {
                                       setPendingProductName(productName);
                                     }
+                                    
+                                    // Calculate dates: start after the furthest out end_date
+                                    // Initialize with first session's end date to ensure we find the actual latest
+                                    let latestEndDate = sessions.length > 0 
+                                      ? parseLocalDate(sessions[0].end_date) 
+                                      : new Date();
+                                    sessions.forEach(session => {
+                                      const sessionEndDate = parseLocalDate(session.end_date);
+                                      if (sessionEndDate > latestEndDate) {
+                                        latestEndDate = sessionEndDate;
+                                      }
+                                    });
+                                    
+                                    // Start date should ALWAYS be the NEXT day after the latest end date (at midnight)
+                                    // (if end date is Dec 11 at 11:59 PM, next session starts Dec 12 at midnight)
+                                    const newStartDate = addDaysToLocalDate(latestEndDate, 1);
+                                    
+                                    // End date is 14 days (2 weeks) after start date
+                                    const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                    
+                                    // Update form with calculated dates
+                                    setCreateSessionForm(prev => ({
+                                      ...prev,
+                                      startDate: formatDateToISO(newStartDate),
+                                      endDate: formatDateToISO(newEndDate)
+                                    }));
+                                    
+                                    setModalOpenedFromCirclePlus(true);
                                     setAllowCreateProduct(false);
                                     setShowCreateSessionModal(true);
                                   }}
@@ -1596,7 +1885,7 @@ export default function SessionSelectionScreen() {
                               
                               {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) (only for single-session products) */}
                               {isSingleSessionProduct && hasAdminAccess && viewMode !== 'stakeholder' && (
-                                <div
+                              <div
                                   className="absolute z-20 bottom-[-20px] left-1/2 -translate-x-1/2 md:bottom-auto md:left-auto md:translate-x-0 md:right-[-20px] md:top-1/2 md:-translate-y-1/2"
                                 >
                                   <button
@@ -1612,11 +1901,29 @@ export default function SessionSelectionScreen() {
                                       if (productName && productName !== 'No Product') {
                                         setPendingProductName(productName);
                                       }
+                                      
+                                      // Calculate dates: start on the NEXT day after end_date (at midnight)
+                                      const sessionEndDate = parseLocalDate(session.end_date);
+                                      // Start date should ALWAYS be the NEXT day after the end date (at midnight)
+                                      // (if end date is Dec 11 at 11:59 PM, next session starts Dec 12 at midnight)
+                                      const newStartDate = addDaysToLocalDate(sessionEndDate, 1);
+                                      
+                                      // End date is 14 days (2 weeks) after start date
+                                      const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                      
+                                      // Update form with calculated dates
+                                      setCreateSessionForm(prev => ({
+                                        ...prev,
+                                        startDate: formatDateToISO(newStartDate),
+                                        endDate: formatDateToISO(newEndDate)
+                                      }));
+                                      
+                                      setModalOpenedFromCirclePlus(true);
                                       setAllowCreateProduct(false);
                                       setShowCreateSessionModal(true);
                                     }}
                                     className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
-                                    style={{
+                                style={{
                                       backgroundColor: sessionProductColors.background || '#C89212',
                                       color: sessionProductColors.text || '#FFFFFF'
                                     }}
@@ -1634,7 +1941,7 @@ export default function SessionSelectionScreen() {
                                   >
                                     <Plus className="h-5 w-5" />
                                   </button>
-                                </div>
+                              </div>
                               )}
                               <div className="p-6 flex flex-col h-full">
                                 {/* Voting Status Badge */}
@@ -2004,6 +2311,33 @@ export default function SessionSelectionScreen() {
                                         if (productName && productName !== 'No Product') {
                                           setPendingProductName(productName);
                                         }
+                                        
+                                        // Calculate dates: start after the furthest out end_date
+                                        // Initialize with first session's end date to ensure we find the actual latest
+                                        let latestEndDate = sessions.length > 0 
+                                          ? parseLocalDate(sessions[0].end_date) 
+                                          : new Date();
+                                        sessions.forEach(session => {
+                                          const sessionEndDate = parseLocalDate(session.end_date);
+                                          if (sessionEndDate > latestEndDate) {
+                                            latestEndDate = sessionEndDate;
+                                          }
+                                        });
+                                        
+                                        // Start date should ALWAYS be the NEXT day after the latest end date (at midnight)
+                                        // (if end date is Dec 11 at 11:59 PM, next session starts Dec 12 at midnight)
+                                        const newStartDate = addDaysToLocalDate(latestEndDate, 1);
+                                        
+                                        // End date is 14 days (2 weeks) after start date
+                                        const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                        
+                                        // Update form with calculated dates
+                                        setCreateSessionForm(prev => ({
+                                          ...prev,
+                                          startDate: formatDateToISO(newStartDate),
+                                          endDate: formatDateToISO(newEndDate)
+                                        }));
+                                        
                                         setAllowCreateProduct(false);
                                         setShowCreateSessionModal(true);
                                       }}
@@ -2053,128 +2387,52 @@ export default function SessionSelectionScreen() {
                                   {sessions.length === 2 && (
                                     <>
                                       <style>{`
-                                        @keyframes fadeIn {
+                                        @keyframes growFromCenter {
                                           from {
                                             opacity: 0;
+                                            transform: scale(0.3);
                                           }
                                           to {
                                             opacity: 1;
+                                            transform: scale(1);
                                           }
                                         }
                                         @keyframes sparkle {
-                                          0% {
-                                            opacity: 0.2;
-                                            transform: scale(0.6) rotate(0deg);
-                                            filter: brightness(0.8);
-                                          }
-                                          15% {
-                                            opacity: 1;
-                                            transform: scale(1.4) rotate(120deg);
-                                            filter: brightness(1.5);
-                                          }
-                                          30% {
-                                            opacity: 0.3;
-                                            transform: scale(0.7) rotate(240deg);
-                                            filter: brightness(0.6);
-                                          }
-                                          45% {
-                                            opacity: 1;
-                                            transform: scale(1.5) rotate(360deg);
-                                            filter: brightness(1.8);
-                                          }
-                                          60% {
-                                            opacity: 0.4;
-                                            transform: scale(0.8) rotate(480deg);
-                                            filter: brightness(0.7);
-                                          }
-                                          75% {
-                                            opacity: 1;
-                                            transform: scale(1.3) rotate(600deg);
-                                            filter: brightness(1.6);
-                                          }
-                                          90% {
-                                            opacity: 0.3;
-                                            transform: scale(0.65) rotate(720deg);
-                                            filter: brightness(0.5);
-                                          }
-                                          100% {
-                                            opacity: 0.2;
-                                            transform: scale(0.6) rotate(720deg);
-                                            filter: brightness(0.8);
-                                          }
-                                        }
-                                        @keyframes twinkle {
-                                          0% {
+                                          0%, 100% {
                                             opacity: 0.1;
-                                            transform: scale(0.5);
-                                            filter: brightness(0.5);
-                                          }
-                                          10% {
-                                            opacity: 1;
-                                            transform: scale(1.6);
-                                            filter: brightness(2);
-                                          }
-                                          20% {
-                                            opacity: 0.2;
-                                            transform: scale(0.6);
-                                            filter: brightness(0.4);
-                                          }
-                                          35% {
-                                            opacity: 1;
-                                            transform: scale(1.7);
-                                            filter: brightness(2.2);
+                                            transform: scale(0.7) rotate(0deg);
                                           }
                                           50% {
-                                            opacity: 0.15;
-                                            transform: scale(0.55);
-                                            filter: brightness(0.3);
-                                          }
-                                          65% {
-                                            opacity: 1;
-                                            transform: scale(1.5);
-                                            filter: brightness(1.9);
-                                          }
-                                          80% {
                                             opacity: 0.25;
-                                            transform: scale(0.7);
-                                            filter: brightness(0.6);
-                                          }
-                                          95% {
-                                            opacity: 1;
-                                            transform: scale(1.4);
-                                            filter: brightness(1.8);
-                                          }
-                                          100% {
-                                            opacity: 0.1;
-                                            transform: scale(0.5);
-                                            filter: brightness(0.5);
+                                            transform: scale(1.3) rotate(180deg);
                                           }
                                         }
-                                        @keyframes gentlePulse {
-                                          0% {
-                                            opacity: 0.3;
-                                            transform: scale(0.8);
-                                            filter: brightness(0.7);
+                                        @keyframes sparkleSlow {
+                                          0%, 100% {
+                                            opacity: 0.08;
+                                            transform: scale(0.6);
+                                          }
+                                          50% {
+                                            opacity: 0.2;
+                                            transform: scale(1.4);
+                                          }
+                                        }
+                                        @keyframes starTwinkle {
+                                          0%, 100% {
+                                            opacity: 0.12;
+                                            transform: scale(0.8) rotate(0deg);
                                           }
                                           25% {
-                                            opacity: 1;
-                                            transform: scale(1.4);
-                                            filter: brightness(1.6);
+                                            opacity: 0.22;
+                                            transform: scale(1.1) rotate(90deg);
                                           }
                                           50% {
-                                            opacity: 0.2;
-                                            transform: scale(0.6);
-                                            filter: brightness(0.5);
+                                            opacity: 0.18;
+                                            transform: scale(1.3) rotate(180deg);
                                           }
                                           75% {
-                                            opacity: 1;
-                                            transform: scale(1.3);
-                                            filter: brightness(1.5);
-                                          }
-                                          100% {
-                                            opacity: 0.3;
-                                            transform: scale(0.8);
-                                            filter: brightness(0.7);
+                                            opacity: 0.22;
+                                            transform: scale(1.1) rotate(270deg);
                                           }
                                         }
                                       `}</style>
@@ -2189,156 +2447,115 @@ export default function SessionSelectionScreen() {
                                         onMouseLeave={() => setHoveredThirdCard(null)}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          const productId = sessions[0]?.product_id;
-                                          const productName = getDisplayProductName(sessions[0], productLookup);
-                                          if (productId) {
-                                            setSelectedProductId(productId);
-                                          }
-                                          if (productName && productName !== 'No Product') {
-                                            setPendingProductName(productName);
-                                          }
+                                            const productId = sessions[0]?.product_id;
+                                            const productName = getDisplayProductName(sessions[0], productLookup);
+                                            if (productId) {
+                                              setSelectedProductId(productId);
+                                            }
+                                            if (productName && productName !== 'No Product') {
+                                              setPendingProductName(productName);
+                                            }
+                                            
+                                            // Calculate dates: start after the furthest out end_date
+                                            // Initialize with first session's end date to ensure we find the actual latest
+                                            let latestEndDate = sessions.length > 0 
+                                              ? parseLocalDate(sessions[0].end_date) 
+                                              : new Date();
+                                            sessions.forEach(session => {
+                                              const sessionEndDate = parseLocalDate(session.end_date);
+                                              if (sessionEndDate > latestEndDate) {
+                                                latestEndDate = sessionEndDate;
+                                              }
+                                            });
+                                            
+                                            // Start date should ALWAYS be the NEXT day after the latest end date (at midnight)
+                                            // (if end date is Dec 11 at 11:59 PM, next session starts Dec 12 at midnight)
+                                            const newStartDate = addDaysToLocalDate(latestEndDate, 1);
+                                            
+                                            // End date is 14 days (2 weeks) after start date
+                                            const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                            
+                                            // Update form with calculated dates
+                                            setCreateSessionForm(prev => ({
+                                              ...prev,
+                                              startDate: formatDateToISO(newStartDate),
+                                              endDate: formatDateToISO(newEndDate)
+                                            }));
+                                            
+                                            
+                                            setModalOpenedFromCirclePlus(true);
+                                            
                                           setAllowCreateProduct(false);
-                                          setShowCreateSessionModal(true);
-                                        }}
+                                            setShowCreateSessionModal(true);
+                                          }}
                                       >
                                         <div 
                                           className="p-6 flex flex-col h-full items-center justify-center min-h-[200px] relative rounded-lg transition-all duration-300" 
-                                        style={{ 
+                                          style={{
                                           backgroundColor: 'transparent',
                                           backgroundImage: (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName)
                                             ? `radial-gradient(circle at center, ${productColors.badgeBackground || 'rgba(200, 146, 18, 0.15)'}, transparent 70%)`
                                             : 'none'
                                         }}
                                       >
-                                        {/* Sparkle effects - fade in when card or + button is hovered */}
+                                        {/* Sparkles and Stars - many with variation, all dim */}
                                         {(hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName) && (
                                           <>
-                                            <Star 
-                                              className="absolute top-4 left-4 w-3 h-3" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '0ms', 
-                                                animation: 'fadeIn 1.2s ease-in forwards, sparkle 2.8s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Sparkles 
-                                              className="absolute top-6 right-6 w-4 h-4" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '300ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.3s forwards, twinkle 2.4s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
-                                              }} 
-                                            />
-                                            <Star 
-                                              className="absolute bottom-8 left-8 w-3.5 h-3.5" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '600ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.6s forwards, gentlePulse 3.2s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Sparkles 
-                                              className="absolute bottom-4 right-4 w-3 h-3" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '900ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.9s forwards, sparkle 3.5s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Star 
-                                              className="absolute top-1/2 left-2 w-4 h-4" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '150ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.15s forwards, twinkle 2.1s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
-                                              }} 
-                                            />
-                                            <Sparkles 
-                                              className="absolute top-1/2 right-2 w-3 h-3" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '450ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.45s forwards, gentlePulse 2.9s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Star 
-                                              className="absolute top-4 left-1/2 w-3.5 h-3.5" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '750ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.75s forwards, sparkle 2.6s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Sparkles 
-                                              className="absolute bottom-2 left-1/2 w-3 h-3" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '1050ms', 
-                                                animation: 'fadeIn 1.2s ease-in 1.05s forwards, twinkle 3.1s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
-                                              }} 
-                                            />
-                                            <Star 
-                                              className="absolute top-1/4 right-1/4 w-2.5 h-2.5" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '200ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.2s forwards, gentlePulse 3.4s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 3px currentColor) drop-shadow(0 0 6px currentColor)'
-                                              }} 
-                                            />
-                                            <Sparkles 
-                                              className="absolute bottom-1/4 left-1/4 w-3.5 h-3.5" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '800ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.8s forwards, sparkle 3.0s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Star 
-                                              className="absolute top-3/4 right-1/3 w-3 h-3" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '500ms', 
-                                                animation: 'fadeIn 1.2s ease-in 0.5s forwards, twinkle 2.7s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor)'
-                                              }} 
-                                            />
-                                            <Sparkles 
-                                              className="absolute bottom-1/3 left-1/3 w-4 h-4" 
-                                              style={{ 
-                                                color: productColors.background || '#C89212', 
-                                                animationDelay: '1100ms', 
-                                                animation: 'fadeIn 1.2s ease-in 1.1s forwards, gentlePulse 3.3s ease-in-out infinite',
-                                                filter: 'drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px currentColor)'
-                                              }} 
-                                            />
+                                            {/* Round sparkles */}
+                                            <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 1.8s ease-in-out infinite', animationDelay: '0ms', opacity: 0.12 }} />
+                                            <div className="absolute top-5 left-8 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.5s ease-in-out infinite', animationDelay: '200ms', opacity: 0.1 }} />
+                                            <div className="absolute top-8 left-5 w-2 h-2 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 2.2s ease-in-out infinite', animationDelay: '400ms', opacity: 0.15 }} />
+                                            <div className="absolute top-4 right-6 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.8s ease-in-out infinite', animationDelay: '600ms', opacity: 0.1 }} />
+                                            <div className="absolute top-7 right-4 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 2s ease-in-out infinite', animationDelay: '800ms', opacity: 0.12 }} />
+                                            <div className="absolute top-10 right-9 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.3s ease-in-out infinite', animationDelay: '1000ms', opacity: 0.1 }} />
+                                            <div className="absolute bottom-5 left-4 w-2 h-2 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 2.1s ease-in-out infinite', animationDelay: '1200ms', opacity: 0.15 }} />
+                                            <div className="absolute bottom-7 left-9 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.6s ease-in-out infinite', animationDelay: '1400ms', opacity: 0.1 }} />
+                                            <div className="absolute bottom-4 left-12 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 1.9s ease-in-out infinite', animationDelay: '1600ms', opacity: 0.12 }} />
+                                            <div className="absolute bottom-8 right-5 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.4s ease-in-out infinite', animationDelay: '1800ms', opacity: 0.1 }} />
+                                            <div className="absolute bottom-6 right-10 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 2.2s ease-in-out infinite', animationDelay: '2000ms', opacity: 0.12 }} />
+                                            <div className="absolute bottom-3 right-7 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.7s ease-in-out infinite', animationDelay: '2200ms', opacity: 0.1 }} />
+                                            
+                                            {/* Star icons */}
+                                            <Star className="absolute top-6 left-12" size={8} style={{ color: productColors.background || '#C89212', animation: 'starTwinkle 3s ease-in-out infinite', animationDelay: '300ms', opacity: 0.15 }} />
+                                            <Star className="absolute top-9 right-12" size={6} style={{ color: productColors.background || '#C89212', animation: 'starTwinkle 3.5s ease-in-out infinite', animationDelay: '700ms', opacity: 0.12 }} />
+                                            <Star className="absolute bottom-9 left-6" size={7} style={{ color: productColors.background || '#C89212', animation: 'starTwinkle 2.8s ease-in-out infinite', animationDelay: '1100ms', opacity: 0.13 }} />
+                                            <Star className="absolute bottom-5 right-12" size={5} style={{ color: productColors.background || '#C89212', animation: 'starTwinkle 3.2s ease-in-out infinite', animationDelay: '1500ms', opacity: 0.1 }} />
+                                            <Star className="absolute top-12 left-1/2 -translate-x-1/2" size={6} style={{ color: productColors.background || '#C89212', animation: 'starTwinkle 2.9s ease-in-out infinite', animationDelay: '500ms', opacity: 0.12 }} />
+                                            <Star className="absolute bottom-12 left-1/2 -translate-x-1/2" size={7} style={{ color: productColors.background || '#C89212', animation: 'starTwinkle 3.3s ease-in-out infinite', animationDelay: '1300ms', opacity: 0.13 }} />
+                                            
+                                            {/* Sparkles icons */}
+                                            <Sparkles className="absolute top-2 left-6" size={6} style={{ color: productColors.background || '#C89212', animation: 'sparkle 2.1s ease-in-out infinite', animationDelay: '250ms', opacity: 0.12 }} />
+                                            <Sparkles className="absolute top-11 right-6" size={5} style={{ color: productColors.background || '#C89212', animation: 'sparkleSlow 2.7s ease-in-out infinite', animationDelay: '750ms', opacity: 0.1 }} />
+                                            <Sparkles className="absolute bottom-10 left-10" size={7} style={{ color: productColors.background || '#C89212', animation: 'sparkle 2.4s ease-in-out infinite', animationDelay: '1150ms', opacity: 0.13 }} />
+                                            <Sparkles className="absolute bottom-2 right-8" size={6} style={{ color: productColors.background || '#C89212', animation: 'sparkleSlow 2.9s ease-in-out infinite', animationDelay: '1550ms', opacity: 0.11 }} />
+                                            <Sparkles className="absolute top-1/2 left-2" size={5} style={{ color: productColors.background || '#C89212', animation: 'sparkle 2.6s ease-in-out infinite', animationDelay: '450ms', opacity: 0.1 }} />
+                                            <Sparkles className="absolute top-1/2 right-2" size={6} style={{ color: productColors.background || '#C89212', animation: 'sparkleSlow 2.8s ease-in-out infinite', animationDelay: '950ms', opacity: 0.12 }} />
+                                            
+                                            {/* More scattered sparkles */}
+                                            <div className="absolute top-1/4 left-1/4 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.2s ease-in-out infinite', animationDelay: '300ms', opacity: 0.1 }} />
+                                            <div className="absolute top-1/3 right-1/4 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 2.3s ease-in-out infinite', animationDelay: '900ms', opacity: 0.12 }} />
+                                            <div className="absolute bottom-1/4 left-1/3 w-1 h-1 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkleSlow 2.5s ease-in-out infinite', animationDelay: '1500ms', opacity: 0.1 }} />
+                                            <div className="absolute bottom-1/3 right-1/3 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: productColors.background || '#C89212', animation: 'sparkle 2.1s ease-in-out infinite', animationDelay: '600ms', opacity: 0.12 }} />
                                           </>
                                         )}
-                                        
-                                        {/* Create New Session text - show on hover of card or + button */}
+                                        {/* Create New Session text - always centered, grow from small to full size */}
                                         <div 
-                                          className={`flex flex-col items-center justify-center gap-2 z-10 ${
-                                            (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName) 
-                                              ? 'opacity-100 transition-opacity duration-[1200ms] ease-in' 
-                                              : 'opacity-0'
-                                          }`}
+                                          className="flex flex-col items-center justify-center gap-2 z-10"
+                                          style={{
+                                            opacity: (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName) ? 1 : 0,
+                                            transformOrigin: 'center center',
+                                            animation: (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName)
+                                              ? 'growFromCenter 0.3s ease-out forwards'
+                                              : 'none'
+                                          }}
                                         >
                                           <Plus className="h-8 w-8" style={{ color: productColors.background || '#C89212' }} />
                                           <div className="flex flex-col items-center justify-center text-base font-semibold" style={{ color: productColors.background || '#C89212' }}>
                                             <span>Create</span>
                                             <span>New Session</span>
                                           </div>
-                                        </div>
                                       </div>
+                                    </div>
                                     </div>
                                     </>
                                   )}
@@ -2415,6 +2632,25 @@ export default function SessionSelectionScreen() {
                                           if (productName && productName !== 'No Product') {
                                             setPendingProductName(productName);
                                           }
+                                          
+                                          // Calculate dates: start after this session's end_date
+                                          // Use the actual stored end_date from the database as the source of truth
+                                          const sessionEndDate = parseLocalDate(session.end_date);
+                                          // Start date should ALWAYS be the NEXT day after the end date (at midnight)
+                                          // (if end date is Dec 11 at 11:59 PM, next session starts Dec 12 at midnight)
+                                          const newStartDate = addDaysToLocalDate(sessionEndDate, 1);
+                                          
+                                          // End date is 14 days (2 weeks) after start date
+                                          const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                          
+                                          // Update form with calculated dates
+                                          setCreateSessionForm(prev => ({
+                                            ...prev,
+                                            startDate: formatDateToISO(newStartDate),
+                                            endDate: formatDateToISO(newEndDate)
+                                          }));
+                                          
+                                          setModalOpenedFromCirclePlus(true);
                                           setAllowCreateProduct(false);
                                           setShowCreateSessionModal(true);
                                         }}
@@ -2486,7 +2722,31 @@ export default function SessionSelectionScreen() {
             </label>
             
             {!isCreatingNewProduct && !pendingProduct ? (
-              /* Default State: Dropdown + OR + Create Button + Optional New Product Input */
+              /* Default State: Dropdown OR Read-only product display (if opened from circle+) */
+              modalOpenedFromCirclePlus && selectedProductId ? (
+                /* Read-only product display when opened from circle+ button */
+                <div className="flex items-center gap-3 px-4 py-2 border border-gray-300 rounded-md bg-gray-50">
+                  {(() => {
+                    const product = modalProducts.find(p => p.id === selectedProductId);
+                    const productName = product?.name || productLookup[selectedProductId] || 'Unknown Product';
+                    const productColorHex = product?.color_hex || productColorLookup[selectedProductId];
+                    const productColors = getProductColor(productName, productColorHex);
+                    return (
+                      <>
+                        <div 
+                          className="w-6 h-6 rounded-md border flex-shrink-0"
+                          style={{ 
+                            backgroundColor: productColors.background || '#2D4660',
+                            borderColor: productColors.border || '#2D4660'
+                          }}
+                        />
+                        <span className="font-medium text-gray-900 flex-1">{productName}</span>
+                      </>
+                    );
+                  })()}
+                </div>
+              ) : (
+                /* Dropdown when opened from top button */
               <div className="space-y-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="flex-1 w-full">
@@ -2494,11 +2754,58 @@ export default function SessionSelectionScreen() {
                       label=""
                       products={modalProducts}
                       value={selectedProductId}
-                      onChange={(value) => {
+                      onChange={async (value) => {
                         setSelectedProductId(value);
                         // Clear new product name if an existing product is selected
                         if (value) {
                           setNewProductName('');
+                          
+                          // Update dates based on selected product's existing sessions
+                          try {
+                            // Get all sessions for this product
+                            const productSessions = userSessions.filter(s => s.product_id === value);
+                            
+                            if (productSessions.length > 0) {
+                              // Find the latest end date
+                              let latestEndDate = parseLocalDate(productSessions[0].end_date);
+                              productSessions.forEach(session => {
+                                const sessionEndDate = parseLocalDate(session.end_date);
+                                if (sessionEndDate > latestEndDate) {
+                                  latestEndDate = sessionEndDate;
+                                }
+                              });
+                              
+                              // Start date should be the NEXT day after the latest end date
+                              const newStartDate = addDaysToLocalDate(latestEndDate, 1);
+                              // End date is 14 days (2 weeks) after start date
+                              const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                              
+                              setCreateSessionForm(prev => ({
+                                ...prev,
+                                startDate: formatDateToISO(newStartDate),
+                                endDate: formatDateToISO(newEndDate)
+                              }));
+                            } else {
+                              // No existing sessions - use default dates (today + 14 days)
+                              const today = new Date();
+                              const defaultEndDate = addDaysToLocalDate(today, 14);
+                              setCreateSessionForm(prev => ({
+                                ...prev,
+                                startDate: formatDateToISO(today),
+                                endDate: formatDateToISO(defaultEndDate)
+                              }));
+                            }
+                          } catch (error) {
+                            console.error('Error calculating dates for selected product:', error);
+                            // On error, just use default dates
+                            const today = new Date();
+                            const defaultEndDate = addDaysToLocalDate(today, 14);
+                            setCreateSessionForm(prev => ({
+                              ...prev,
+                              startDate: formatDateToISO(today),
+                              endDate: formatDateToISO(defaultEndDate)
+                            }));
+                          }
                         }
                         if (createSessionErrors.product) {
                           setCreateSessionErrors(prev => {
@@ -2513,33 +2820,34 @@ export default function SessionSelectionScreen() {
                       disabled={isLoadingProducts || modalProducts.length === 0}
                       placeholder="Select a product"
                       helperText={
-                        !isLoadingProducts && modalProducts.length === 0 && !productError && allowCreateProduct
+                          !isLoadingProducts && modalProducts.length === 0 && !productError && allowCreateProduct
                           ? 'No products found yet. Enter a product name below to create one.'
                           : undefined
                       }
-                      allowDelete={allowCreateProduct}
-                      onRequestDeleteProduct={allowCreateProduct ? ((product) => {
+                        allowDelete={allowCreateProduct}
+                        onRequestDeleteProduct={allowCreateProduct ? ((product) => {
                         setProductToDelete(product);
-                      }) : undefined}
+                        }) : undefined}
                       className="w-full"
                     />
                   </div>
-                  {allowCreateProduct && (
-                    <div className="flex items-center gap-2 sm:flex-none">
-                      <span className="text-gray-500 font-medium px-2">or</span>
-                      <button
-                        type="button"
-                        onClick={() => setIsCreatingNewProduct(true)}
-                        disabled={isLoadingProducts}
-                        className="px-4 py-2 bg-[#1E5461] text-white rounded-md hover:bg-[#576C71] transition-colors font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Plus className="h-4 w-4 inline mr-2" />
-                        Create New Product
-                      </button>
-                    </div>
-                  )}
+                    {allowCreateProduct && (
+                  <div className="flex items-center gap-2 sm:flex-none">
+                    <span className="text-gray-500 font-medium px-2">or</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNewProduct(true)}
+                      disabled={isLoadingProducts}
+                      className="px-4 py-2 bg-[#1E5461] text-white rounded-md hover:bg-[#576C71] transition-colors font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="h-4 w-4 inline mr-2" />
+                      Create New Product
+                    </button>
+                  </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )
             ) : pendingProduct ? (
               /* Pending Product Display - Minimal */
               <div 

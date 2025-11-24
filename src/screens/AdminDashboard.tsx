@@ -1164,15 +1164,8 @@ function SessionEditForm({
   // Handle form submission - update both session and product color if pending
   const handleFormSubmit = async (data: SessionEditFormValues) => {
     try {
-      console.log('=== FORM SUBMISSION STARTED ===');
-      console.log('handleFormSubmit called with form data:', data);
-      console.log('data.productId:', data.productId);
-      console.log('selectedProductId from watch:', selectedProductId);
-      console.log('Form errors:', errors);
-      
       // If there's a pending color update, apply it first
       if (pendingColorUpdate && selectedProductId) {
-        console.log('Updating product color:', pendingColorUpdate, 'for product:', selectedProductId);
         setIsUpdatingColor(true);
         try {
           await db.updateProduct(selectedProductId, { color_hex: pendingColorUpdate });
@@ -1182,7 +1175,6 @@ function SessionEditForm({
           }
           setPendingColorUpdate(null);
           setEditingProductColor(pendingColorUpdate);
-          console.log('Product color updated successfully');
         } catch (error) {
           console.error('Error updating product color:', error);
           // Still submit the form even if color update fails
@@ -1192,9 +1184,7 @@ function SessionEditForm({
       }
       
       // Submit the session update
-      console.log('Calling onSubmit with data:', data);
       onSubmit(data);
-      console.log('=== FORM SUBMISSION COMPLETED ===');
     } catch (error) {
       console.error('ERROR in handleFormSubmit:', error);
       throw error;
@@ -1203,10 +1193,8 @@ function SessionEditForm({
 
   return (
     <form onSubmit={handleSubmit((data) => {
-      console.log('FORM onSubmit triggered via handleSubmit');
       return handleFormSubmit(data);
     }, (errors) => {
-      console.log('FORM VALIDATION ERRORS:', errors);
     })}>
       <Controller
         control={control}
@@ -1237,7 +1225,6 @@ function SessionEditForm({
                     products={displayProducts}
                     value={field.value}
                     onChange={(value) => {
-                      console.log('ProductPicker onChange called with value:', value);
                       field.onChange(value);
                     }}
                     fallbackName={fallbackProductName}
@@ -1379,24 +1366,17 @@ function SessionEditForm({
               e.preventDefault();
               e.stopPropagation();
               
-              console.log('SAVE BUTTON CLICKED - Manual trigger');
               const formData = watch();
-              console.log('Form data:', formData);
-              console.log('Form errors:', errors);
               
               // Manually trigger form submission
-              const result = await handleSubmit(
+              await handleSubmit(
                 (data) => {
-                  console.log('Manual handleFormSubmit called with:', data);
                   return handleFormSubmit(data);
                 },
                 (errors) => {
-                  console.log('Form validation failed:', errors);
                   alert('Please fix form errors: ' + JSON.stringify(errors));
                 }
               )();
-              
-              console.log('Form submission result:', result);
             }}
           >
             Save Changes
@@ -1645,21 +1625,33 @@ export function AdminDashboard({
     [productName, productColorHex]
   );
 
+  const lastTenantRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const loadProducts = async () => {
       const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId ?? null;
       if (!tenantId) {
+      lastTenantRef.current = null;
         setProducts([]);
         setProductError(null);
         return;
       }
 
+    // Only load if we haven't loaded for this tenant yet
+    if (lastTenantRef.current === tenantId) {
+      return;
+    }
+
+    let isCancelled = false;
+    const loadProducts = async () => {
       setIsLoadingProducts(true);
       setProductError(null);
       try {
         const results = await db.getProductsForTenant(tenantId);
+        if (isCancelled) return;
         setProducts(results);
+        lastTenantRef.current = tenantId;
       } catch (error) {
+        if (isCancelled) return;
         console.error('Error loading products for admin dashboard:', error);
         if (db.isProductsTableMissingError?.(error)) {
           setProductError('Products are not configured yet. Please create the `products` table in Supabase.');
@@ -1667,12 +1659,19 @@ export function AdminDashboard({
           setProductError('Unable to load products. Please try again.');
         }
         setProducts([]);
+        lastTenantRef.current = null;
       } finally {
+        if (!isCancelled) {
         setIsLoadingProducts(false);
+        }
       }
     };
 
     loadProducts();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [currentUser?.tenant_id, currentUser?.tenantId]);
   
   const handleDeleteProduct = useCallback(async () => {
@@ -1885,16 +1884,10 @@ export function AdminDashboard({
   }, [suggestionToMove, otherSessions]);
 
   const handleSessionUpdate = (data: any) => {
-    console.log('handleSessionUpdate called with data:', data);
-    console.log('Current products:', products);
-    console.log('Current votingSession.product_id:', votingSession.product_id);
-    
     // Handle productId - can be empty string, null, undefined, or a valid ID
     const productId = data.productId && data.productId.trim() !== '' ? data.productId : null;
-    console.log('Extracted productId:', productId);
     
     const selectedProduct = productId ? products.find(product => product.id === productId) || null : null;
-    console.log('Found selectedProduct:', selectedProduct);
     
     const updatedSession: VotingSession = {
       ...votingSession,
@@ -1908,9 +1901,6 @@ export function AdminDashboard({
       product_id: selectedProduct?.id ?? null,
       product_name: null // Products table is single source of truth - don't store product_name
     };
-    
-    console.log('Updated session product_id:', updatedSession.product_id);
-    console.log('Full updatedSession:', updatedSession);
     
     onUpdateVotingSession(updatedSession);
     setShowSessionEditForm(false);
@@ -2117,7 +2107,7 @@ export function AdminDashboard({
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           <ImageWithFallback
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}
@@ -2128,38 +2118,40 @@ export function AdminDashboard({
         <div ref={mobileMenuRef} className="relative z-40">
           {/* Desktop buttons */}
           <div className="hidden md:flex space-x-2">
-            <button 
-              onClick={onShowVoterView} 
-              className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
-            >
-              <Vote className="mr-2 h-4 w-4" />
+          {votingSession.isActive && (
+          <button 
+            onClick={onShowVoterView} 
+            className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
+          >
+            <Vote className="mr-2 h-4 w-4" />
               Vote!
-            </button>
-            <button 
-              onClick={() => navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder')} 
-              className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
-            >
-              {adminPerspective === 'system' ? (
-                <Shield className="mr-2 h-4 w-4" />
-              ) : (
-                <Users className="mr-2 h-4 w-4" />
-              )}
-              {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
-            </button>
-            <button 
-              onClick={() => navigate('/sessions')} 
-              className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
-            >
+          </button>
+          )}
+          <button 
+            onClick={() => navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder')} 
+            className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
+          >
+            {adminPerspective === 'system' ? (
+              <Shield className="mr-2 h-4 w-4" />
+            ) : (
               <Users className="mr-2 h-4 w-4" />
+            )}
+              {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
+          </button>
+          <button 
+            onClick={() => navigate('/sessions')} 
+            className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
+          >
+            <Users className="mr-2 h-4 w-4" />
               All Sessions
-            </button>
-            <button 
-              onClick={onLogout} 
-              className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
-            >
-              <LogOut className="mr-2 h-4 w-4" />
+          </button>
+          <button 
+            onClick={onLogout} 
+            className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
+          >
+            <LogOut className="mr-2 h-4 w-4" />
               Logout
-            </button>
+          </button>
           </div>
 
           {/* Mobile menu trigger */}
@@ -2177,6 +2169,7 @@ export function AdminDashboard({
           {mobileMenuOpen && (
             <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
               <div className="py-1">
+                {votingSession.isActive && (
                 <button
                   onClick={() => { setMobileMenuOpen(false); onShowVoterView(); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
@@ -2184,6 +2177,7 @@ export function AdminDashboard({
                   <Vote className="h-4 w-4 mr-2 text-gray-700" />
                   Vote!
                 </button>
+                )}
                 <button
                   onClick={() => { setMobileMenuOpen(false); navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder'); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
@@ -2234,14 +2228,14 @@ export function AdminDashboard({
       {/* Session Info (with Edit button) */}
       <div className="relative bg-white rounded-lg shadow-md p-4 mb-6" style={{ marginTop: productName ? '3.5rem' : '0' }}>
         {productName && (
-          <div
+        <div
             className="absolute left-0 px-4 py-1 pr-8 rounded-t-md border-b-0 text-sm font-semibold shadow-sm z-20 flex items-center gap-2 whitespace-nowrap group cursor-pointer"
-            style={{
+          style={{
               top: '0',
               left: '-1px',
               transform: 'translateY(-100%)',
-              backgroundColor: productColors.background,
-              color: productColors.text,
+            backgroundColor: productColors.background,
+            color: productColors.text,
               borderColor: productColors.border,
               borderWidth: '1px',
               borderBottomWidth: '0',
@@ -2268,8 +2262,8 @@ export function AdminDashboard({
                 setEditingProductColor(product.color_hex || null);
                 setEditTempColor(product.color_hex || '#2D4660');
               }
-            }}
-          >
+          }}
+        >
             <BadgeCheck className="h-4 w-4 flex-shrink-0" />
             <span className="overflow-hidden text-ellipsis flex-1 min-w-0">{productName}</span>
             {(() => {
@@ -2277,7 +2271,7 @@ export function AdminDashboard({
               return productId && hoveredProductTab && (
                 <div className="absolute right-2 flex-shrink-0 opacity-80">
                   <Pencil className="h-4 w-4" style={{ color: productColors.text }} />
-                </div>
+        </div>
               );
             })()}
           </div>
@@ -2291,23 +2285,23 @@ export function AdminDashboard({
             {/* Desktop buttons */}
             <div className="hidden md:flex space-x-2">
               {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
-                <Button 
-                  variant="gold"
-                  onClick={onShowResults}
-                  className="flex items-center"
-                >
-                  <BarChart2 className="h-4 w-4 mr-2" />
-                  {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
-                </Button>
+            <Button 
+              variant="gold"
+              onClick={onShowResults}
+              className="flex items-center"
+            >
+              <BarChart2 className="h-4 w-4 mr-2" />
+              {isPastDate(votingSession.endDate) ? 'Final Results' : 'Current Results'}
+            </Button>
               )}
-              <Button 
-                variant="primary"
-                onClick={() => setShowSessionEditForm(true)}
-                className="flex items-center"
-              >
-                <Settings className="h-4 w-4 mr-2" />
-                Edit Session
-              </Button>
+            <Button 
+              variant="primary"
+              onClick={() => setShowSessionEditForm(true)}
+              className="flex items-center"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Edit Session
+            </Button>
             </div>
 
             {/* Mobile menu trigger */}
@@ -3556,8 +3550,8 @@ export function AdminDashboard({
                     alert('Failed to update product. Please try again.');
                   } finally {
                     setIsUpdatingProduct(false);
-                  }
-                }}
+          }
+        }}
                 disabled={isUpdatingProduct || !editingProductName.trim()}
               >
                 {isUpdatingProduct ? 'Updating...' : 'Update Product'}

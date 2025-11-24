@@ -287,7 +287,7 @@ export default function CreateSessionScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://media.licdn.com/dms/image/C4D0BAQEC3OhRqehrKg/company-logo_200_200/0/1630518354793/new_millennium_building_systems_logo?e=2147483647&v=beta&t=LM3sJTmQZet5NshZ-RNHXW1MMG9xSi1asp-VUeSA9NA"
+            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px' }}

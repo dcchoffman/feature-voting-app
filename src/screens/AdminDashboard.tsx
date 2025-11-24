@@ -1047,6 +1047,47 @@ function SessionEditForm({
   const [isUpdatingColor, setIsUpdatingColor] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
+  // Date helper functions (same as SessionSelectionScreen)
+  const parseLocalDate = (dateString: string): Date => {
+    if (!dateString || typeof dateString !== 'string') {
+      return new Date();
+    }
+    const dateOnly = dateString.split('T')[0].split(' ')[0];
+    const parts = dateOnly.split('-');
+    if (parts.length !== 3) {
+      return new Date();
+    }
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) {
+      return new Date();
+    }
+    const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+    if (isNaN(date.getTime())) {
+      return new Date();
+    }
+    return date;
+  };
+
+  const formatDateToISO = (date: Date): string => {
+    if (!date || isNaN(date.getTime())) {
+      const today = new Date();
+      return today.toISOString().split('T')[0];
+    }
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const addDaysToLocalDate = (date: Date, days: number): Date => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+    return new Date(year, month, day + days, 0, 0, 0, 0);
+  };
+
   const productLookup = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach((product) => {
@@ -1078,15 +1119,17 @@ function SessionEditForm({
   });
 
   useEffect(() => {
+    const startDateValue = session.startDate.split('T')[0];
     reset({
       productId: (session as any).productId ?? (session as any).product_id ?? '',
       title: session.title,
       goal: session.goal,
-      startDate: session.startDate.split('T')[0],
+      startDate: startDateValue,
       endDate: session.endDate.split('T')[0],
       useAutoVotes: session.useAutoVotes || false,
       votesPerUser: session.votesPerUser
     });
+    prevStartDateRef.current = startDateValue;
   }, [session, reset]);
 
   const initialProductName =
@@ -1117,6 +1160,18 @@ function SessionEditForm({
 
   const useAutoVotes = watch('useAutoVotes');
   const selectedProductId = watch('productId');
+  const startDate = watch('startDate');
+  const prevStartDateRef = useRef<string>('');
+  
+  // Auto-update end date when start date changes
+  useEffect(() => {
+    if (startDate && startDate !== prevStartDateRef.current) {
+      prevStartDateRef.current = startDate;
+      const startDateParsed = parseLocalDate(startDate);
+      const endDate = addDaysToLocalDate(startDateParsed, 14);
+      setValue('endDate', formatDateToISO(endDate), { shouldDirty: true });
+    }
+  }, [startDate, setValue]);
   
   // Create a modified products array that includes the pending color update for display
   // This must be after selectedProductId is defined
@@ -1219,7 +1274,7 @@ function SessionEditForm({
 
           return (
             <div className="mb-4">
-              <div className="flex items-start gap-3">
+              <div className="flex items-end gap-3">
                 <div className="flex-1">
                   <ProductPicker
                     products={displayProducts}
@@ -1241,7 +1296,7 @@ function SessionEditForm({
                   />
                 </div>
                 {hasProductSelected && (
-                  <div className="flex items-center gap-2 mt-6">
+                  <div className="flex items-center gap-2 pb-0.5">
                     <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
                       Product Color
                     </label>

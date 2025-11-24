@@ -133,6 +133,14 @@ export function SessionProvider({ children }: SessionProviderProps) {
                     const user = await db.getOrCreateUser(email.toLowerCase(), name);
                     setCurrentUser(user);
                     await refreshSessions(user);
+                    
+                    // Clean up hash fragment after user is loaded
+                    setTimeout(() => {
+                      if (window.location.hash) {
+                        const cleanUrl = window.location.pathname + window.location.search;
+                        window.history.replaceState(null, '', cleanUrl);
+                      }
+                    }, 200);
                   } catch (error) {
                     console.error('Error getting/creating user:', error);
                     // Continue anyway - don't block the app
@@ -169,23 +177,23 @@ export function SessionProvider({ children }: SessionProviderProps) {
           }
         } else {
           // No Supabase session, check localStorage
-          const storedUser = localStorage.getItem('voting_system_user');
-          if (storedUser) {
-            try {
-              const user = JSON.parse(storedUser);
-              setCurrentUser(user);
+      const storedUser = localStorage.getItem('voting_system_user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          setCurrentUser(user);
               // Try to refresh sessions, but don't block if it fails
               try {
-                await refreshSessions(user);
+          await refreshSessions(user);
               } catch (error) {
                 console.error('Error refreshing sessions:', error);
                 // Continue anyway
               }
-            } catch (error) {
-              console.error('Error loading stored user:', error);
-              localStorage.removeItem('voting_system_user');
-            }
-          }
+        } catch (error) {
+          console.error('Error loading stored user:', error);
+          localStorage.removeItem('voting_system_user');
+        }
+      }
         }
       } catch (error) {
         console.error('Error checking Supabase auth:', error);
@@ -207,7 +215,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
                                 window.location.hash.includes('access_token') ||
                                 window.location.search.includes('error=');
         if (!isOAuthCallback) {
-          setIsLoading(false);
+      setIsLoading(false);
           clearTimeout(safetyTimeout);
         }
       }
@@ -225,6 +233,15 @@ export function SessionProvider({ children }: SessionProviderProps) {
           setCurrentUser(user);
           await refreshSessions(user);
           setIsLoading(false); // Make sure loading is false after successful sign in
+          
+          // Clean up any hash fragment from OAuth callback - do this after user is set
+          // Use setTimeout to ensure it runs after any navigation
+          setTimeout(() => {
+            if (window.location.hash) {
+              const cleanUrl = window.location.pathname + window.location.search;
+              window.history.replaceState(null, '', cleanUrl);
+            }
+          }, 100);
         }
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
@@ -358,6 +375,36 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
     restoreSession();
   }, [currentUser, sessions]);
+
+  // Aggressively clean up hash fragments from OAuth callbacks
+  useEffect(() => {
+    const cleanupHash = () => {
+      // Only remove empty hash fragments (OAuth callbacks leave '#')
+      const hash = window.location.hash;
+      if (hash === '#' || hash === '') {
+        const cleanUrl = window.location.pathname + window.location.search;
+        window.history.replaceState(null, '', cleanUrl);
+      }
+    };
+
+    // Clean up hash on mount if present
+    cleanupHash();
+
+    // Watch for hash changes and remove empty ones
+    const handleHashChange = () => {
+      cleanupHash();
+    };
+
+    // Check periodically for hash fragments (in case they're added after navigation)
+    const hashCheckInterval = setInterval(cleanupHash, 500);
+
+    window.addEventListener('hashchange', handleHashChange);
+
+    return () => {
+      clearInterval(hashCheckInterval);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
 
   const value: SessionContextType = {
     currentSession,

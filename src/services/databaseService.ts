@@ -111,7 +111,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     .select('*')
     .eq('email', email)
     .single();
-    
+  
     // Wrap in a promise with timeout
     const queryWithTimeout = Promise.race([
       queryBuilder,

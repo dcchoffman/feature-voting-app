@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Feature Voting System - New Millennium</title>
+    <script>
+      // GitHub Pages 404 handler for SPA routing
+      // Redirect to index.html to let React Router handle the routing
+      var path = window.location.pathname;
+      var search = window.location.search;
+      var hash = window.location.hash;
+      
+      // Extract path after /feature-voting-app
+      var appPath = path.replace(/^\/feature-voting-app\/?/, '') || '/';
+      
+      // Redirect to index.html with the full path
+      window.location.replace('/feature-voting-app/' + appPath + search + hash);
+    </script>
+  </head>
+  <body>
+    <p>Redirecting...</p>
+  </body>
+</html>
+

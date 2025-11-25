@@ -1102,7 +1102,7 @@ export async function fetchAzureDevOpsWorkItems(
                   if (match) {
                     const parentId = parseInt(match[1], 10);
                     workItemToParentMap.set(item.id, parentId);
-                    console.log(`Work item ${item.id} has parent ${parentId}`);
+                    // Debug: console.log(`Work item ${item.id} has parent ${parentId}`);
                   }
                 }
               }
@@ -1134,7 +1134,7 @@ export async function fetchAzureDevOpsWorkItems(
             parentTitlesMap.set(parent.id, parent.fields['System.Title'] || '');
             if (parent.fields['System.WorkItemType'] === 'Epic') {
               epicTitlesMap.set(parent.id, parent.fields['System.Title'] || '');
-              console.log(`Found Epic ${parent.id}: ${parent.fields['System.Title']}`);
+              // Debug: console.log(`Found Epic ${parent.id}: ${parent.fields['System.Title']}`);
             }
           }
         }
@@ -1153,10 +1153,10 @@ export async function fetchAzureDevOpsWorkItems(
       if (parentId) {
         epicTitle = epicTitlesMap.get(parentId) || null;
         if (epicTitle) {
-          console.log(`Work item ${item.id} has Epic from parent ${parentId}: ${epicTitle}`);
+          // Debug: console.log(`Work item ${item.id} has Epic from parent ${parentId}: ${epicTitle}`);
         } else {
           const parentTitle = parentTitlesMap.get(parentId);
-          console.log(`Work item ${item.id} has parent ${parentId} (${parentTitle}) but it's not an Epic type`);
+          // Debug: console.log(`Work item ${item.id} has parent ${parentId} (${parentTitle}) but it's not an Epic type`);
         }
       }
       
@@ -1181,18 +1181,18 @@ export async function fetchAzureDevOpsWorkItems(
               if (!isNaN(epicId) && epicId > 0) {
                 epicTitle = epicTitlesMap.get(epicId) || null;
                 if (epicTitle) {
-                  console.log(`Work item ${item.id} has Epic ID ${epicId} from field ${fieldName}: ${epicTitle}`);
+                  // Debug: console.log(`Work item ${item.id} has Epic ID ${epicId} from field ${fieldName}: ${epicTitle}`);
                   break;
                 }
               } else {
                 epicTitle = epicFieldValue.trim();
-                console.log(`Work item ${item.id} has Epic name from field ${fieldName}: ${epicTitle}`);
+                // Debug: console.log(`Work item ${item.id} has Epic name from field ${fieldName}: ${epicTitle}`);
                 break;
               }
             } else if (typeof epicFieldValue === 'number') {
               epicTitle = epicTitlesMap.get(epicFieldValue) || null;
               if (epicTitle) {
-                console.log(`Work item ${item.id} has Epic ID ${epicFieldValue} from field ${fieldName}: ${epicTitle}`);
+                // Debug: console.log(`Work item ${item.id} has Epic ID ${epicFieldValue} from field ${fieldName}: ${epicTitle}`);
                 break;
               }
             }
@@ -1201,7 +1201,7 @@ export async function fetchAzureDevOpsWorkItems(
       }
       
       if (!epicTitle) {
-        console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic found`);
+        // Debug: console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic found`);
       }
       
       return {
@@ -1243,7 +1243,7 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
       // Make sure it's not the work item type or just "Epic"
       if (trimmedEpic !== workItemType && trimmedEpic !== 'Epic' && trimmedEpic.toLowerCase() !== 'epic') {
         epic = trimmedEpic;
-        console.log(`Work item ${item.id} converted - Epic: "${epic}"`);
+        // Debug: console.log(`Work item ${item.id} converted - Epic: "${epic}"`);
       } else {
         console.warn(`Work item ${item.id} has epic field "${trimmedEpic}" which matches work item type "${workItemType}" - ignoring`);
       }
@@ -1251,7 +1251,7 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
     
     // Debug log if epic is missing
     if (!epic && workItemType !== 'Epic') {
-      console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic assigned`);
+      // Debug: console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic assigned`);
     }
     
     // Clean description - strip HTML tags

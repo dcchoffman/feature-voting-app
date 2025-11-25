@@ -680,6 +680,57 @@ export async function getSessionAdmins(sessionId: string): Promise<SessionAdmin[
   }));
 }
 
+/**
+ * Get all session admins for sessions of a specific product
+ */
+export async function getSessionAdminsForProduct(productId: string): Promise<SessionAdmin[]> {
+  // First, get all sessions for this product
+  const { data: sessions, error: sessionsError } = await supabase
+    .from('voting_sessions')
+    .select('id')
+    .eq('product_id', productId);
+  
+  if (sessionsError) throw sessionsError;
+  
+  if (!sessions || sessions.length === 0) {
+    return [];
+  }
+  
+  const sessionIds = sessions.map(s => s.id);
+  
+  // Get all session admins for these sessions
+  const { data, error } = await supabase
+    .from('session_admins')
+    .select(`
+      *,
+      users (*)
+    `)
+    .in('session_id', sessionIds);
+  
+  if (error) throw error;
+  
+  // Deduplicate by user email to avoid sending multiple emails to the same admin
+  const adminMap = new Map<string, SessionAdmin>();
+  (data || []).forEach(item => {
+    const admin: SessionAdmin = {
+      id: item.id,
+      session_id: item.session_id,
+      user_id: item.user_id,
+      created_at: item.created_at,
+      user: item.users as User
+    };
+    
+    if (admin.user && admin.user.email) {
+      const email = admin.user.email.toLowerCase();
+      if (!adminMap.has(email)) {
+        adminMap.set(email, admin);
+      }
+    }
+  });
+  
+  return Array.from(adminMap.values());
+}
+
 export async function addSessionAdmin(sessionId: string, userId: string): Promise<SessionAdmin> {
   const { data, error } = await supabase
     .from('session_admins')
@@ -780,7 +831,9 @@ export async function addSessionStakeholderByEmail(sessionId: string, email: str
 
 // Helper: Build a mailto link for inviting a user to a session
 export function buildSessionInviteMailto(session: VotingSession & { session_code?: string }, toEmail: string, inviterName: string): string {
-  const inviteUrl = `${window.location.origin}/login?session=${(session as any).session_code ?? ''}`;
+  // Include basename for GitHub Pages
+  const basename = typeof window !== 'undefined' && window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+  const inviteUrl = `${window.location.origin}${basename}/login?session=${(session as any).session_code ?? ''}`;
   const subject = encodeURIComponent(`You're invited to vote: ${session.title}`);
   const body = encodeURIComponent(
     `Hi,\n\nYou've been invited to participate in a feature voting session.\n\n` +

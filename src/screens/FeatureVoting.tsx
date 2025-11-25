@@ -15,6 +15,8 @@ import {
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
   Cloud, Database, Search, Shield, List, Lightbulb, Crown
 } from "lucide-react";
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 // Import services
 import * as db from '../services/databaseService';
@@ -337,45 +339,62 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   maxWidth?: string;
+  hideCloseButton?: boolean;
+  hideHeader?: boolean;
 }
 
 class Modal extends Component<ModalProps> {
   render() {
-    const { isOpen, onClose, title, children, maxWidth = "max-w-2xl" } = this.props;
+    const { isOpen, onClose, title, children, maxWidth = "max-w-2xl", hideCloseButton = false, hideHeader = false } = this.props;
     
     if (!isOpen) return null;
     
     return (
       <div className="fixed inset-0 z-50 overflow-y-auto">
         <div className="flex items-center justify-center min-h-screen p-4 text-center">
+          {/* Always show backdrop for lightbox effect */}
           <div 
             className="fixed inset-0 transition-opacity bg-black/50"
-            onClick={onClose}
+            onClick={hideCloseButton ? undefined : onClose}
             aria-hidden="true"
           ></div>
           
-          <div className={`inline-block w-full ${maxWidth} p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-xl rounded-lg`}>
-            <div className="flex items-start justify-between mb-5">
-              <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
-                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-[#C89212]/15 text-[#C89212]">
-                  <Lightbulb className="h-6 w-6" />
+          <div className={`inline-block w-full ${maxWidth} ${hideHeader ? 'p-6' : 'p-6'} my-8 overflow-visible text-left align-middle transition-all transform bg-white shadow-xl rounded-lg relative z-10`}>
+            {!hideHeader ? (
+              <div className="flex items-start justify-between mb-5">
+                <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
+                  <div className="flex items-center justify-center h-10 w-10 rounded-full bg-[#C89212]/15 text-[#C89212]">
+                    <Lightbulb className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-[#2d4660] tracking-tight">{title}</h3>
+                    <p className="text-xs text-[#8A6D3B] font-medium mt-1 uppercase tracking-widest">
+                      Spark the roadmap with your ideas
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-[#2d4660] tracking-tight">{title}</h3>
-                  <p className="text-xs text-[#8A6D3B] font-medium mt-1 uppercase tracking-widest">
-                    Spark the roadmap with your ideas
-                  </p>
-                </div>
+                {!hideCloseButton && (
+                  <button
+                    onClick={onClose}
+                    className="ml-3 text-gray-400 hover:text-gray-500 focus:outline-none"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                )}
               </div>
-              <button
-                onClick={onClose}
-                className="ml-3 text-gray-400 hover:text-gray-500 focus:outline-none"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+            ) : (
+              // Show only close button when header is hidden
+              <div className="flex justify-end -mt-2 -mr-2">
+                <button
+                  onClick={onClose}
+                  className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            )}
             
-            <div className="mt-2">
+            <div className={hideHeader ? "-mt-4" : "mt-2 overflow-visible"}>
               {children}
             </div>
           </div>
@@ -839,7 +858,7 @@ function ResultsScreen({
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -852,10 +871,10 @@ function ResultsScreen({
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <ImageWithFallback
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden cursor-pointer hover:opacity-80 transition-opacity"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
             onClick={() => navigate('/sessions')}
           />
           <button 
@@ -1069,7 +1088,7 @@ function ThankYouScreen({ navigate, votingSession }: ThankYouScreenProps) {
     <div className="relative z-10 flex flex-col items-center justify-center min-h-[80vh] p-6">
       <div className="relative z-10 w-full max-w-md bg-white rounded-lg shadow-lg p-8 text-center">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="mx-auto mb-6"
           style={{ maxWidth: '200px', height: 'auto' }}
@@ -1653,7 +1672,7 @@ function AlreadyVotedScreen({
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -1666,10 +1685,10 @@ function AlreadyVotedScreen({
         <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <div>
             <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
@@ -2094,7 +2113,7 @@ const VotingScreen = React.memo(function VotingScreen({
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -2107,10 +2126,10 @@ const VotingScreen = React.memo(function VotingScreen({
         <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <div>
             <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
@@ -3256,20 +3275,90 @@ useEffect(() => {
     }
   }, [azureDevOpsConfig, ensureValidToken, handleInitiateOAuth]);
 
-  const handleConfirmSync = useCallback(async (replaceAll: boolean = false) => {
+  const handleReplaceAll = useCallback(async () => {
     if (!previewFeatures || !currentSession) return;
     
     try {
       setIsFetchingAzureDevOps(true);
       
-      if (replaceAll) {
-        const existingFeatures = await db.getFeatures(currentSession.id);
-        for (const feature of existingFeatures) {
-          await db.deleteFeature(feature.id);
-        }
+      // Delete all existing features
+      const existingFeatures = await db.getFeatures(currentSession.id);
+      for (const feature of existingFeatures) {
+        await db.deleteFeature(feature.id);
       }
       
+      // Add all preview features
       for (const feature of previewFeatures) {
+        const plainTextDescription = stripHtmlTags(feature.description);
+        const truncatedDescription = truncateText(plainTextDescription, 300);
+        
+        await db.createFeature({
+          session_id: currentSession.id,
+          title: feature.title,
+          description: truncatedDescription,
+          epic: feature.epic || null,
+          state: feature.state,
+          areaPath: feature.areaPath,
+          tags: feature.tags,
+          azure_devops_id: feature.azureDevOpsId,
+          azure_devops_url: feature.azureDevOpsUrl
+        });
+      }
+      
+      const allFeatures = await db.getFeatures(currentSession.id);
+      const votesData = await db.getVotes(currentSession.id);
+      
+      const featuresWithVotes = allFeatures.map(feature => {
+        const featureVotes = votesData.filter(v => v.feature_id === feature.id);
+        const voters = featureVotes.map(v => ({
+          userId: v.user_id,
+          name: v.user_name,
+          email: v.user_email,
+          voteCount: v.vote_count
+        }));
+        const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
+        
+        return {
+          id: feature.id,
+          title: feature.title,
+          description: feature.description,
+          epic: feature.epic,
+          state: feature.state,
+          areaPath: feature.area_path,
+          tags: feature.tags || [],
+          azureDevOpsId: feature.azure_devops_id,
+          azureDevOpsUrl: feature.azure_devops_url,
+          votes: totalVotes,
+          voters
+        };
+      });
+      
+      setFeatures(featuresWithVotes);
+      
+      const updatedConfig = {
+        ...azureDevOpsConfig,
+        lastSyncTime: new Date().toISOString()
+      };
+      
+      await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
+      setAzureDevOpsConfig(updatedConfig);
+      
+    } catch (error) {
+      console.error('Azure DevOps replace all error:', error);
+      setAzureFetchError("Failed to replace all features from Azure DevOps.");
+    } finally {
+      setIsFetchingAzureDevOps(false);
+      setPreviewFeatures(null);
+    }
+  }, [previewFeatures, currentSession, azureDevOpsConfig]);
+
+  const handleConfirmSync = useCallback(async (selectedFeatures: Feature[]) => {
+    if (!selectedFeatures || selectedFeatures.length === 0 || !currentSession) return;
+    
+    try {
+      setIsFetchingAzureDevOps(true);
+      
+      for (const feature of selectedFeatures) {
         const existingFeatures = await db.getFeatures(currentSession.id);
         const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
         
@@ -3931,6 +4020,7 @@ const handleDeleteSession = useCallback(async () => {
               showPreviewModal={showPreviewModal}
               setShowPreviewModal={setShowPreviewModal}
               onConfirmSync={handleConfirmSync}
+              onReplaceAll={handleReplaceAll}
               onUpdateVotingSession={handleUpdateVotingSession}
               onFetchStatesForType={handleFetchStatesForType}
               onFetchAreaPathsForTypeAndState={handleFetchAreaPathsForTypeAndState}

@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { getProductColor } from '../utils/productColors';
 import { supabase } from '../supabaseClient';
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 import { searchAzureAdUsers, type AzureAdUser } from '../services/azureAdUserService';
 
 interface SessionWithAssignment extends VotingSession {
@@ -1919,7 +1921,7 @@ export default function UsersManagementScreen() {
         {/* Desktop: Centered logo at top */}
         <div className="hidden md:flex md:justify-center mb-2">
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={desktopLogo}
             alt="New Millennium Building Systems Logo"
             className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
             style={{ height: '96px', width: 'auto' }}
@@ -1932,10 +1934,10 @@ export default function UsersManagementScreen() {
           <div className="flex items-center flex-1 min-w-0">
             {/* Mobile: small logo */}
             <img
-              src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+              src={mobileLogo}
               alt="New Millennium Building Systems Logo"
               className="mr-3 md:hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-              style={{ width: '36px', height: '36px' }}
+              style={{ width: '36px', height: '36px', objectFit: 'contain' }}
               onClick={() => navigate('/sessions')}
             />
             <button 

@@ -15,6 +15,8 @@ import {
   Mail, Shield, Settings, Crown, List, LogOut
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 interface SystemAdmin {
   id: string;
@@ -127,7 +129,9 @@ export default function SystemAdminsScreen() {
       await db.addSystemAdmin(user.id);
       // Send login email via Edge Function (fallback to mailto)
       try {
-        const loginUrl = `${window.location.origin}/login`;
+        // Include basename for GitHub Pages
+        const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+        const loginUrl = `${window.location.origin}${basename}/login`;
         await sendInvitationEmail({
           to: formData.email,
           subject: `You're a System Admin: Feature Voting System` ,
@@ -136,7 +140,9 @@ export default function SystemAdminsScreen() {
         });
       } catch {
         try {
-          const loginUrl = `${window.location.origin}/login`;
+          // Include basename for GitHub Pages
+          const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+          const loginUrl = `${window.location.origin}${basename}/login`;
           const subject = encodeURIComponent("You're a System Admin: Feature Voting System");
           const body = encodeURIComponent(
             `Hi,\n\nYou've been granted System Admin access to the Feature Voting System.\n\n` +
@@ -241,7 +247,7 @@ export default function SystemAdminsScreen() {
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -254,10 +260,10 @@ export default function SystemAdminsScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <button 
             onClick={() => navigate('/sessions')}

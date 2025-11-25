@@ -13,6 +13,8 @@ import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
   CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star
 } from 'lucide-react';
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 export default function SessionSelectionScreen() {
   const { currentUser, setCurrentSession, refreshSessions, setCurrentUser, isLoading: contextLoading } = useSession();
@@ -81,10 +83,7 @@ export default function SessionSelectionScreen() {
     
     if (errorParam) {
       // Redirect to login with error message
-      const basename = window.location.pathname.startsWith('/feature-voting-app') 
-        ? '/feature-voting-app' 
-        : '';
-      
+      // React Router handles basename automatically
       let errorMessage = 'Authentication failed.';
       if (errorCode === 'unexpected_failure' && errorDescription?.includes('email')) {
         errorMessage = 'Azure AD did not return your email address. Please ensure your Azure AD app has the correct API permissions (User.Read or email) and that your account has an email address.';
@@ -94,7 +93,7 @@ export default function SessionSelectionScreen() {
       
       // Store error in sessionStorage to show on login page
       sessionStorage.setItem('oauth_error', errorMessage);
-      navigate(`${basename}/login`, { replace: true });
+      navigate('/login', { replace: true });
     }
   }, [searchParams, navigate]);
 
@@ -778,10 +777,8 @@ export default function SessionSelectionScreen() {
       const timeout = setTimeout(() => {
         setWaitingForAuth(false);
         if (!currentUser) {
-          const basename = window.location.pathname.startsWith('/feature-voting-app') 
-            ? '/feature-voting-app' 
-            : '';
-          navigate(`${basename}/login`, { replace: true });
+          // React Router handles basename automatically
+          navigate('/login', { replace: true });
         }
       }, 3000); // Wait 3 seconds for OAuth processing
       
@@ -801,10 +798,8 @@ export default function SessionSelectionScreen() {
     // Only redirect if we're sure there's no user AND we're not loading
     // Don't redirect on network errors - user might be authenticated but network is down
     if (!currentUser && !contextLoading) {
-      const basename = window.location.pathname.startsWith('/feature-voting-app') 
-        ? '/feature-voting-app' 
-        : '';
-      navigate(`${basename}/login`, { replace: true });
+      // React Router handles basename automatically
+      navigate('/login', { replace: true });
       return;
     }
 
@@ -869,11 +864,8 @@ export default function SessionSelectionScreen() {
       sessionStorage.removeItem('oauth_action');
     } catch {}
     setMobileMenuOpen(false);
-    // Use window.location for logout to ensure clean navigation and avoid basename doubling
-    const basename = window.location.pathname.startsWith('/feature-voting-app') 
-      ? '/feature-voting-app' 
-      : '';
-    window.location.href = `${basename}/login`;
+    // React Router handles basename automatically - use navigate instead of window.location
+    navigate('/login', { replace: true });
   };
 
   const formatDate = (dateString: string): string => {
@@ -936,7 +928,9 @@ export default function SessionSelectionScreen() {
   const handleEmailInvite = (e: React.MouseEvent, session: any) => {
     e.stopPropagation();
 
-    const inviteUrl = `${window.location.origin}/login?session=${session.session_code}`;
+    // Include basename for GitHub Pages
+    const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+    const inviteUrl = `${window.location.origin}${basename}/login?session=${session.session_code}`;
     const subject = encodeURIComponent(`You're invited to vote: ${session.title}`);
     const body = encodeURIComponent(
       `Hi,\n\nYou've been invited to participate in a feature voting session.\n\n` +
@@ -1218,7 +1212,7 @@ export default function SessionSelectionScreen() {
             <div>
               {/* Only show Vote! button for Active sessions (not Upcoming or Closed) */}
               {status.text === 'Active' && (
-                <div className="relative inline-block" style={{ marginLeft: '-10px', marginTop: '-10px' }}>
+                <div className="relative inline-block" style={{ marginLeft: '-10px', marginTop: '-10px', marginRight: '10px' }}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1389,7 +1383,7 @@ export default function SessionSelectionScreen() {
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -1402,10 +1396,10 @@ export default function SessionSelectionScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to title */}
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden cursor-pointer hover:opacity-80 transition-opacity"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
             onClick={() => navigate('/sessions')}
           />
           <div>

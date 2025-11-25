@@ -11,6 +11,8 @@ import * as db from '../services/databaseService';
 import { supabase } from '../supabaseClient';
 import { ChevronLeft, Calendar, Users, Vote, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
 import type { Product } from '../types';
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 export default function CreateSessionScreen() {
   const { currentUser, setCurrentSession, refreshSessions, setCurrentUser } = useSession();
@@ -274,7 +276,7 @@ export default function CreateSessionScreen() {
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -287,10 +289,10 @@ export default function CreateSessionScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <button 
             onClick={() => navigate('/sessions')}

@@ -34,8 +34,12 @@ import {
   Settings,
   BadgeCheck,
   List,
-  Pencil
+  Pencil,
+  Square,
+  Crown
 } from "lucide-react";
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 // Import shared components
 import { 
@@ -62,6 +66,14 @@ import { getDisplayProductName } from '../utils/productDisplay';
 // ============================================
 // TYPES & INTERFACES
 // ============================================
+
+interface PreviewFeaturesModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  previewFeatures: Feature[] | null;
+  onConfirmSync: (selectedFeatures: Feature[]) => Promise<void>;
+  onReplaceAll?: () => Promise<void>;
+}
 
 interface AdminDashboardProps {
   features: Feature[];
@@ -91,7 +103,7 @@ interface AdminDashboardProps {
   previewFeatures: Feature[] | null;
   showPreviewModal: boolean;
   setShowPreviewModal: (show: boolean) => void;
-  onConfirmSync: (replaceAll: boolean) => Promise<void>;
+  onConfirmSync: (selectedFeatures: Feature[]) => Promise<void>;
   onUpdateVotingSession: (session: VotingSession) => void;
   onFetchStatesForType?: (workItemType?: string) => Promise<void>;
   onFetchAreaPathsForTypeAndState?: (workItemType?: string, states?: string[]) => Promise<void>;
@@ -345,6 +357,237 @@ function MultiSelectDropdown({ options, value, onChange, placeholder = "Select..
         </div>
       )}
     </div>
+  );
+}
+
+// ============================================
+// PREVIEW FEATURES MODAL
+// ============================================
+
+function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync, onReplaceAll }: PreviewFeaturesModalProps) {
+  const [selectedFeatures, setSelectedFeatures] = useState<Set<string>>(new Set());
+
+  // Select all by default when modal opens
+  useEffect(() => {
+    if (isOpen && previewFeatures && previewFeatures.length > 0) {
+      setSelectedFeatures(new Set(previewFeatures.map(f => f.id)));
+    }
+  }, [isOpen, previewFeatures]);
+
+  const toggleFeature = (featureId: string) => {
+    setSelectedFeatures(prev => {
+      const next = new Set(prev);
+      if (next.has(featureId)) {
+        next.delete(featureId);
+      } else {
+        next.add(featureId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (!previewFeatures) return;
+    if (selectedFeatures.size === previewFeatures.length) {
+      setSelectedFeatures(new Set());
+    } else {
+      setSelectedFeatures(new Set(previewFeatures.map(f => f.id)));
+    }
+  };
+
+  const handleAddSelected = async () => {
+    if (!previewFeatures) return;
+    const featuresToAdd = previewFeatures.filter(f => selectedFeatures.has(f.id));
+    await onConfirmSync(featuresToAdd);
+    onClose();
+  };
+
+  const handleReplaceAll = async () => {
+    if (!previewFeatures || !onReplaceAll) return;
+    await onReplaceAll();
+    onClose();
+  };
+
+  const selectedCount = selectedFeatures.size;
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Preview Azure DevOps Features"
+      maxWidth="max-w-6xl"
+    >
+      <div className="space-y-4">
+        {previewFeatures && previewFeatures.length > 0 ? (
+          <>
+            <div className="bg-[#1E5461]/5 border border-[#1E5461]/20 rounded-lg p-4">
+              <p className="text-[#1E5461] font-medium">
+                Select the work items you want to add to your voting session.
+              </p>
+            </div>
+            
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="max-h-96 overflow-y-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleAll();
+                          }}
+                          className="flex items-center justify-center"
+                        >
+                          {previewFeatures.length > 0 && selectedFeatures.size === previewFeatures.length ? (
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                          ) : (
+                            <Square className="w-5 h-5 text-gray-400" />
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Title</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">State</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Epic</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Area Path</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {previewFeatures.map((feature) => {
+                      const isSelected = selectedFeatures.has(feature.id);
+                      return (
+                        <tr
+                          key={feature.id}
+                          className={`hover:bg-gray-50 cursor-pointer ${isSelected ? 'bg-blue-50' : ''}`}
+                          onClick={() => toggleFeature(feature.id)}
+                        >
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFeature(feature.id);
+                              }}
+                              className="flex items-center justify-center"
+                            >
+                              {isSelected ? (
+                                <CheckCircle className="w-5 h-5 text-green-600" />
+                              ) : (
+                                <Square className="w-5 h-5 text-gray-400" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-start gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-gray-900">{feature.title}</div>
+                                {feature.description && feature.description.trim() && (
+                                  <div className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {feature.description.replace(/<[^>]*>/g, '').substring(0, 100)}
+                                    {feature.description.replace(/<[^>]*>/g, '').length > 100 ? '...' : ''}
+                                  </div>
+                                )}
+                                {feature.tags && feature.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {feature.tags.slice(0, 3).map((tag, idx) => (
+                                      <span key={idx} className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
+                                        {tag}
+                                      </span>
+                                    ))}
+                                    {feature.tags.length > 3 && (
+                                      <span className="px-1.5 py-0.5 text-xs text-gray-500">
+                                        +{feature.tags.length - 3}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              {feature.azureDevOpsId && (
+                                <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            <div className="flex items-center">
+                              {feature.workItemType === 'Epic' ? (
+                                <Crown className="w-5 h-5 text-green-600" />
+                              ) : feature.workItemType === 'Feature' ? (
+                                <Trophy className="w-5 h-5 text-purple-600" />
+                              ) : feature.workItemType ? (
+                                <span className="px-2 py-1 text-xs font-medium bg-[#492434]/10 text-[#492434] rounded">
+                                  {feature.workItemType}
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            {feature.state && (
+                              <span className="px-2 py-1 text-xs font-medium bg-[#1E5461]/10 text-[#1E5461] rounded">
+                                {feature.state}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            {feature.workItemType !== 'Epic' && feature.epic ? (
+                              <EpicTag name={feature.epic} />
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            {feature.areaPath ? (
+                              <div className="text-xs text-gray-700 max-w-xs truncate" title={feature.areaPath}>
+                                {feature.areaPath}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div className="flex justify-between items-center pt-4 border-t">
+              <div className="text-sm text-gray-600">
+                {selectedCount} of {previewFeatures.length} selected
+              </div>
+              <div className="flex space-x-2">
+                <Button 
+                  variant="primary"
+                  onClick={handleAddSelected}
+                  disabled={selectedCount === 0}
+                  className="flex items-center"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add {selectedCount} Feature{selectedCount !== 1 ? 's' : ''}
+                </Button>
+                {onReplaceAll && (
+                  <Button 
+                    variant="danger"
+                    onClick={handleReplaceAll}
+                    className="flex items-center"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Replace All Features
+                  </Button>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8">
+            <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-600">No features found to sync</p>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -1560,6 +1803,7 @@ export function AdminDashboard({
   showPreviewModal,
   setShowPreviewModal,
   onConfirmSync,
+  onReplaceAll,
   onUpdateVotingSession,
   onFetchStatesForType,
   onFetchAreaPathsForTypeAndState,
@@ -2150,7 +2394,7 @@ export function AdminDashboard({
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -2162,10 +2406,10 @@ export function AdminDashboard({
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
           <ImageWithFallback
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">Admin Dashboard</h1>
         </div>
@@ -3230,145 +3474,13 @@ export function AdminDashboard({
         </Modal>
       )}
 
-      <Modal
+      <PreviewFeaturesModal
         isOpen={showPreviewModal}
         onClose={() => setShowPreviewModal(false)}
-        title="Preview Azure DevOps Features"
-        maxWidth="max-w-4xl"
-      >
-        <div className="space-y-4">
-          {previewFeatures && previewFeatures.length > 0 ? (
-            <>
-              <div className="bg-[#1E5461]/5 border border-[#1E5461]/20 rounded-lg p-4">
-                <p className="text-[#1E5461] font-medium">
-                  Review the work items below. If they look correct, add them to your voting session.
-                </p>
-              </div>
-              
-              <div className="max-h-96 overflow-y-auto">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {previewFeatures.map((feature) => (
-                    <div key={feature.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
-                      {/* Title at top */}
-                      <div className="mb-3">
-                        <h4 className="text-base font-semibold text-gray-900">
-                          {feature.title}
-                        </h4>
-                      </div>
-                      
-                      {/* Epic - above description (only for non-Feature types) */}
-                      {feature.workItemType !== 'Feature' && feature.epic && (
-                        <div className="mb-3">
-                          <p className="text-xs text-gray-500 mb-1">Epic</p>
-                          <EpicTag name={feature.epic} />
-                        </div>
-                      )}
-                      
-                      {/* Description */}
-                      {feature.description && feature.description.trim() !== '' ? (
-                        <div className="mb-3">
-                          <p className="text-xs text-gray-500 mb-1">Description</p>
-                          <p className="text-xs text-gray-700 line-clamp-3">{feature.description}</p>
-                        </div>
-                      ) : null}
-                      
-                    {feature.state && (
-                      <div className="mb-3">
-                        <p className="text-xs text-gray-500 mb-1">State</p>
-                        <span className="px-2 py-1 text-xs font-medium bg-[#1E5461]/10 text-[#1E5461] rounded">
-                          {feature.state}
-                        </span>
-                      </div>
-                    )}
-
-                      {/* Epic - above Work Item Type if Feature */}
-                      {feature.workItemType === 'Feature' && feature.epic && (
-                        <div className="mb-3">
-                          <p className="text-xs text-gray-500 mb-1">Epic</p>
-                          <EpicTag name={feature.epic} />
-                        </div>
-                      )}
-                      
-                      {/* Work Item Type with Azure DevOps ID */}
-                      <div className="mb-3">
-                        <p className="text-xs text-gray-500 mb-1">Work Item Type</p>
-                        <div className="flex items-center gap-2">
-                          {feature.workItemType && (
-                            <span className="px-2 py-1 text-xs font-medium bg-[#492434]/10 text-[#492434] rounded">
-                              {feature.workItemType}
-                            </span>
-                          )}
-                          {feature.azureDevOpsId && (
-                            <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                          )}
-                        </div>
-                      </div>
-                      
-                      {/* Area Path - Full width at bottom */}
-                      {feature.areaPath && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Area Path</p>
-                          <p className="text-xs text-gray-700 break-words">{feature.areaPath}</p>
-                        </div>
-                      )}
-                      
-                      {/* Tags - Compact display if available */}
-                      {feature.tags && feature.tags.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-gray-100">
-                          <p className="text-xs text-gray-500 mb-1">Tags</p>
-                          <div className="flex flex-wrap gap-1">
-                            {feature.tags.map((tag, idx) => (
-                              <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <Button 
-                  variant="secondary"
-                  onClick={() => setShowPreviewModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  variant="primary"
-                  onClick={async () => {
-                    await onConfirmSync(false);
-                    setShowPreviewModal(false);
-                  }}
-                  className="flex items-center"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add {previewFeatures.length} Feature{previewFeatures.length !== 1 ? 's' : ''}
-                </Button>
-                <Button 
-                  variant="danger"
-                  onClick={async () => {
-                    await onConfirmSync(true);
-                    setShowPreviewModal(false);
-                  }}
-                  className="flex items-center"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Replace All Features
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-8">
-              <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No features found to sync</p>
-            </div>
-          )}
-        </div>
-      </Modal>
+        previewFeatures={previewFeatures}
+        onConfirmSync={onConfirmSync}
+        onReplaceAll={onReplaceAll}
+      />
 
       {/* Reopen Session Modal */}
       <Modal

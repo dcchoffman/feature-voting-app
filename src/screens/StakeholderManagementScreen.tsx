@@ -18,6 +18,8 @@ import {
   Mail, User, Clock, Settings, List, LogOut, ChevronDown
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 interface Stakeholder {
   id: string;
@@ -418,7 +420,9 @@ export default function StakeholderManagementScreen() {
         const session = availableSessions.find(s => s.id === sessionId);
         if (session) {
       try {
-            const inviteUrl = `${window.location.origin}/login?session=${session.session_code}`;
+            // Include basename for GitHub Pages
+            const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+            const inviteUrl = `${window.location.origin}${basename}/login?session=${session.session_code}`;
         await sendInvitationEmail({
           to: formData.email,
               subject: `You're invited to vote: ${session.title}`,
@@ -514,7 +518,7 @@ export default function StakeholderManagementScreen() {
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -527,10 +531,10 @@ export default function StakeholderManagementScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <button 
             onClick={() => navigate('/admin')}

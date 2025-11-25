@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import { Lock, Mail, Users, ArrowLeft, CheckCircle } from 'lucide-react';
 import * as db from '../services/databaseService';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 export default function UnauthorizedScreen() {
   const { currentUser, sessions } = useSession();
@@ -86,7 +87,7 @@ export default function UnauthorizedScreen() {
         {/* Logo */}
         <div className="text-center mb-8">
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={desktopLogo}
             alt="New Millennium Building Systems Logo"
             className="mx-auto cursor-pointer hover:opacity-80 transition-opacity"
             style={{ height: '80px', width: 'auto' }}

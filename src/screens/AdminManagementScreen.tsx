@@ -15,6 +15,8 @@ import {
   Mail, User as UserIcon, Shield, Settings, List, LogOut
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 
 export default function AdminManagementScreen() {
   const { currentSession, currentUser, setCurrentUser, setCurrentSession } = useSession();
@@ -118,7 +120,9 @@ export default function AdminManagementScreen() {
       await db.addSessionAdminByEmail(currentSession.id, formData.email, fallbackName);
       // Send invite email via Edge Function (fallback to mailto)
       try {
-        const inviteUrl = `${window.location.origin}/login?session=${currentSession.session_code}`;
+        // Include basename for GitHub Pages
+        const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+        const inviteUrl = `${window.location.origin}${basename}/login?session=${currentSession.session_code}`;
         await sendInvitationEmail({
           to: formData.email,
           subject: `You're invited to administer: ${currentSession.title}`,
@@ -222,7 +226,7 @@ export default function AdminManagementScreen() {
       {/* Desktop: Centered logo at top */}
       <div className="hidden md:flex md:justify-center mb-2">
         <img
-          src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+          src={desktopLogo}
           alt="New Millennium Building Systems Logo"
           className="-mt-4 cursor-pointer hover:opacity-80 transition-opacity"
           style={{ height: '96px', width: 'auto' }}
@@ -235,10 +239,10 @@ export default function AdminManagementScreen() {
         <div className="flex items-center">
           {/* Mobile: small logo next to back button and title */}
           <img
-            src="https://www.steeldynamics.com/wp-content/uploads/2024/05/New-Millennium-color-logo1.png"
+            src={mobileLogo}
             alt="New Millennium Building Systems Logo"
             className="mr-4 md:hidden"
-            style={{ width: '40px', height: '40px' }}
+            style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
           <button 
             onClick={() => navigate('/admin')}

@@ -8,16 +8,21 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
-import { LogIn } from 'lucide-react';
+import { sendInvitationEmail } from '../services/emailService';
+import { LogIn, Mail, CheckCircle, ChevronDown } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import desktopLogo from '../../New-Millennium-color-logo1.png';
+import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 import microsoftLogo from '../assets/microsoft.svg';
+import { Modal, Button } from './FeatureVoting';
+import type { Product } from '../types';
+import { getProductColor } from '../utils/productColors';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showRequestAccessModal, setShowRequestAccessModal] = useState(false);
   const { setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -199,6 +204,8 @@ export default function LoginScreen() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  data-lpignore="true"
+                  data-form-type="other"
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
                   placeholder="John Doe"
                 />
@@ -218,6 +225,8 @@ export default function LoginScreen() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  data-lpignore="true"
+                  data-form-type="other"
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
                   placeholder="your.email@company.com"
                 />
@@ -317,10 +326,392 @@ export default function LoginScreen() {
               <p>Simply enter your name and email to access</p>
               <p>voting sessions you've been invited to</p>
             </div>
+            
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setShowRequestAccessModal(true)}
+                className="w-full text-sm text-[#2d4660] hover:text-[#1d3a53] underline"
+              >
+                Request Access
+              </button>
+            </div>
             </div>
           </div>
         </div>
       </div>
+      
+      <RequestAccessModal
+        isOpen={showRequestAccessModal}
+        onClose={React.useCallback(() => setShowRequestAccessModal(false), [])}
+      />
     </div>
   );
 }
+
+// ============================================
+// REQUEST ACCESS MODAL
+// ============================================
+
+interface RequestAccessModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onClose }: RequestAccessModalProps) {
+  const [requestName, setRequestName] = useState('');
+  const [requestEmail, setRequestEmail] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [error, setError] = useState('');
+  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
+  const productDropdownRef = React.useRef<HTMLDivElement>(null);
+  const hasLoadedProducts = React.useRef(false);
+  const nameInputRef = React.useRef<HTMLInputElement>(null);
+  const emailInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Load products when modal opens (only once)
+  useEffect(() => {
+    if (isOpen && !hasLoadedProducts.current) {
+      const loadProducts = async () => {
+        setIsLoadingProducts(true);
+        try {
+          const allProducts = await db.getProducts();
+          setProducts(allProducts);
+          hasLoadedProducts.current = true;
+        } catch (error) {
+          console.error('Error loading products:', error);
+          setError('Failed to load products. Please try again.');
+        } finally {
+          setIsLoadingProducts(false);
+        }
+      };
+      loadProducts();
+    } else if (!isOpen) {
+      // Reset form when modal closes
+      setRequestName('');
+      setRequestEmail('');
+      setSelectedProductId('');
+      setIsSubmitted(false);
+      setError('');
+      hasLoadedProducts.current = false;
+    }
+  }, [isOpen]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (productDropdownRef.current && !productDropdownRef.current.contains(event.target as Node)) {
+        setProductDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setRequestName(e.target.value);
+  }, []);
+
+  const handleEmailChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setRequestEmail(e.target.value);
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    // Validation
+    if (!requestName.trim()) {
+      setError('Name is required');
+      return;
+    }
+    if (!requestEmail.trim()) {
+      setError('Email is required');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestEmail)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    if (!selectedProductId) {
+      setError('Please select a product');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Get session admins for the selected product
+      const admins = await db.getSessionAdminsForProduct(selectedProductId);
+      
+      if (admins.length === 0) {
+        setError('No administrators found for this product. Please contact your system administrator.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const selectedProduct = products.find(p => p.id === selectedProductId);
+      const productName = selectedProduct?.name || 'the selected product';
+
+      // Get unique admin emails
+      const adminEmails = Array.from(new Set(admins.map(admin => admin.user?.email).filter(Boolean) as string[]));
+
+      // Include basename for GitHub Pages
+      const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+      const loginUrl = `${window.location.origin}${basename}/login`;
+
+      // Create HTML email content (body only - outer HTML structure goes in EmailJS template)
+      const htmlContent = `
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="background-color: #2d4660; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">Access Request - Feature Voting System</h2>
+          </div>
+          <div style="background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb;">
+            <p>Hello,</p>
+            <p>A new access request has been submitted for <strong>${productName}</strong>.</p>
+            
+            <div style="background-color: white; padding: 20px; margin: 20px 0; border-left: 4px solid #2d4660; border-radius: 4px;">
+              <div style="margin: 10px 0;">
+                <span style="font-weight: bold; color: #2d4660;">Requester Name:</span> ${requestName}
+              </div>
+              <div style="margin: 10px 0;">
+                <span style="font-weight: bold; color: #2d4660;">Requester Email:</span> ${requestEmail}
+              </div>
+              <div style="margin: 10px 0;">
+                <span style="font-weight: bold; color: #2d4660;">Product:</span> ${productName}
+              </div>
+            </div>
+
+            <p>To grant access, please add this user as a stakeholder or admin to the relevant voting sessions for this product.</p>
+            
+            <p>
+              <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; margin-top: 20px;">Go to Feature Voting System</a>
+            </p>
+          </div>
+          <div style="background-color: #f3f4f6; padding: 15px; text-align: center; border-radius: 0 0 8px 8px; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0;">This is an automated message from the Feature Voting System.</p>
+          </div>
+        </div>
+      `;
+
+      const textContent = `
+Access Request - Feature Voting System
+
+Hello,
+
+A new access request has been submitted for ${productName}.
+
+Requester Name: ${requestName}
+Requester Email: ${requestEmail}
+Product: ${productName}
+
+To grant access, please add this user as a stakeholder or admin to the relevant voting sessions for this product.
+
+Login: ${loginUrl}
+
+This is an automated message from the Feature Voting System.
+      `;
+
+      // Try to send email to all admins via Edge Function
+      try {
+        const emailPromises = adminEmails.map(adminEmail =>
+          sendInvitationEmail({
+            to: adminEmail,
+            subject: `Access Request for ${productName} - Feature Voting System`,
+            text: textContent,
+            html: htmlContent
+          })
+        );
+        await Promise.all(emailPromises);
+        setIsSubmitted(true);
+      } catch (emailError: any) {
+        console.error('Email service failed:', emailError);
+        // Show the actual error to help debug
+        let errorMessage = 'Failed to send email through the system.';
+        if (emailError instanceof Error) {
+          errorMessage = emailError.message;
+        } else if (emailError?.message) {
+          errorMessage = emailError.message;
+        } else if (typeof emailError === 'string') {
+          errorMessage = emailError;
+        }
+        
+        // Check for common Resend errors
+        if (errorMessage.includes('validation_error') || errorMessage.includes('403')) {
+          errorMessage = 'Domain verification required. Please verify your domain in Resend and update FROM_EMAIL in Supabase secrets.';
+        }
+        
+        setError(`Failed to send access request: ${errorMessage}. Please check the Supabase Edge Function logs for details.`);
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (error) {
+      console.error('Error sending access request:', error);
+      setError('Failed to send access request. Please try again or contact your administrator.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const selectedProduct = products.find(p => p.id === selectedProductId);
+  const productColors = selectedProduct ? getProductColor(selectedProduct.name, selectedProduct.color_hex ?? null) : null;
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={isSubmitted ? "" : "Request Access"}
+      maxWidth="max-w-lg"
+      hideHeader={isSubmitted}
+    >
+      {isSubmitted ? (
+        <div className="text-center pb-6">
+          <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-3">Thank You!</h3>
+          <p className="text-sm text-gray-600 mb-2">
+            Your access request has been sent to the administrators for
+          </p>
+          <p className="text-xl font-semibold text-[#2d4660] mb-4">
+            {selectedProduct?.name}
+          </p>
+          <p className="text-sm text-gray-600">
+            You will be notified once your access has been granted.
+          </p>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="requestName" className="block text-sm font-medium text-gray-700 mb-1">
+              Full Name *
+            </label>
+            <input
+              ref={nameInputRef}
+              id="requestName"
+              type="text"
+              required
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
+              value={requestName}
+              onChange={handleNameChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+              placeholder="John Doe"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="requestEmail" className="block text-sm font-medium text-gray-700 mb-1">
+              Email Address *
+            </label>
+            <input
+              ref={emailInputRef}
+              id="requestEmail"
+              type="email"
+              required
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
+              value={requestEmail}
+              onChange={handleEmailChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+              placeholder="your.email@company.com"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Product *
+            </label>
+            <div ref={productDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setProductDropdownOpen(!productDropdownOpen)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left flex items-center justify-between hover:border-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+              >
+                <div className="flex items-center gap-2">
+                  {selectedProduct && productColors && (
+                    <div
+                      className="w-4 h-4 rounded flex-shrink-0"
+                      style={{ backgroundColor: productColors.background }}
+                    />
+                  )}
+                  <span className={selectedProduct ? 'text-gray-900' : 'text-gray-400'}>
+                    {selectedProduct ? selectedProduct.name : 'Select a product...'}
+                  </span>
+                </div>
+                <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${productDropdownOpen ? 'transform rotate-180' : ''}`} />
+              </button>
+
+              {productDropdownOpen && (
+                <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-96 overflow-y-auto">
+                  {isLoadingProducts ? (
+                    <div className="px-3 py-2 text-sm text-gray-500 text-center">Loading products...</div>
+                  ) : products.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500 text-center">No products available</div>
+                  ) : (
+                    products.map(product => {
+                      const colors = getProductColor(product.name, product.color_hex ?? null);
+                      const isSelected = selectedProductId === product.id;
+                      return (
+                        <div
+                          key={product.id}
+                          onClick={() => {
+                            setSelectedProductId(product.id);
+                            setProductDropdownOpen(false);
+                          }}
+                          className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
+                            isSelected ? 'bg-[#2d4660]/5' : ''
+                          }`}
+                        >
+                          {colors && (
+                            <div
+                              className="w-4 h-4 rounded flex-shrink-0"
+                              style={{ backgroundColor: colors.background }}
+                            />
+                          )}
+                          <span className="text-sm text-gray-900">{product.name}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="rounded-md bg-red-50 p-4">
+              <div className="flex">
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">{error}</h3>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-2 pt-4 border-t">
+            <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" disabled={isSubmitting} className="flex items-center">
+              {isSubmitting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Mail className="h-4 w-4 mr-2" />
+                  Send Request
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+});

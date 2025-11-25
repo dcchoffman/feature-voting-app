@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
+import colorPickerIcon from '../assets/colorpicker.png';
 
 // Import shared components
 import { 
@@ -3662,7 +3663,7 @@ export function AdminDashboard({
                 >
                   {!editingProductColor && (
                     <img 
-                      src="/colorpicker.png" 
+                      src={colorPickerIcon} 
                       alt="Color Picker"
                       className="w-8 h-8 object-contain"
                     />

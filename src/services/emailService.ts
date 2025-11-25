@@ -1,5 +1,5 @@
 // EmailJS Configuration - these should match your EmailJS setup
-const EMAILJS_SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID || 'service_t6q8uib';
+const EMAILJS_SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID || 'service_idsx5cg';
 const EMAILJS_TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || 'template_4owif48';
 const EMAILJS_PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY || 'OXfL2jaTJuDR5IThS';
 
@@ -30,6 +30,8 @@ export async function sendInvitationEmail(payload: SendInvitePayload): Promise<v
           subject: payload.subject,
           message_html: payload.html || payload.text || '',
           message_text: payload.text || payload.html?.replace(/<[^>]*>/g, '') || '',
+          // Note: from_email and from_name should be set in EmailJS template settings
+          // to match the authenticated Outlook account, or use template variables if supported
         },
       }),
     });

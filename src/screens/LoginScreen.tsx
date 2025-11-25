@@ -463,39 +463,79 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
       const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
       const loginUrl = `${window.location.origin}${basename}/login`;
 
-      // Create HTML email content (body only - outer HTML structure goes in EmailJS template)
+      // Create HTML email content with inline styles (matching EmailJS template format)
+      // Using table-based layout for better email client compatibility
+      // Use GitHub Pages URL for images to ensure they're accessible in emails
+      const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
+      const curveImageUrl = 'https://dcchoffman.github.io/feature-voting-app/bottom-left-curve.png';
+      
       const htmlContent = `
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-          <div style="background-color: #2d4660; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">Access Request - Feature Voting System</h2>
-          </div>
-          <div style="background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb;">
-            <p>Hello,</p>
-            <p>A new access request has been submitted for <strong>${productName}</strong>.</p>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center" style="padding: 48px 20px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); position: relative;">
+        <!-- Logo Header - Matching Login Page -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 30px; font-weight: bold; color: #2d4660; margin-top: 16px; margin-bottom: 8px;">Feature Voting System</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 8px;">Access Request Notification</div>
+          </td>
+        </tr>
+        
+        <!-- Main Content -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello,</p>
+            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333;">A new access request has been submitted for <strong style="color: #2d4660;">${productName}</strong>.</p>
             
-            <div style="background-color: white; padding: 20px; margin: 20px 0; border-left: 4px solid #2d4660; border-radius: 4px;">
-              <div style="margin: 10px 0;">
-                <span style="font-weight: bold; color: #2d4660;">Requester Name:</span> ${requestName}
-              </div>
-              <div style="margin: 10px 0;">
-                <span style="font-weight: bold; color: #2d4660;">Requester Email:</span> ${requestEmail}
-              </div>
-              <div style="margin: 10px 0;">
-                <span style="font-weight: bold; color: #2d4660;">Product:</span> ${productName}
-              </div>
-            </div>
+            <!-- User Details - Keeping as requested -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: white; border-left: 4px solid #2d4660; border-radius: 4px; margin: 20px 0;">
+              <tr>
+                <td style="padding: 20px;">
+                  <div style="margin: 10px 0;">
+                    <span style="font-weight: bold; color: #2d4660;">Requester Name:</span> <span style="color: #333;">${requestName}</span>
+                  </div>
+                  <div style="margin: 10px 0;">
+                    <span style="font-weight: bold; color: #2d4660;">Requester Email:</span> <span style="color: #333;">${requestEmail}</span>
+                  </div>
+                  <div style="margin: 10px 0;">
+                    <span style="font-weight: bold; color: #2d4660;">Product:</span> <span style="color: #333;">${productName}</span>
+                  </div>
+                </td>
+              </tr>
+            </table>
 
-            <p>To grant access, please add this user as a stakeholder or admin to the relevant voting sessions for this product.</p>
+            <p style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">To grant access, please add this user as a stakeholder or admin to the relevant voting sessions for this product.</p>
             
-            <p>
-              <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; margin-top: 20px;">Go to Feature Voting System</a>
-            </p>
-          </div>
-          <div style="background-color: #f3f4f6; padding: 15px; text-align: center; border-radius: 0 0 8px 8px; font-size: 12px; color: #6b7280;">
-            <p style="margin: 0;">This is an automated message from the Feature Voting System.</p>
-          </div>
-        </div>
-      `;
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
+              <tr>
+                <td align="center">
+                  <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Go to Feature Voting System</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
+          </td>
+        </tr>
+        
+        <!-- Bottom-left curve image -->
+        <tr>
+          <td style="position: relative; height: 200px; overflow: hidden; background-color: #f9fafb;">
+            <img src="${curveImageUrl}" alt="" width="600" style="max-width: 600px; width: 100%; height: auto; opacity: 0.2; border: 0;" />
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
 
       const textContent = `
 Access Request - Feature Voting System

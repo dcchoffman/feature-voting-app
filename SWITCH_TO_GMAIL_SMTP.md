@@ -40,7 +40,7 @@
 
 1. Go to **"Email Templates"** → Your template
 2. Change the service to the new Gmail SMTP service
-3. In **"From Email"** field, enter: `noreply@newmill.com`
+3. In **"From Email"** field, enter: `FeatureVotingSystem@NewMill.com`
 4. In **"From Name"** field, enter: `Feature Voting System`
 5. **Make sure "Use Default Email Address" is UNCHECKED**
 6. Save the template
@@ -52,11 +52,11 @@ Update the Service ID in `src/services/emailService.ts` to use the new SMTP serv
 ## Benefits
 
 - HTML emails will render properly (not as raw code)
-- "From" address will show `Feature Voting System <noreply@newmill.com>`
+- "From" address will show `Feature Voting System <FeatureVotingSystem@NewMill.com>`
 - More reliable email delivery
 - No API scope issues
 
 ## Note About "From" Address
 
-Even with SMTP, some email clients might show "via gmail.com" in small text, but the main "From" will show as `noreply@newmill.com`. This is normal and acceptable for most use cases.
+Even with SMTP, some email clients might show "via gmail.com" in small text, but the main "From" will show as `FeatureVotingSystem@NewMill.com`. This is normal and acceptable for most use cases.
 

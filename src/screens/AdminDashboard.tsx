@@ -17,7 +17,7 @@ import {
   X,
   Users,
   Clock,
-  CheckCircle,
+  CheckSquare,
   RefreshCw,
   AlertCircle,
   Shield,
@@ -37,7 +37,9 @@ import {
   List,
   Pencil,
   Square,
-  Crown
+  Crown,
+  CheckCircle,
+  Paperclip
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -440,10 +442,10 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                             e.stopPropagation();
                             toggleAll();
                           }}
-                          className="flex items-center justify-center"
+                          className="flex items-center justify-center w-5 h-5"
                         >
                           {previewFeatures.length > 0 && selectedFeatures.size === previewFeatures.length ? (
-                            <CheckCircle className="w-5 h-5 text-green-600" />
+                            <CheckSquare className="w-5 h-5 text-green-600" />
                           ) : (
                             <Square className="w-5 h-5 text-gray-400" />
                           )}
@@ -472,10 +474,10 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                                 e.stopPropagation();
                                 toggleFeature(feature.id);
                               }}
-                              className="flex items-center justify-center"
+                              className="flex items-center justify-center w-5 h-5"
                             >
                               {isSelected ? (
-                                <CheckCircle className="w-5 h-5 text-green-600" />
+                                <CheckSquare className="w-5 h-5 text-green-600" />
                               ) : (
                                 <Square className="w-5 h-5 text-gray-400" />
                               )}
@@ -1292,6 +1294,15 @@ function SessionEditForm({
   const [isUpdatingColor, setIsUpdatingColor] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
+  // Placeholder date constant (same as SessionSelectionScreen)
+  const PLACEHOLDER_DATE = '2099-12-31'; // Placeholder date for drafts without dates
+  
+  const isPlaceholderDate = (dateStr: string | null | undefined): boolean => {
+    if (!dateStr) return false;
+    const dateOnly = dateStr.split('T')[0];
+    return dateOnly === PLACEHOLDER_DATE;
+  };
+
   // Date helper functions (same as SessionSelectionScreen)
   const parseLocalDate = (dateString: string): Date => {
     if (!dateString || typeof dateString !== 'string') {
@@ -1356,21 +1367,22 @@ function SessionEditForm({
       productId: (session as any).productId ?? (session as any).product_id ?? '',
       title: session.title,
       goal: session.goal,
-      startDate: session.startDate.split('T')[0],
-      endDate: session.endDate.split('T')[0],
+      startDate: isPlaceholderDate(session.startDate) ? '' : session.startDate.split('T')[0],
+      endDate: isPlaceholderDate(session.endDate) ? '' : session.endDate.split('T')[0],
       useAutoVotes: session.useAutoVotes || false,
       votesPerUser: session.votesPerUser
     }
   });
 
   useEffect(() => {
-    const startDateValue = session.startDate.split('T')[0];
+    const startDateValue = isPlaceholderDate(session.startDate) ? '' : session.startDate.split('T')[0];
+    const endDateValue = isPlaceholderDate(session.endDate) ? '' : session.endDate.split('T')[0];
     reset({
       productId: (session as any).productId ?? (session as any).product_id ?? '',
       title: session.title,
       goal: session.goal,
       startDate: startDateValue,
-      endDate: session.endDate.split('T')[0],
+      endDate: endDateValue,
       useAutoVotes: session.useAutoVotes || false,
       votesPerUser: session.votesPerUser
     });
@@ -1406,17 +1418,121 @@ function SessionEditForm({
   const useAutoVotes = watch('useAutoVotes');
   const selectedProductId = watch('productId');
   const startDate = watch('startDate');
+  const endDate = watch('endDate');
   const prevStartDateRef = useRef<string>('');
   
-  // Auto-update end date when start date changes
+  // Handle date focus - populate dates if empty, based on furthest out session for product
+  const handleDateFocus = useCallback(async (fieldName: 'startDate' | 'endDate') => {
+    const currentStartDate = startDate;
+    const currentEndDate = endDate;
+    
+    if (fieldName === 'startDate' && !currentStartDate) {
+      let newStartDate: Date;
+      
+      // If product is selected, calculate based on furthest out session for that product
+      if (selectedProductId) {
+        try {
+          const productSessions = await db.getSessionsByProduct(selectedProductId);
+          
+          // Filter out the current session being edited
+          const otherProductSessions = productSessions.filter(s => s.id !== session.id);
+          
+          if (otherProductSessions.length > 0) {
+            // Find the latest end date (excluding placeholder dates)
+            let latestEndDate: Date | null = null;
+            otherProductSessions.forEach(sessionItem => {
+              const sessionEndDateStr = sessionItem.end_date || (sessionItem as any).endDate;
+              if (sessionEndDateStr && !isPlaceholderDate(sessionEndDateStr)) {
+                const sessionEndDate = parseLocalDate(sessionEndDateStr);
+                if (!latestEndDate || sessionEndDate > latestEndDate) {
+                  latestEndDate = sessionEndDate;
+                }
+              }
+            });
+            
+            if (latestEndDate) {
+              // Start date should be the NEXT day after the latest end date
+              newStartDate = addDaysToLocalDate(latestEndDate, 1);
+            } else {
+              // No valid end dates found - use today
+              newStartDate = new Date();
+            }
+          } else {
+            // No existing sessions - use today
+            newStartDate = new Date();
+          }
+        } catch (error) {
+          console.error('Error calculating dates for product:', error);
+          newStartDate = new Date();
+        }
+      } else {
+        // No product selected - use today
+        newStartDate = new Date();
+      }
+      
+      const newEndDate = addDaysToLocalDate(newStartDate, 14);
+      setValue('startDate', formatDateToISO(newStartDate), { shouldDirty: true });
+      if (!currentEndDate) {
+        setValue('endDate', formatDateToISO(newEndDate), { shouldDirty: true });
+      }
+    } else if (fieldName === 'endDate' && !currentEndDate) {
+      let newStartDate: Date;
+      
+      if (currentStartDate) {
+        newStartDate = parseLocalDate(currentStartDate);
+      } else {
+        // If no start date, calculate it first based on product
+        if (selectedProductId) {
+          try {
+            const productSessions = await db.getSessionsByProduct(selectedProductId);
+            
+            // Filter out the current session being edited
+            const otherProductSessions = productSessions.filter(s => s.id !== session.id);
+            
+            if (otherProductSessions.length > 0) {
+              let latestEndDate: Date | null = null;
+              otherProductSessions.forEach(sessionItem => {
+                const sessionEndDateStr = sessionItem.end_date || (sessionItem as any).endDate;
+                if (sessionEndDateStr && !isPlaceholderDate(sessionEndDateStr)) {
+                  const sessionEndDate = parseLocalDate(sessionEndDateStr);
+                  if (!latestEndDate || sessionEndDate > latestEndDate) {
+                    latestEndDate = sessionEndDate;
+                  }
+                }
+              });
+              
+              if (latestEndDate) {
+                newStartDate = addDaysToLocalDate(latestEndDate, 1);
+              } else {
+                newStartDate = new Date();
+              }
+            } else {
+              newStartDate = new Date();
+            }
+          } catch (error) {
+            console.error('Error calculating dates for product:', error);
+            newStartDate = new Date();
+          }
+        } else {
+          newStartDate = new Date();
+        }
+        setValue('startDate', formatDateToISO(newStartDate), { shouldDirty: true });
+      }
+      
+      const newEndDate = addDaysToLocalDate(newStartDate, 14);
+      setValue('endDate', formatDateToISO(newEndDate), { shouldDirty: true });
+    }
+  }, [startDate, endDate, selectedProductId, setValue]);
+  
+  // Auto-update end date when start date changes (only if both dates are set)
   useEffect(() => {
-    if (startDate && startDate !== prevStartDateRef.current) {
+    if (startDate && startDate !== prevStartDateRef.current && endDate) {
       prevStartDateRef.current = startDate;
       const startDateParsed = parseLocalDate(startDate);
-      const endDate = addDaysToLocalDate(startDateParsed, 14);
-      setValue('endDate', formatDateToISO(endDate), { shouldDirty: true });
+      const newEndDate = addDaysToLocalDate(startDateParsed, 14);
+      setValue('endDate', formatDateToISO(newEndDate), { shouldDirty: true });
     }
-  }, [startDate, setValue]);
+  }, [startDate, endDate, setValue]);
   
   // Create a modified products array that includes the pending color update for display
   // This must be after selectedProductId is defined
@@ -1462,33 +1578,20 @@ function SessionEditForm({
     : watch('votesPerUser');
 
   // Handle form submission - update both session and product color if pending
-  const handleFormSubmit = async (data: SessionEditFormValues) => {
+  const handleFormSubmit = async (data: SessionEditFormValues, isDraft: boolean = false) => {
     try {
-      // If there's a pending color update, apply it first
-      if (pendingColorUpdate && selectedProductId) {
-        setIsUpdatingColor(true);
-        try {
-          await db.updateProduct(selectedProductId, { color_hex: pendingColorUpdate });
-          // Notify parent to refresh products list
-          if (onProductColorUpdated) {
-            onProductColorUpdated();
-          }
-          setPendingColorUpdate(null);
-          setEditingProductColor(pendingColorUpdate);
-        } catch (error) {
-          console.error('Error updating product color:', error);
-          // Still submit the form even if color update fails
-        } finally {
-          setIsUpdatingColor(false);
-        }
-      }
-      
       // Submit the session update
-      onSubmit(data);
+      onSubmit({ ...data, isDraft });
     } catch (error) {
       console.error('ERROR in handleFormSubmit:', error);
       throw error;
     }
+  };
+
+  // Handle save draft
+  const handleSaveDraft = async () => {
+    const formData = watch();
+    await handleFormSubmit(formData, true);
   };
 
   return (
@@ -1496,77 +1599,31 @@ function SessionEditForm({
       return handleFormSubmit(data);
     }, (errors) => {
     })}>
-      <Controller
-        control={control}
-        name="productId"
-        render={({ field }) => {
-          const selectedProduct =
-            displayProducts.find((product) => product.id === field.value) ?? null;
-
-          const lookupName = field.value ? productLookup[field.value] ?? null : null;
-          const fallbackProductName = !selectedProduct
-            ? lookupName ?? (initialProductName ? initialProductName : null)
-            : null;
-
-          const hasProductSelected = Boolean(field.value);
-          // Use the product color from displayProducts (which includes pending updates)
-          const displayColorHex = selectedProduct?.color_hex || null;
-          // Always use the same color source as ProductPicker for consistency
-          const selectedProductColors = selectedProduct
-            ? getProductColor(selectedProduct.name, displayColorHex ?? null)
-            : null;
-          const productColorHex = selectedProductColors?.background || null;
-
-          return (
-            <div className="mb-4">
-              <div className="flex items-end gap-3">
-                <div className="flex-1">
-                  <ProductPicker
-                    products={displayProducts}
-                    value={field.value}
-                    onChange={(value) => {
-                      field.onChange(value);
-                    }}
-                    fallbackName={fallbackProductName}
-                    isLoading={isLoadingProducts}
-                    error={productError}
-                    disabled={isLoadingProducts || displayProducts.length === 0}
-                    helperText={
-                      !isLoadingProducts && displayProducts.length === 0 && !productError
-                        ? 'No products found yet. Create products from the session creation modal.'
-                        : undefined
-                    }
-                    allowDelete={Boolean(onRequestDeleteProduct)}
-                    onRequestDeleteProduct={onRequestDeleteProduct}
-                  />
-                </div>
-                {hasProductSelected && (
-                  <div className="flex items-center gap-2 pb-0.5">
-                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                      Product Color
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const productColor = productColorHex || '#2D4660';
-                        setTempColor(productColor);
-                        setEditingProductColor(productColor);
-                        setShowColorPickerModal(true);
-                      }}
-                      className="block w-10 h-10 rounded-md border-2 border-gray-300 hover:border-gray-400 transition-all shadow-sm"
-                      style={{ 
-                        backgroundColor: productColorHex || '#2D4660', 
-                        borderColor: selectedProductColors?.border || '#D1D5DB'
-                      }}
-                      title="Change product color"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        }}
-      />
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
+        <div className="flex items-center gap-2">
+          {(() => {
+            const selectedProduct = displayProducts.find((product) => product.id === selectedProductId) ?? null;
+            const lookupName = selectedProductId ? productLookup[selectedProductId] ?? null : null;
+            const displayProductName = selectedProduct?.name ?? lookupName ?? initialProductName ?? 'No Product';
+            const displayColorHex = selectedProduct?.color_hex || null;
+            const selectedProductColors = selectedProduct
+              ? getProductColor(selectedProduct.name, displayColorHex ?? null)
+              : null;
+            const productColorHex = selectedProductColors?.background || null;
+            
+            return (
+              <>
+                <div
+                  className="w-4 h-4 rounded-sm flex-shrink-0"
+                  style={{ backgroundColor: productColorHex || '#2D4660' }}
+                />
+                <span className="text-gray-900">{displayProductName}</span>
+              </>
+            );
+          })()}
+        </div>
+      </div>
 
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-1">Session Title</label>
@@ -1592,8 +1649,29 @@ function SessionEditForm({
           <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
           <input
             type="date"
-            {...register('startDate', { required: 'Start date is required' })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+            {...register('startDate', { 
+              required: !isPlaceholderDate(session.startDate) && !isPlaceholderDate(session.endDate) ? 'Start date is required' : false
+            })}
+            value={watch('startDate') || ''}
+            onFocus={(e) => {
+              if (!watch('startDate')) {
+                handleDateFocus('startDate');
+              }
+            }}
+            autoComplete="off"
+            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660] [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
+              errors.startDate ? 'border-red-500' : 'border-gray-300'
+            }`}
+            style={!watch('startDate') ? { 
+              color: 'transparent'
+            } : {}}
+            onBlur={(e) => {
+              if (!e.target.value) {
+                e.target.style.color = 'transparent';
+              } else {
+                e.target.style.color = '';
+              }
+            }}
           />
           {errors.startDate && <p className="mt-1 text-sm text-red-600">{errors.startDate.message}</p>}
         </div>
@@ -1602,8 +1680,30 @@ function SessionEditForm({
           <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
           <input
             type="date"
-            {...register('endDate', { required: 'End date is required' })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+            {...register('endDate', { 
+              required: !isPlaceholderDate(session.startDate) && !isPlaceholderDate(session.endDate) ? 'End date is required' : false
+            })}
+            value={watch('endDate') || ''}
+            onFocus={(e) => {
+              if (!watch('endDate')) {
+                handleDateFocus('endDate');
+              }
+            }}
+            autoComplete="off"
+            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660] [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
+              errors.endDate ? 'border-red-500' : 'border-gray-300'
+            }`}
+            style={!watch('endDate') ? { 
+              color: 'transparent',
+              position: 'relative'
+            } : {}}
+            onBlur={(e) => {
+              if (!e.target.value) {
+                e.target.style.color = 'transparent';
+              } else {
+                e.target.style.color = '';
+              }
+            }}
           />
           {errors.endDate && <p className="mt-1 text-sm text-red-600">{errors.endDate.message}</p>}
         </div>
@@ -1614,10 +1714,24 @@ function SessionEditForm({
           <input
             type="checkbox"
             {...register('useAutoVotes')}
-            className="mt-1 h-4 w-4 text-[#399E5A] border-gray-300 rounded accent-[#399E5A]"
+            className="hidden"
           />
+          <button
+            type="button"
+            onClick={() => setValue('useAutoVotes', !useAutoVotes, { shouldDirty: true })}
+            className="flex-shrink-0 cursor-pointer mt-0.5 w-5 h-5 flex items-center justify-center"
+          >
+            {useAutoVotes ? (
+              <CheckSquare className="w-5 h-5 text-green-600" />
+            ) : (
+              <Square className="w-5 h-5 text-gray-400" />
+            )}
+          </button>
           <div className="ml-3">
-            <label className="text-sm font-medium text-gray-700">
+            <label 
+              onClick={() => setValue('useAutoVotes', !useAutoVotes, { shouldDirty: true })}
+              className="text-sm font-medium text-gray-700 cursor-pointer"
+            >
               Automatically calculate votes per user
             </label>
             <p className="text-sm text-gray-600 mt-1">
@@ -1656,8 +1770,12 @@ function SessionEditForm({
         </Button>
 
         <div className="flex w-full justify-end gap-2 sm:w-auto">
-          <Button variant="secondary" type="button" onClick={onCancel}>
-            Cancel
+          <Button 
+            variant="secondary" 
+            type="button"
+            onClick={handleSaveDraft}
+          >
+            Save Draft
           </Button>
           <Button 
             variant="primary" 
@@ -1671,7 +1789,7 @@ function SessionEditForm({
               // Manually trigger form submission
               await handleSubmit(
                 (data) => {
-                  return handleFormSubmit(data);
+                  return handleFormSubmit(data, false);
                 },
                 (errors) => {
                   alert('Please fix form errors: ' + JSON.stringify(errors));
@@ -1865,24 +1983,27 @@ export function AdminDashboard({
     whatWouldItDo: '',
     howWouldItWork: ''
   });
+  const [editAttachments, setEditAttachments] = useState<string[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [isSavingSuggestion, setIsSavingSuggestion] = useState(false);
   const [suggestionToDelete, setSuggestionToDelete] = useState<FeatureSuggestion | null>(null);
   const [isDeletingSuggestion, setIsDeletingSuggestion] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
   const [statusNotes, setStatusNotes] = useState<SessionStatusNote[]>([]);
   const [showAllStatusNotes, setShowAllStatusNotes] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
-  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
-  const [hoveredProductTab, setHoveredProductTab] = useState<boolean>(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
   const [editingProductName, setEditingProductName] = useState('');
+  const [editingProductColor, setEditingProductColor] = useState<string | null>(null);
   const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
   const [showEditProductColorPicker, setShowEditProductColorPicker] = useState(false);
   const [editTempColor, setEditTempColor] = useState<string>('#2D4660');
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
+  const [hoveredProductTab, setHoveredProductTab] = useState<boolean>(false);
   const productLookup = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach((product) => {
@@ -2047,11 +2168,60 @@ export function AdminDashboard({
     }
   });
   
-  const votingStatus = votingSession.isActive 
-    ? <span className="text-[#1E5461] font-medium">Active</span>
-    : isPastDate(votingSession.endDate)
-      ? <span className="text-[#591D0F] font-medium">Closed</span>
-      : <span className="text-[#C89212] font-medium">Upcoming</span>;
+  // Placeholder date constant (same as SessionSelectionScreen)
+  const PLACEHOLDER_DATE = '2099-12-31'; // Placeholder date for drafts without dates
+  
+  const isPlaceholderDate = (dateStr: string | null | undefined): boolean => {
+    if (!dateStr) return false;
+    const dateOnly = dateStr.split('T')[0];
+    return dateOnly === PLACEHOLDER_DATE;
+  };
+
+  const isDraftSession = (session: any) => {
+    // A session is a draft if:
+    // 1. It's not active (is_active: false)
+    // 2. AND either the title is "Untitled Session" or the goal is empty
+    // This identifies sessions saved via "Save Draft" button
+    if (!session.is_active) {
+      const isUntitled = !session.title || session.title === 'Untitled Session' || session.title.trim() === '';
+      const hasNoGoal = !session.goal || session.goal.trim() === '';
+      
+      // If it's not active and has default/empty values, it's a draft
+      return isUntitled || hasNoGoal;
+    }
+    return false;
+  };
+
+  const getSessionStatus = (session: any) => {
+    // Draft sessions have a special status
+    if (isDraftSession(session)) {
+      return { text: 'Draft', color: 'text-yellow-900 bg-yellow-200', icon: Pencil };
+    }
+    
+    const now = new Date();
+    const startDate = session.startDate || session.start_date;
+    const endDate = session.endDate || session.end_date;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (now < start) {
+      return { text: 'Upcoming', color: 'text-yellow-600 bg-yellow-50', icon: Clock };
+    } else if (now > end) {
+      return { text: 'Closed', color: 'text-gray-600 bg-gray-100', icon: AlertCircle };
+    } else {
+      return { text: 'Active', color: 'text-[#1E6154] bg-[#1E6154]/10', icon: CheckCircle };
+    }
+  };
+
+  const sessionStatus = getSessionStatus(votingSession);
+  const StatusIcon = sessionStatus.icon;
+  
+  const votingStatus = (
+    <span className={`inline-flex items-center ${sessionStatus.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${sessionStatus.color}`}>
+      <StatusIcon className={`${sessionStatus.text === 'Active' ? 'h-4 w-4' : 'h-3 w-3'} mr-1`} />
+      {sessionStatus.text}
+    </span>
+  );
 
   const statusNotesDisplay = useMemo(() => {
     const buildUiNote = (note: SessionStatusNote) => {
@@ -2190,6 +2360,7 @@ export function AdminDashboard({
         whatWouldItDo: suggestionToEdit.whatWouldItDo ?? '',
         howWouldItWork: suggestionToEdit.howWouldItWork ?? ''
       });
+      setEditAttachments(suggestionToEdit.attachment_urls ? [...suggestionToEdit.attachment_urls] : []);
       setEditError(null);
     }
   }, [suggestionToEdit]);
@@ -2203,7 +2374,18 @@ export function AdminDashboard({
     setMoveError(null);
   }, [suggestionToMove, otherSessions]);
 
-  const handleSessionUpdate = (data: any) => {
+  const handleSessionUpdate = (data: SessionEditFormValues & { isDraft?: boolean }) => {
+    const isDraft = data.isDraft || false;
+    
+    // For drafts, use placeholder dates if empty
+    const PLACEHOLDER_DATE = '2099-12-31';
+    const startDateValue = data.startDate && data.startDate.trim() 
+      ? data.startDate 
+      : PLACEHOLDER_DATE;
+    const endDateValue = data.endDate && data.endDate.trim()
+      ? data.endDate
+      : PLACEHOLDER_DATE;
+    
     // Handle productId - can be empty string, null, undefined, or a valid ID
     const productId = data.productId && data.productId.trim() !== '' ? data.productId : null;
     
@@ -2211,13 +2393,13 @@ export function AdminDashboard({
     
     const updatedSession: VotingSession = {
       ...votingSession,
-      title: data.title,
-      goal: data.goal,
+      title: data.title.trim() || 'Untitled Session',
+      goal: data.goal.trim() || '',
       votesPerUser: data.useAutoVotes ? Math.max(1, Math.floor(features.length / 2)) : Number(data.votesPerUser),
       useAutoVotes: data.useAutoVotes,
-      startDate: new Date(data.startDate).toISOString(),
-      endDate: new Date(data.endDate + 'T23:59:59').toISOString(),
-      isActive: votingSession.isActive,
+      startDate: new Date(startDateValue).toISOString(),
+      endDate: new Date(endDateValue + 'T23:59:59').toISOString(),
+      isActive: isDraft ? false : votingSession.isActive,
       product_id: selectedProduct?.id ?? null,
       product_name: null // Products table is single source of truth - don't store product_name
     };
@@ -2310,9 +2492,11 @@ export function AdminDashboard({
         title: trimmedTitle,
         summary: editForm.summary.trim() ? editForm.summary.trim() : null,
         whatWouldItDo: editForm.whatWouldItDo.trim() ? editForm.whatWouldItDo.trim() : null,
-        howWouldItWork: editForm.howWouldItWork.trim() ? editForm.howWouldItWork.trim() : null
+        howWouldItWork: editForm.howWouldItWork.trim() ? editForm.howWouldItWork.trim() : null,
+        attachment_urls: editAttachments.length > 0 ? editAttachments : null
       });
       setSuggestionToEdit(null);
+      setEditAttachments([]);
     } catch (error) {
       console.error('Error updating suggestion:', error);
       setEditError('Failed to update the suggestion. Please try again.');
@@ -2325,6 +2509,18 @@ export function AdminDashboard({
     if (!suggestionToMove) return;
     if (!targetSessionId) {
       setMoveError('Please select a session.');
+      return;
+    }
+
+    // Verify the target session still exists
+    try {
+      const targetSession = await db.getSessionById(targetSessionId);
+      if (!targetSession) {
+        setMoveError('The selected session no longer exists. Please refresh and try again.');
+        return;
+      }
+    } catch (verifyError) {
+      setMoveError('The selected session no longer exists. Please refresh and try again.');
       return;
     }
 
@@ -2460,7 +2656,7 @@ export function AdminDashboard({
             onClick={onShowVoterView} 
             className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
           >
-            <Vote className="mr-2 h-4 w-4" />
+            <Vote className="mr-2 h-[26px] w-[26px]" />
               Vote!
           </button>
           )}
@@ -2511,7 +2707,7 @@ export function AdminDashboard({
                   onClick={() => { setMobileMenuOpen(false); onShowVoterView(); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                 >
-                  <Vote className="h-4 w-4 mr-2 text-gray-700" />
+                  <Vote className="h-[26px] w-[26px] mr-2 text-gray-700" />
                   Vote!
                 </button>
                 )}
@@ -2588,10 +2784,11 @@ export function AdminDashboard({
               }
             }}
             onMouseLeave={() => setHoveredProductTab(false)}
-            onClick={async (e) => {
+            onClick={(e) => {
               const productId = (votingSession as any).product_id || (votingSession as any).productId;
               if (!productId) return;
               e.stopPropagation();
+              e.preventDefault();
               const product = products.find(p => p.id === productId);
               if (product) {
                 setProductToEdit(product);
@@ -2599,7 +2796,7 @@ export function AdminDashboard({
                 setEditingProductColor(product.color_hex || null);
                 setEditTempColor(product.color_hex || '#2D4660');
               }
-          }}
+            }}
         >
             <BadgeCheck className="h-4 w-4 flex-shrink-0" />
             <span className="overflow-hidden text-ellipsis flex-1 min-w-0">{productName}</span>
@@ -2686,9 +2883,13 @@ export function AdminDashboard({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-1">Voting Period</h3>
-            <p className={`text-[#2D4660] font-medium ${votingSession.originalEndDate ? 'line-through text-gray-400' : ''}`}>
-              {formatDate(votingSession.startDate)} - {formatDate(votingSession.originalEndDate || votingSession.endDate)}
-            </p>
+            {isPlaceholderDate(votingSession.startDate) || isPlaceholderDate(votingSession.endDate) ? (
+              <p className="text-gray-400 italic">Dates not set</p>
+            ) : (
+              <p className={`text-[#2D4660] font-medium ${votingSession.originalEndDate ? 'line-through text-gray-400' : ''}`}>
+                {formatDate(votingSession.startDate)} - {formatDate(votingSession.originalEndDate || votingSession.endDate)}
+              </p>
+            )}
             {votingSession.originalEndDate && votingSession.endedEarlyBy && (
               <div className="flex items-center mt-1 text-xs text-[#591D0F]">
                 <span>Ended Early by {votingSession.endedEarlyBy}</span>
@@ -2720,7 +2921,6 @@ export function AdminDashboard({
             <h3 className="text-sm font-medium text-gray-700 mb-1">Status</h3>
             <div className="flex items-center justify-between">
               <div className="flex items-center">
-                <Clock className="h-4 w-4 mr-1 text-gray-600" />
                 {votingStatus}
               </div>
               {(votingSession.isActive || isPastDate(votingSession.endDate)) && (
@@ -2742,89 +2942,89 @@ export function AdminDashboard({
             </div>
           </div>
         </div>
-        <div className="pt-3 border-t border-gray-200">
-          <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
-            <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
-            <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
-            <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
-            <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
+        {votingSession.goal && votingSession.goal.trim() && (
+          <div className="pt-3 border-t border-gray-200">
+            <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
+              <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
+              <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
+              <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
+              <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
 
-            <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-              <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
-                <div className="relative">
-                  <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
-                    <Trophy className="h-8 w-8 md:h-10 md:w-10" />
-                  </div>
-                  <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
-                  <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
-                  <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
-                    {votingSession.goal}
-                  </h3>
-                </div>
-              </div>
-
-              <div className="md:w-80 lg:w-96 rounded-xl border border-white/70 bg-white/80 backdrop-blur-sm shadow-inner p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-[#2D4660]">Status Notes</h3>
-                  {statusNotesDisplay.length > 2 && (
-                    <span className="inline-flex items-center justify-between text-xs text-[#1E5461] w-[90px]">
-                      <span className="flex items-center justify-center w-4 h-4 border border-current rounded">
-                        {showAllStatusNotes ? (
-                          <Minus className="h-2.5 w-2.5" />
-                        ) : (
-                          <Plus className="h-2.5 w-2.5" />
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAllStatusNotes((prev) => !prev)}
-                        className="ml-1 hover:text-[#173B65] transition-colors text-left flex-1"
-                      >
-                        {showAllStatusNotes ? 'Show Less' : 'Show More'}
-                      </button>
-                    </span>
-                  )}
-                </div>
-
-                {statusNotesDisplay.length > 0 ? (
-                  <>
-                    <div className="space-y-3">
-                      {statusNotesDisplay
-                        .slice(0, showAllStatusNotes ? statusNotesDisplay.length : 2)
-                        .map((note) => {
-                          const IconComponent = note.type === 'reopen' ? RefreshCw : AlertCircle;
-                          return (
-                            <div
-                              key={note.id}
-                              className={`flex items-start gap-3 text-sm ${note.textColorClass}`}
-                            >
-                              <div
-                                className={`mt-0.5 flex items-center justify-center w-8 h-8 ${note.iconBgClass} ${note.iconBorderClass} border rounded-lg`}
-                              >
-                                <IconComponent className={`h-3.5 w-3.5 ${note.iconColorClass}`} />
-                              </div>
-                              <div>
-                                <p className="font-semibold text-gray-800">{note.title}</p>
-                                <p className="text-xs text-gray-600 leading-relaxed">{note.description}</p>
-                              </div>
-                            </div>
-                          );
-                        })}
+              <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+                <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
+                  <div className="relative">
+                    <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
+                      <Trophy className="h-8 w-8 md:h-10 md:w-10" />
                     </div>
-                    {statusNotesDisplay.length > 2 && !showAllStatusNotes && (
-                      <p className="text-xs text-gray-500 mt-3">Showing newest notes. Select "Show More" to view all updates.</p>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-sm text-gray-500">No status updates yet.</p>
-                )}
+                    <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
+                    <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
+                    <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
+                      {votingSession.goal}
+                    </h3>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {statusNotesDisplay.length > 0 && (
+          <div className="pt-3 border-t border-gray-200">
+            <div className="md:w-80 lg:w-96 rounded-xl border border-white/70 bg-white/80 backdrop-blur-sm shadow-inner p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-[#2D4660]">Status Notes</h3>
+                {statusNotesDisplay.length > 2 && (
+                  <span className="inline-flex items-center justify-between text-xs text-[#1E5461] w-[90px]">
+                    <span className="flex items-center justify-center w-4 h-4 border border-current rounded">
+                      {showAllStatusNotes ? (
+                        <Minus className="h-2.5 w-2.5" />
+                      ) : (
+                        <Plus className="h-2.5 w-2.5" />
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAllStatusNotes((prev) => !prev)}
+                      className="ml-1 hover:text-[#173B65] transition-colors text-left flex-1"
+                    >
+                      {showAllStatusNotes ? 'Show Less' : 'Show More'}
+                    </button>
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                {statusNotesDisplay
+                  .slice(0, showAllStatusNotes ? statusNotesDisplay.length : 2)
+                  .map((note) => {
+                    const IconComponent = note.type === 'reopen' ? RefreshCw : AlertCircle;
+                    return (
+                      <div
+                        key={note.id}
+                        className={`flex items-start gap-3 text-sm ${note.textColorClass}`}
+                      >
+                        <div
+                          className={`mt-0.5 flex items-center justify-center w-8 h-8 ${note.iconBgClass} ${note.iconBorderClass} border rounded-lg`}
+                        >
+                          <IconComponent className={`h-3.5 w-3.5 ${note.iconColorClass}`} />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-800">{note.title}</p>
+                          <p className="text-xs text-gray-600 leading-relaxed">{note.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+              {statusNotesDisplay.length > 2 && !showAllStatusNotes && (
+                <p className="text-xs text-gray-500 mt-3">Showing newest notes. Select "Show More" to view all updates.</p>
+              )}
+            </div>
+          </div>
+        )}
         </div>
       </div>
 
@@ -2954,9 +3154,30 @@ export function AdminDashboard({
             <h2 className="text-xl font-semibold text-[#2D4660]">Suggested Features</h2>
             <p className="text-sm text-gray-600">Ideas submitted from the voting experience for future consideration.</p>
           </div>
-          <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#1E5461]/10 text-[#1E5461] text-sm font-medium">
-            {suggestedFeatures.length} {suggestedFeatures.length === 1 ? 'suggestion' : 'suggestions'}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#1E5461]/10 text-[#1E5461] text-sm font-medium">
+              {suggestedFeatures.length} {suggestedFeatures.length === 1 ? 'suggestion' : 'suggestions'}
+            </span>
+            {suggestedFeatures.length > 1 && (
+              <Button
+                variant="gold"
+                onClick={() => setShowAllSuggestions(!showAllSuggestions)}
+                className="text-xs px-3 py-1 flex items-center gap-1"
+              >
+                {showAllSuggestions ? (
+                  <>
+                    <Minus className="h-3.5 w-3.5" />
+                    Show Less
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-3.5 w-3.5" />
+                    Show All
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
 
         {suggestedFeatures.length === 0 ? (
@@ -2964,7 +3185,7 @@ export function AdminDashboard({
             No feature suggestions have been submitted yet. Encourage voters to use the "Suggest a Feature" button in the voting experience.
           </div>
         ) : (
-          <div className="space-y-4 max-h-[360px] overflow-y-auto pr-1">
+          <div className={`space-y-4 pr-1 ${showAllSuggestions ? '' : 'max-h-[360px] overflow-y-auto'}`}>
             {suggestedFeatures.map((suggestion) => {
               const submitter = suggestion.requester_name || suggestion.requester_email || 'Anonymous';
               return (
@@ -3080,6 +3301,67 @@ export function AdminDashboard({
                         </p>
                       </div>
                     </div>
+
+                    {/* Attachments Section */}
+                    {suggestion.attachment_urls && suggestion.attachment_urls.length > 0 && (
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Paperclip className="h-4 w-4 text-[#2D4660]" />
+                          <p className="text-sm font-semibold text-[#2D4660]">Attachments ({suggestion.attachment_urls.length})</p>
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                          {suggestion.attachment_urls.map((url, index) => {
+                            const isImage = url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                            const isPDF = url.match(/\.pdf$/i);
+                            const fileName = url.split('/').pop() || `attachment-${index + 1}`;
+                            
+                            return (
+                              <div
+                                key={index}
+                                className="relative group border border-gray-300 rounded-md overflow-hidden"
+                                style={{ width: '120px', height: '120px' }}
+                              >
+                                {isImage ? (
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block w-full h-full"
+                                  >
+                                    <img
+                                      src={url}
+                                      alt={fileName}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </a>
+                                ) : isPDF ? (
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block w-full h-full flex items-center justify-center bg-red-50 hover:bg-red-100 transition-colors"
+                                  >
+                                    <Paperclip className="h-10 w-10 text-red-600" />
+                                  </a>
+                                ) : (
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block w-full h-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition-colors"
+                                  >
+                                    <Paperclip className="h-8 w-8 text-gray-600" />
+                                  </a>
+                                )}
+                                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-1.5 truncate">
+                                  {fileName.length > 18 ? `${fileName.substring(0, 18)}...` : fileName}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -3356,24 +3638,84 @@ export function AdminDashboard({
               disabled={isSavingSuggestion}
             />
           </div>
+          
+          {/* Attachments Section */}
+          {editAttachments.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Attachments</label>
+              <div className="flex flex-wrap gap-3">
+                {editAttachments.map((url, index) => {
+                  const isImage = url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                  const isPDF = url.match(/\.pdf$/i);
+                  const fileName = url.split('/').pop() || `attachment-${index + 1}`;
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="relative group border border-gray-300 rounded-md overflow-hidden"
+                      style={{ width: '120px', height: '120px' }}
+                    >
+                      {isImage ? (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full h-full"
+                        >
+                          <img
+                            src={url}
+                            alt={fileName}
+                            className="w-full h-full object-cover"
+                          />
+                        </a>
+                      ) : isPDF ? (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full h-full flex items-center justify-center bg-red-50 hover:bg-red-100 transition-colors"
+                        >
+                          <Paperclip className="h-10 w-10 text-red-600" />
+                        </a>
+                      ) : (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full h-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          <Paperclip className="h-8 w-8 text-gray-600" />
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditAttachments(prev => prev.filter((_, i) => i !== index));
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        style={{ width: '20px', height: '20px' }}
+                        disabled={isSavingSuggestion}
+                        aria-label={`Remove ${fileName}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-1.5 truncate">
+                        {fileName.length > 18 ? `${fileName.substring(0, 18)}...` : fileName}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-gray-500">Click the X icon on hover to remove attachments</p>
+            </div>
+          )}
+          
           {editError && (
             <div className="bg-[#591D0F]/5 border border-[#591D0F]/20 text-[#591D0F] text-sm rounded-md px-3 py-2">
               {editError}
             </div>
           )}
           <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                if (!isSavingSuggestion) {
-                  setSuggestionToEdit(null);
-                  setEditError(null);
-                }
-              }}
-              disabled={isSavingSuggestion}
-            >
-              Cancel
-            </Button>
             <Button
               variant="primary"
               onClick={handleSaveSuggestionEdit}

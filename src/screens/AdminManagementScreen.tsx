@@ -270,7 +270,7 @@ export default function AdminManagementScreen() {
             <ChevronLeft className="h-6 w-6" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Session Admins</h1>
+          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Session Admins</h1>
             {currentUser && (
               <p className="text-sm text-gray-600 mt-1">
                 {currentUser.name}

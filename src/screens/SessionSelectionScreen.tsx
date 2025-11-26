@@ -11,7 +11,7 @@ import type { Product, SessionStakeholder } from '../types';
 import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
-  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star, Square
+  CheckSquare, CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star, Square
 } from 'lucide-react';
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -42,8 +42,8 @@ export default function SessionSelectionScreen() {
     goal: '',
     votesPerUser: 10,
     useAutoVotes: true,
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    startDate: '',
+    endDate: ''
   });
   const [createSessionErrors, setCreateSessionErrors] = useState<Record<string, string>>({});
   const [isCreatingSession, setIsCreatingSession] = useState(false);
@@ -67,6 +67,7 @@ export default function SessionSelectionScreen() {
   const [pendingProductName, setPendingProductName] = useState<string | null>(null);
   const [hoveredPlusButton, setHoveredPlusButton] = useState<string | null>(null);
   const [modalOpenedFromCirclePlus, setModalOpenedFromCirclePlus] = useState(false);
+  const [isProductLocked, setIsProductLocked] = useState(false);
   const [hoveredThirdCard, setHoveredThirdCard] = useState<string | null>(null);
   const [hoveredProductTab, setHoveredProductTab] = useState<string | null>(null);
   const [hoveredSessionCard, setHoveredSessionCard] = useState<string | null>(null);
@@ -86,7 +87,7 @@ export default function SessionSelectionScreen() {
   const [inviteModalError, setInviteModalError] = useState('');
   const [inviteSessionDetails, setInviteSessionDetails] = useState<any | null>(null);
   const [isSendingInvites, setIsSendingInvites] = useState(false);
-  const [inviteSuccessSummary, setInviteSuccessSummary] = useState<{ sessionTitle: string; count: number } | null>(null);
+  const [inviteSuccessSummary, setInviteSuccessSummary] = useState<{ sessionTitle: string; count: number; stakeholders: Array<{ name: string; email: string }> } | null>(null);
   const closeInviteSuccessModal = () => setInviteSuccessSummary(null);
   const inviteStakeholderEmails = inviteStakeholders.map((stakeholder) => stakeholder.user_email.toLowerCase());
   const allStakeholdersSelected = inviteStakeholderEmails.length > 0 && inviteStakeholderEmails.every((email) => selectedStakeholderEmails.includes(email));
@@ -286,8 +287,8 @@ export default function SessionSelectionScreen() {
       goal: '',
       votesPerUser: 10,
       useAutoVotes: true,
-      startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      startDate: '',
+      endDate: ''
     });
     setCreateSessionErrors({});
     setNewProductName('');
@@ -302,18 +303,24 @@ export default function SessionSelectionScreen() {
     setPendingProductName(null);
     setAllowCreateProduct(true);
     setModalOpenedFromCirclePlus(false);
-    setSelectedProductId(''); // Always reset to no selection
+    setIsProductLocked(false);
+    // Don't reset selectedProductId here - it will be set by the caller if needed
   };
 
-  const validateCreateSessionForm = () => {
+  const validateCreateSessionForm = (isDraft: boolean = false) => {
     const errors: Record<string, string> = {};
 
-    if (!createSessionForm.title.trim()) {
-      errors.title = 'Session title is required';
+    // For drafts, skip required field validation
+    if (!isDraft) {
+      if (!createSessionForm.title.trim()) {
+        errors.title = 'Session title is required';
+      }
+      if (!createSessionForm.goal.trim()) {
+        errors.goal = 'Session goal is required';
+      }
     }
-    if (!createSessionForm.goal.trim()) {
-      errors.goal = 'Session goal is required';
-    }
+
+    // Votes validation (only if not using auto votes)
     if (!createSessionForm.useAutoVotes) {
       if (createSessionForm.votesPerUser < 1) {
         errors.votesPerUser = 'Votes per user must be at least 1';
@@ -322,22 +329,48 @@ export default function SessionSelectionScreen() {
         errors.votesPerUser = 'Votes per user cannot exceed 100';
       }
     }
-    // Parse dates using local date parsing to avoid timezone issues
-    const start = parseLocalDate(createSessionForm.startDate);
-    const end = parseLocalDate(createSessionForm.endDate);
-    if (end <= start) {
-      errors.endDate = 'End date must be after start date';
+
+    // Date validation
+    if (!isDraft) {
+      // Dates are required for non-draft sessions
+      if (!createSessionForm.startDate || !createSessionForm.startDate.trim()) {
+        errors.startDate = 'Start date is required';
+      }
+      if (!createSessionForm.endDate || !createSessionForm.endDate.trim()) {
+        errors.endDate = 'End date is required';
+      }
+      
+      // If both dates are provided, validate they're correct
+      if (createSessionForm.startDate && createSessionForm.endDate && 
+          createSessionForm.startDate.trim() && createSessionForm.endDate.trim()) {
+        const start = parseLocalDate(createSessionForm.startDate);
+        const end = parseLocalDate(createSessionForm.endDate);
+        if (end <= start) {
+          errors.endDate = 'End date must be after start date';
+        }
+      }
+    } else {
+      // For drafts, only validate dates if they're provided
+      if (createSessionForm.startDate && createSessionForm.endDate) {
+        const start = parseLocalDate(createSessionForm.startDate);
+        const end = parseLocalDate(createSessionForm.endDate);
+        if (end <= start) {
+          errors.endDate = 'End date must be after start date';
+        }
+      }
     }
     
-    // Require either a selected product, a pending product, or a new product name entered
-    const hasNewProductName = newProductName.trim().length > 0;
-    if (!productError && modalProducts.length > 0 && !selectedProductId && !pendingProduct && !isCreatingNewProduct && !hasNewProductName) {
-      errors.product = 'Please select a product or enter a new product name';
-    }
-    
-    // If user is in "creating new product" mode but hasn't entered a name, show error
-    if (isCreatingNewProduct && !hasNewProductName) {
-      errors.product = 'Please enter a product name or select an existing product';
+    // Product validation (only if not a draft)
+    if (!isDraft) {
+      const hasNewProductName = newProductName.trim().length > 0;
+      if (!productError && modalProducts.length > 0 && !selectedProductId && !pendingProduct && !isCreatingNewProduct && !hasNewProductName) {
+        errors.product = 'Please select a product or enter a new product name';
+      }
+      
+      // If user is in "creating new product" mode but hasn't entered a name, show error
+      if (isCreatingNewProduct && !hasNewProductName) {
+        errors.product = 'Please enter a product name or select an existing product';
+      }
     }
 
     setCreateSessionErrors(errors);
@@ -367,6 +400,91 @@ export default function SessionSelectionScreen() {
         delete next[name];
         return next;
       });
+    }
+  };
+
+  const handleDateFocus = async (fieldName: 'startDate' | 'endDate') => {
+    // Only populate if the field is currently empty
+    if (fieldName === 'startDate' && !createSessionForm.startDate) {
+      let startDate: Date;
+      
+      // If product is selected, calculate based on furthest out session for that product
+      if (selectedProductId) {
+        try {
+          const productSessions = userSessions.filter(s => s.product_id === selectedProductId);
+          
+          if (productSessions.length > 0) {
+            // Find the latest end date
+            let latestEndDate = parseLocalDate(productSessions[0].end_date);
+            productSessions.forEach(session => {
+              const sessionEndDate = parseLocalDate(session.end_date);
+              if (sessionEndDate > latestEndDate) {
+                latestEndDate = sessionEndDate;
+              }
+            });
+            
+            // Start date should be the NEXT day after the latest end date
+            startDate = addDaysToLocalDate(latestEndDate, 1);
+          } else {
+            // No existing sessions - use today
+            startDate = new Date();
+          }
+        } catch (error) {
+          console.error('Error calculating dates for product:', error);
+          startDate = new Date();
+        }
+      } else {
+        // No product selected - use today
+        startDate = new Date();
+      }
+      
+      const startDateStr = formatDateToISO(startDate);
+      const startDateObj = parseLocalDate(startDateStr);
+      const endDate = addDaysToLocalDate(startDateObj, 14);
+      
+      setCreateSessionForm(prev => ({
+        ...prev,
+        startDate: startDateStr,
+        endDate: prev.endDate || formatDateToISO(endDate)
+      }));
+    } else if (fieldName === 'endDate' && !createSessionForm.endDate) {
+      // If end date is focused and empty, use start date + 14 days
+      let startDate: Date;
+      
+      if (createSessionForm.startDate) {
+        startDate = parseLocalDate(createSessionForm.startDate);
+      } else if (selectedProductId) {
+        // Calculate start date based on product, then add 14 days for end date
+        try {
+          const productSessions = userSessions.filter(s => s.product_id === selectedProductId);
+          
+          if (productSessions.length > 0) {
+            let latestEndDate = parseLocalDate(productSessions[0].end_date);
+            productSessions.forEach(session => {
+              const sessionEndDate = parseLocalDate(session.end_date);
+              if (sessionEndDate > latestEndDate) {
+                latestEndDate = sessionEndDate;
+              }
+            });
+            startDate = addDaysToLocalDate(latestEndDate, 1);
+          } else {
+            startDate = new Date();
+          }
+        } catch (error) {
+          console.error('Error calculating dates for product:', error);
+          startDate = new Date();
+        }
+      } else {
+        startDate = new Date();
+      }
+      
+      const endDate = addDaysToLocalDate(startDate, 14);
+      
+      setCreateSessionForm(prev => ({
+        ...prev,
+        endDate: formatDateToISO(endDate),
+        startDate: prev.startDate || formatDateToISO(startDate)
+      }));
     }
   };
 
@@ -431,10 +549,113 @@ export default function SessionSelectionScreen() {
     }
   };
 
+  const handleSaveDraft = async () => {
+    if (!currentUser) return;
+    if (!validateCreateSessionForm(true)) return; // Pass true for isDraft
+
+    setIsCreatingSession(true);
+    try {
+      const code = generateSessionCode();
+      const tenantId = currentUser.tenant_id ?? currentUser.tenantId ?? null;
+      let productIdToUse = selectedProductId && selectedProductId.trim() !== '' ? selectedProductId : null;
+      
+      // Handle product creation for drafts (optional)
+      const trimmedNewProductName = newProductName.trim();
+      const hasNewProductName = trimmedNewProductName.length > 0;
+      
+      let productNameToCreate: string | null = null;
+      let productColorToUse: string | null = null;
+      
+      if (pendingProduct) {
+        productNameToCreate = pendingProduct.name;
+        productColorToUse = pendingProduct.color;
+      } else if (hasNewProductName) {
+        productNameToCreate = trimmedNewProductName;
+        productColorToUse = newProductColor;
+      }
+      
+      // Create product if we have a name to create (optional for drafts)
+      if (productNameToCreate && tenantId) {
+        try {
+          const existingProduct = modalProducts.find(p => 
+            p.name.toLowerCase().trim() === productNameToCreate.toLowerCase().trim()
+          );
+          
+          if (existingProduct) {
+            productIdToUse = existingProduct.id;
+          } else {
+            const created = await db.createProductForTenant(
+              tenantId, 
+              productNameToCreate, 
+              productColorToUse || undefined
+            );
+            productIdToUse = created.id;
+            
+            setModalProducts(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+            setProductLookup(prev => ({ ...prev, [created.id]: created.name }));
+            setProductColorLookup(prev => {
+              const next = { ...prev };
+              if (created.color_hex) next[created.id] = created.color_hex as string;
+              return next;
+            });
+          }
+        } catch (error) {
+          console.error('Error creating product during draft save:', error);
+          // Don't block draft save if product creation fails
+        }
+      }
+
+      // For drafts, only use dates if they were actually set by the user
+      // If empty, use a placeholder date that we can recognize and not display
+      const startDate = createSessionForm.startDate && createSessionForm.startDate.trim() 
+        ? createSessionForm.startDate 
+        : PLACEHOLDER_DATE;
+      const endDate = createSessionForm.endDate && createSessionForm.endDate.trim()
+        ? createSessionForm.endDate
+        : PLACEHOLDER_DATE;
+      const startDateWithTime = `${startDate}T00:00:00`;
+      const endDateWithTime = `${endDate}T23:59:59`;
+      
+      const newSession = await db.createSession({
+        title: createSessionForm.title.trim() || 'Untitled Session',
+        goal: createSessionForm.goal.trim() || '',
+        votes_per_user: createSessionForm.votesPerUser || 10,
+        use_auto_votes: createSessionForm.useAutoVotes,
+        start_date: startDateWithTime,
+        end_date: endDateWithTime,
+        is_active: false, // Drafts are not active
+        session_code: code,
+        access_type: 'invite-only',
+        product_id: productIdToUse ?? null,
+        product_name: null
+      });
+
+      // Add session admin
+      try {
+        await db.addSessionAdmin(newSession.id, currentUser.id);
+      } catch (error) {
+        console.error('Error adding session admin for draft:', error);
+      }
+
+      await refreshSessions();
+      sessionsLoadedRef.current = false; // Reset ref to allow reload
+      await loadUserSessions();
+      handleCloseCreateModal();
+    } catch (error: any) {
+      console.error('Error saving draft:', error);
+      setCreateSessionErrors(prev => ({
+        ...prev,
+        submit: error.message || 'Failed to save draft. Please try again.'
+      }));
+    } finally {
+      setIsCreatingSession(false);
+    }
+  };
+
   const handleCreateSessionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
-    if (!validateCreateSessionForm()) return;
+    if (!validateCreateSessionForm(false)) return; // Pass false for regular session
 
     setIsCreatingSession(true);
     try {
@@ -514,7 +735,9 @@ export default function SessionSelectionScreen() {
       }
 
       // Check for duplicate sessions and active session conflicts
-      if (productIdToUse) {
+      // Only check if dates are provided
+      if (productIdToUse && createSessionForm.startDate && createSessionForm.endDate && 
+          createSessionForm.startDate.trim() && createSessionForm.endDate.trim()) {
         // First, check if there's already a session with the exact same dates for this product
         // Compare date parts only (ignore time components)
         const allSessionsForProduct = userSessions.filter(s => s.product_id === productIdToUse);
@@ -744,6 +967,7 @@ export default function SessionSelectionScreen() {
       // Refresh the context with fresh sessions
       await refreshSessions();
 
+      // Keep all sessions including drafts (drafts will be shown with disabled features)
       setUserSessions(freshSessions);
       setSessionRoles(roles);
       setFeatureCounts(counts);
@@ -864,6 +1088,11 @@ export default function SessionSelectionScreen() {
     }
   };
 
+  const handleVoteButton = (session: any) => {
+    setCurrentSession(session);
+    navigate('/vote');
+  };
+
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
@@ -916,7 +1145,35 @@ export default function SessionSelectionScreen() {
     return formatted.replace(/\b(\d{4})\b/g, (match) => `'${match.slice(-2)}`);
   };
 
+  const PLACEHOLDER_DATE = '2099-12-31'; // Placeholder date for drafts without dates
+  
+  const isPlaceholderDate = (dateStr: string | null | undefined): boolean => {
+    if (!dateStr) return false;
+    const dateOnly = dateStr.split('T')[0];
+    return dateOnly === PLACEHOLDER_DATE;
+  };
+
+  const isDraftSession = (session: any) => {
+    // A session is a draft if:
+    // 1. It's not active (is_active: false)
+    // 2. AND either the title is "Untitled Session" or the goal is empty
+    // This identifies sessions saved via "Save Draft" button
+    if (!session.is_active) {
+      const isUntitled = !session.title || session.title === 'Untitled Session' || session.title.trim() === '';
+      const hasNoGoal = !session.goal || session.goal.trim() === '';
+      
+      // If it's not active and has default/empty values, it's a draft
+      return isUntitled || hasNoGoal;
+    }
+    return false;
+  };
+
   const getSessionStatus = (session: any) => {
+    // Draft sessions have a special status
+    if (isDraftSession(session)) {
+      return { text: 'Draft', color: 'text-yellow-900 bg-yellow-200', icon: Pencil };
+    }
+    
     const now = new Date();
     const start = new Date(session.start_date);
     const end = new Date(session.end_date);
@@ -955,41 +1212,82 @@ export default function SessionSelectionScreen() {
   };
 
   const getDefaultInviteSubject = (session: any) => {
-    return `You're invited to vote: ${session.title}`;
+    const productName = getDisplayProductName(session, productLookup);
+    return productName ? `${productName} • ${session.title}` : `You're invited to vote: ${session.title}`;
   };
 
   const getDefaultInviteBody = (session: any, inviteUrl: string) => {
+    const productName = getDisplayProductName(session, productLookup);
+    const sessionLabel = productName ? `${productName} • ${session.title}` : session.title;
     return (
       `Hello,\n\n` +
-      `You're invited to participate in the "${session.title}" feature voting session.\n\n` +
+      `You're invited to participate in the "${sessionLabel}" feature voting session.\n\n` +
       (session.goal ? `Goal: ${session.goal}\n\n` : '') +
-      `Voting Period: ${formatDate(session.start_date)} - ${formatDate(session.end_date)}\n\n` +
-      `Click the button below to sign in and cast your votes.\n\n` +
+      `Voting Period: ${isPlaceholderDate(session.start_date) || isPlaceholderDate(session.end_date) ? 'Dates not set' : `${formatDate(session.start_date)} - ${formatDate(session.end_date)}`}\n\n` +
+      `Click the "Go Vote!" button below to sign in and cast your votes.\n\n` +
       `Need help? Reach out to the session admin team.\n\n` +
       `Thanks,\n${currentUser?.name || 'Feature Voting System'}`
     );
   };
 
   const getDefaultInviteBodyHtml = (session: any, inviteUrl: string) => {
-    const textBody = getDefaultInviteBody(session, inviteUrl);
-    const htmlBody = convertTextToHtml(textBody);
+    const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
+    const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+    const loginUrl = `${window.location.origin}${basename}/login`;
+    const productName = getDisplayProductName(session, productLookup);
+    const sessionLabel = productName ? `${productName} • ${session.title}` : session.title;
     
-    // Replace the button placeholder with an actual HTML button
-    const buttonHtml = `
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
+    return `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center" style="padding: 48px 20px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
+        <!-- Logo Header -->
         <tr>
-          <td align="center">
-            <a href="${inviteUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Sign In to Vote</a>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 24px; font-weight: bold; color: #2d4660; margin-top: 16px;">You're Invited to Vote</div>
+          </td>
+        </tr>
+        
+        <!-- Main Content -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello,</p>
+            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333; line-height: 1.6;">You're invited to participate in the <strong style="color: #2d4660;">"${sessionLabel}"</strong> feature voting session.</p>
+            
+            ${session.goal ? `<p style="margin: 0 0 24px 0; font-size: 16px; color: #333; line-height: 1.6;"><strong style="color: #2d4660;">Goal:</strong> ${escapeHtml(session.goal)}</p>` : ''}
+            
+            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333; line-height: 1.6;"><strong style="color: #2d4660;">Voting Period:</strong> ${isPlaceholderDate(session.start_date) || isPlaceholderDate(session.end_date) ? 'Dates not set' : `${formatDate(session.start_date)} - ${formatDate(session.end_date)}`}</p>
+            
+            <p style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">Click the button below to sign in and cast your votes.</p>
+            
+            <!-- Go Vote Button - Gold styling like admin email -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
+              <tr>
+                <td align="center">
+                  <a href="${inviteUrl}" style="display: inline-block; padding: 12px 24px; background-color: #C89212; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Go Vote!</a>
+                </td>
+              </tr>
+            </table>
+            
+            <p style="margin: 24px 0 0 0; font-size: 14px; color: #6b7280; line-height: 1.6;">Need help? Reach out to the session admin team.</p>
+            
+            <p style="margin: 24px 0 0 0; font-size: 16px; color: #333; line-height: 1.6;">Thanks,<br />${currentUser?.name || 'Feature Voting System'}</p>
+          </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
           </td>
         </tr>
       </table>
-    `;
-    
-    // Insert button before "Need help?" text
-    return htmlBody.replace(
-      /Need help\?/,
-      buttonHtml + '<br />Need help?'
-    );
+    </td>
+  </tr>
+</table>`;
   };
 
   const handleEmailInvite = async (e: React.MouseEvent, session: any) => {
@@ -1085,31 +1383,70 @@ export default function SessionSelectionScreen() {
     const sessionTitle = inviteSessionDetails.title;
 
     const baseBody = inviteEmailBody || getDefaultInviteBody(inviteSessionDetails, inviteSessionLink);
+    const subject = inviteEmailSubject || getDefaultInviteSubject(inviteSessionDetails);
+    
+    // Always include the button after the body text
+    const buttonHtml = `
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
+        <tr>
+          <td align="center">
+            <a href="${inviteSessionLink}" style="display: inline-block; padding: 12px 24px; background-color: #C89212; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Go Vote!</a>
+          </td>
+        </tr>
+      </table>
+    `;
+    
     // Use HTML version with button if using default body, otherwise convert the custom body
-    // If custom body contains the invite link, replace it with a button
     let htmlBody: string;
     if (inviteEmailBody) {
-      // Custom body - convert to HTML and replace any URL with a button
+      // Custom body - wrap in full email template and always append button
+      const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
       let customHtml = convertTextToHtml(baseBody);
-      // Replace any occurrence of the invite link with a button
-      if (inviteSessionLink && customHtml.includes(inviteSessionLink)) {
-        const buttonHtml = `
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 16px 0;">
-            <tr>
-              <td align="center">
-                <a href="${inviteSessionLink}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Sign In to Vote</a>
-              </td>
-            </tr>
-          </table>
-        `;
-        customHtml = customHtml.replace(new RegExp(escapeHtml(inviteSessionLink), 'g'), buttonHtml);
+      
+      // Remove any occurrence of the invite link from the text (user shouldn't need to include it)
+      if (inviteSessionLink && customHtml.includes(escapeHtml(inviteSessionLink))) {
+        customHtml = customHtml.replace(new RegExp(escapeHtml(inviteSessionLink), 'g'), '');
       }
-      htmlBody = customHtml;
+      
+      // Always append the button after the custom content
+      customHtml = customHtml + buttonHtml;
+      
+      // Wrap custom body in full email template
+      htmlBody = `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center" style="padding: 48px 20px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
+        <!-- Logo Header -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 24px; font-weight: bold; color: #2d4660; margin-top: 16px;">You're Invited to Vote</div>
+          </td>
+        </tr>
+        
+        <!-- Main Content -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <div style="font-family: Arial, sans-serif; font-size: 14px; color: #111827; line-height: 1.6;">${customHtml}</div>
+          </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
     } else {
       // Default body - use the HTML version with button
       htmlBody = getDefaultInviteBodyHtml(inviteSessionDetails, inviteSessionLink);
     }
-    const subject = inviteEmailSubject || getDefaultInviteSubject(inviteSessionDetails);
 
     try {
       await Promise.all(
@@ -1118,15 +1455,24 @@ export default function SessionSelectionScreen() {
             to: email,
             subject,
             text: baseBody,
-            html: `<div style="font-family: Arial, sans-serif; font-size: 14px; color: #111827; line-height: 1.6;">${htmlBody}</div>`
+            html: htmlBody
           })
         )
       );
 
+      // Get stakeholder details for the success modal
+      const sentStakeholders = inviteStakeholders
+        .filter(stakeholder => selectedStakeholderEmails.includes(stakeholder.user_email.toLowerCase()))
+        .map(stakeholder => ({
+          name: stakeholder.user_name || 'Unnamed Stakeholder',
+          email: stakeholder.user_email
+        }));
+
       closeStakeholderInviteModal();
       setInviteSuccessSummary({
         sessionTitle,
-        count: recipientCount
+        count: recipientCount,
+        stakeholders: sentStakeholders
       });
     } catch (error: any) {
       console.error('Error sending stakeholder invites:', error);
@@ -1151,7 +1497,9 @@ export default function SessionSelectionScreen() {
   const handleCloseCreateModal = () => {
     setShowCreateSessionModal(false);
     setModalOpenedFromCirclePlus(false);
+    setIsProductLocked(false);
     resetCreateSessionForm();
+    setSelectedProductId(''); // Reset product selection when closing
   };
 
   if (isLoading) {
@@ -1401,14 +1749,14 @@ export default function SessionSelectionScreen() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                      handleSelectSession(session);
+                      handleVoteButton(session);
                   }}
-                    className="inline-flex items-center px-4 py-2 rounded-md text-sm font-semibold transition-colors text-white shadow-md"
+                    className="inline-flex items-center px-4 py-1 rounded-md text-sm font-semibold transition-colors text-white shadow-md"
                     style={{ backgroundColor: '#1E6154' }}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#1E6154'}
                 >
-                    <Vote className="h-4 w-4 mr-1.5" />
+                    <Vote className="h-[26px] w-[26px] mr-1.5" />
                   Vote!
                 </button>
                   </div>
@@ -1480,7 +1828,11 @@ export default function SessionSelectionScreen() {
             <div className="flex items-center justify-between">
               <div className="flex items-center">
                 <Calendar className="h-4 w-4 mr-2" />
-                <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+                {isPlaceholderDate(session.start_date) || isPlaceholderDate(session.end_date) ? (
+                  <span className="text-gray-400 italic">Dates not set</span>
+                ) : (
+                  <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+                )}
               </div>
               <span className={`inline-flex items-center ${status.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${status.color}`}>
                 <StatusIcon className={`${status.text === 'Active' ? 'h-4 w-4' : 'h-3 w-3'} mr-1`} />
@@ -1509,7 +1861,7 @@ export default function SessionSelectionScreen() {
                     </div>
                   )}
                 </div>
-                {status.text !== 'Upcoming' && (
+                {status.text !== 'Upcoming' && status.text !== 'Draft' && (
                 <button
                   onClick={(e) => handleViewResults(e, session)}
                     className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#E0A814] transition-colors cursor-pointer flex-shrink-0"
@@ -1524,27 +1876,33 @@ export default function SessionSelectionScreen() {
 
           {/* Email Invite */}
           <div className="mt-4 pt-4 border-t border-gray-200">
-            <div className={`relative inline-block w-full ${isClosed ? 'group' : ''}`}>
-              <button
-                onClick={(e) => handleEmailInvite(e, session)}
-                disabled={isClosed}
-                className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
-                  isClosed
-                    ? 'bg-gray-200 text-gray-500'
-                    : 'bg-blue-50 hover:bg-blue-100'
-                }`}
-                style={isClosed ? { cursor: 'not-allowed' } : {}}
-              >
-                <Mail className={`h-4 w-4 mr-2 ${isClosed ? 'text-gray-500' : 'text-blue-600'}`} />
-                <span className={`text-sm font-medium ${isClosed ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
-              </button>
-              {isClosed && (
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                  Session Closed
-                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+            {(() => {
+              const isDraft = isDraftSession(session);
+              const shouldDisable = isClosed || isDraft;
+              return (
+                <div className={`relative inline-block w-full ${shouldDisable ? 'group' : ''}`}>
+                  <button
+                    onClick={(e) => handleEmailInvite(e, session)}
+                    disabled={shouldDisable}
+                    className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
+                      shouldDisable
+                        ? 'bg-gray-200 text-gray-500'
+                        : 'bg-blue-50 hover:bg-blue-100'
+                    }`}
+                    style={shouldDisable ? { cursor: 'not-allowed' } : {}}
+                  >
+                    <Mail className={`h-4 w-4 mr-2 ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`} />
+                    <span className={`text-sm font-medium ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
+                  </button>
+                  {shouldDisable && (
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                      {isDraft ? 'Draft Session' : 'Session Closed'}
+                      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
           </div>
         </div>
       </>
@@ -1628,6 +1986,7 @@ export default function SessionSelectionScreen() {
               <>
                 <button
                   onClick={() => {
+                    resetCreateSessionForm();
                     setModalOpenedFromCirclePlus(false);
                     setAllowCreateProduct(true);
                     setSelectedProductId(''); // Always start with no product selected
@@ -1680,6 +2039,7 @@ export default function SessionSelectionScreen() {
                   <>
                     <button
                       onClick={() => { 
+                        resetCreateSessionForm();
                         setMobileMenuOpen(false);
                         setAllowCreateProduct(true);
                         setShowCreateSessionModal(true);
@@ -1715,6 +2075,7 @@ export default function SessionSelectionScreen() {
           {isSystemAdmin && (
             <button
               onClick={() => {
+                resetCreateSessionForm();
                 setAllowCreateProduct(true);
                 setShowCreateSessionModal(true);
               }}
@@ -1865,15 +2226,13 @@ export default function SessionSelectionScreen() {
                                     // End date is 14 days (2 weeks) after start date
                                     const newEndDate = addDaysToLocalDate(newStartDate, 14);
                                     
-                                    // Update form with calculated dates
-                                    setCreateSessionForm(prev => ({
-                                      ...prev,
-                                      startDate: formatDateToISO(newStartDate),
-                                      endDate: formatDateToISO(newEndDate)
-                                    }));
-                                    
+                                    // Don't set dates here - they'll be populated on focus
+                                    // Reset form but keep product selected
+                                    resetCreateSessionForm();
+                                    setSelectedProductId(productId);
                                     setModalOpenedFromCirclePlus(true);
                                     setAllowCreateProduct(false);
+                                    setIsProductLocked(true);
                                     setShowCreateSessionModal(true);
                                   }}
                                   onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
@@ -2090,15 +2449,13 @@ export default function SessionSelectionScreen() {
                                       // End date is 14 days (2 weeks) after start date
                                       const newEndDate = addDaysToLocalDate(newStartDate, 14);
                                       
-                                      // Update form with calculated dates
-                                      setCreateSessionForm(prev => ({
-                                        ...prev,
-                                        startDate: formatDateToISO(newStartDate),
-                                        endDate: formatDateToISO(newEndDate)
-                                      }));
-                                      
+                                      // Don't set dates here - they'll be populated on focus
+                                      // Reset form but keep product selected
+                                      resetCreateSessionForm();
+                                      setSelectedProductId(productId);
                                       setModalOpenedFromCirclePlus(true);
                                       setAllowCreateProduct(false);
+                                      setIsProductLocked(true);
                                       setShowCreateSessionModal(true);
                                     }}
                                     className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
@@ -2510,14 +2867,13 @@ export default function SessionSelectionScreen() {
                                         // End date is 14 days (2 weeks) after start date
                                         const newEndDate = addDaysToLocalDate(newStartDate, 14);
                                         
-                                        // Update form with calculated dates
-                                        setCreateSessionForm(prev => ({
-                                          ...prev,
-                                          startDate: formatDateToISO(newStartDate),
-                                          endDate: formatDateToISO(newEndDate)
-                                        }));
-                                        
+                                        // Don't set dates here - they'll be populated on focus
+                                        // Reset form but keep product selected
+                                        resetCreateSessionForm();
+                                        setSelectedProductId(productId);
+                                        setModalOpenedFromCirclePlus(true);
                                         setAllowCreateProduct(false);
+                                        setIsProductLocked(true);
                                         setShowCreateSessionModal(true);
                                       }}
                                       onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
@@ -2654,17 +3010,13 @@ export default function SessionSelectionScreen() {
                                             // End date is 14 days (2 weeks) after start date
                                             const newEndDate = addDaysToLocalDate(newStartDate, 14);
                                             
-                                            // Update form with calculated dates
-                                            setCreateSessionForm(prev => ({
-                                              ...prev,
-                                              startDate: formatDateToISO(newStartDate),
-                                              endDate: formatDateToISO(newEndDate)
-                                            }));
-                                            
-                                            
+                                            // Don't set dates here - they'll be populated on focus
+                                            // Reset form but keep product selected
+                                            resetCreateSessionForm();
+                                            setSelectedProductId(productId);
                                             setModalOpenedFromCirclePlus(true);
-                                            
-                                          setAllowCreateProduct(false);
+                                            setAllowCreateProduct(false);
+                                            setIsProductLocked(true);
                                             setShowCreateSessionModal(true);
                                           }}
                                       >
@@ -2822,15 +3174,13 @@ export default function SessionSelectionScreen() {
                                           // End date is 14 days (2 weeks) after start date
                                           const newEndDate = addDaysToLocalDate(newStartDate, 14);
                                           
-                                          // Update form with calculated dates
-                                          setCreateSessionForm(prev => ({
-                                            ...prev,
-                                            startDate: formatDateToISO(newStartDate),
-                                            endDate: formatDateToISO(newEndDate)
-                                          }));
-                                          
+                                          // Don't set dates here - they'll be populated on focus
+                                          // Reset form but keep product selected
+                                          resetCreateSessionForm();
+                                          setSelectedProductId(productId);
                                           setModalOpenedFromCirclePlus(true);
                                           setAllowCreateProduct(false);
+                                          setIsProductLocked(true);
                                           setShowCreateSessionModal(true);
                                         }}
                                         className="flex items-center justify-center w-10 h-10 rounded-full transition-colors shadow-md hover:shadow-lg"
@@ -2926,8 +3276,8 @@ export default function SessionSelectionScreen() {
                 </div>
               ) : (
                 /* Dropdown when opened from top button */
-              <div className="space-y-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="space-y-3" style={{ marginTop: 0 }}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end" style={{ marginTop: 0 }}>
                   <div className="flex-1 w-full">
                     <ProductPicker
                       label=""
@@ -2996,7 +3346,7 @@ export default function SessionSelectionScreen() {
                       }}
                       isLoading={isLoadingProducts}
                       error={productError}
-                      disabled={isLoadingProducts || modalProducts.length === 0}
+                      disabled={isLoadingProducts || modalProducts.length === 0 || isProductLocked}
                       placeholder="Select a product"
                       helperText={
                           !isLoadingProducts && modalProducts.length === 0 && !productError && allowCreateProduct
@@ -3205,17 +3555,26 @@ export default function SessionSelectionScreen() {
                 Votes Per User *
               </label>
               <div className="flex items-center mb-3">
-                <input
-                  type="checkbox"
-                  id="modalAutoVotes"
-                  checked={createSessionForm.useAutoVotes}
-                  onChange={(e) =>
-                    setCreateSessionForm(prev => ({ ...prev, useAutoVotes: e.target.checked }))
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCreateSessionForm(prev => ({ ...prev, useAutoVotes: !prev.useAutoVotes }))
                   }
-                  className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-[#3A9B5C] focus:outline-none focus:ring-0"
-                />
-                <label htmlFor="modalAutoVotes" className="ml-2 text-sm text-gray-700 cursor-pointer">
-                  Auto-calculate votes (half of feature count, minimum 1)
+                  className="flex-shrink-0 cursor-pointer w-5 h-5 flex items-center justify-center"
+                >
+                  {createSessionForm.useAutoVotes ? (
+                    <CheckSquare className="w-5 h-5 text-green-600" />
+                  ) : (
+                    <Square className="w-5 h-5 text-gray-400" />
+                  )}
+                </button>
+                <label 
+                  onClick={() =>
+                    setCreateSessionForm(prev => ({ ...prev, useAutoVotes: !prev.useAutoVotes }))
+                  }
+                  className="ml-2 text-sm text-gray-700 cursor-pointer"
+                >
+                  Auto-calculate votes<br />(half of feature count, minimum 1)
                 </label>
               </div>
               {!createSessionForm.useAutoVotes && (
@@ -3245,39 +3604,102 @@ export default function SessionSelectionScreen() {
                   : 'Each stakeholder receives this many votes.'}
               </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Start Date *
-                </label>
-                <input
-                  type="date"
-                  name="startDate"
-                  value={createSessionForm.startDate}
-                  onChange={handleCreateSessionChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660]"
-                />
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date *
+                  </label>
+                  <input
+                    type="date"
+                    name="startDate"
+                    value={createSessionForm.startDate || ''}
+                    onChange={handleCreateSessionChange}
+                    onFocus={(e) => {
+                      if (!createSessionForm.startDate) {
+                        handleDateFocus('startDate');
+                      }
+                    }}
+                    autoComplete="off"
+                    className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660] [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
+                      createSessionErrors.startDate ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                    style={!createSessionForm.startDate ? { 
+                      color: 'transparent'
+                    } : {}}
+                    onBlur={(e) => {
+                      if (!e.target.value) {
+                        e.target.style.color = 'transparent';
+                      } else {
+                        e.target.style.color = '';
+                      }
+                    }}
+                  />
+                  {createSessionErrors.startDate && (
+                    <p className="mt-1 text-sm text-red-600 flex items-center">
+                      <AlertCircle className="h-4 w-4 mr-1" />
+                      {createSessionErrors.startDate}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date *
+                  </label>
+                  <input
+                    type="date"
+                    name="endDate"
+                    value={createSessionForm.endDate || ''}
+                    onChange={handleCreateSessionChange}
+                    onFocus={(e) => {
+                      if (!createSessionForm.endDate) {
+                        handleDateFocus('endDate');
+                      }
+                    }}
+                    autoComplete="off"
+                    className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660] [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
+                      createSessionErrors.endDate ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                    style={!createSessionForm.endDate ? { 
+                      color: 'transparent',
+                      position: 'relative'
+                    } : {}}
+                    onBlur={(e) => {
+                      if (!e.target.value) {
+                        e.target.style.color = 'transparent';
+                      } else {
+                        e.target.style.color = '';
+                      }
+                    }}
+                  />
+                  {createSessionErrors.endDate && (
+                    <p className="mt-1 text-sm text-red-600 flex items-center">
+                      <AlertCircle className="h-4 w-4 mr-1" />
+                      {createSessionErrors.endDate}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  End Date *
-                </label>
-                <input
-                  type="date"
-                  name="endDate"
-                  value={createSessionForm.endDate}
-                  onChange={handleCreateSessionChange}
-                  className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660] ${
-                    createSessionErrors.endDate ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                />
-                {createSessionErrors.endDate && (
-                  <p className="mt-1 text-sm text-red-600 flex items-center">
-                    <AlertCircle className="h-4 w-4 mr-1" />
-                    {createSessionErrors.endDate}
-                  </p>
-                )}
-              </div>
+              {(createSessionForm.startDate || createSessionForm.endDate) && (
+                <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div></div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateSessionForm(prev => ({
+                          ...prev,
+                          startDate: '',
+                          endDate: ''
+                        }));
+                      }}
+                      className="text-sm text-[#2D4660] hover:text-[#173B65] underline"
+                    >
+                      Clear Dates
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -3292,15 +3714,15 @@ export default function SessionSelectionScreen() {
             <Button
               type="button"
               variant="secondary"
-              onClick={handleCloseCreateModal}
-              disabled={isCreatingSession}
+              onClick={handleSaveDraft}
+              disabled={isCreatingSession || (!isProductLocked && !selectedProductId && !(isCreatingNewProduct && newProductName.trim() && newProductColor) && !pendingProduct)}
             >
-              Cancel
+              {isCreatingSession ? 'Saving...' : 'Save Draft'}
             </Button>
             <Button
               type="submit"
               variant={isCreatingNewProduct && newProductName.trim() && newProductColor ? 'gold' : 'primary'}
-              disabled={isCreatingSession}
+              disabled={isCreatingSession || (!isProductLocked && !selectedProductId && !(isCreatingNewProduct && newProductName.trim() && newProductColor) && !pendingProduct)}
               className={`transition-all duration-500 ease-in-out ${isCreatingNewProduct && newProductName.trim() && newProductColor ? 'relative overflow-hidden' : ''}`}
             >
               {isCreatingSession ? (
@@ -3451,7 +3873,10 @@ export default function SessionSelectionScreen() {
             closeStakeholderInviteModal();
           }
         }}
-        title={inviteSessionDetails ? `Email Stakeholders • ${inviteSessionDetails.title}` : 'Email Stakeholders'}
+        title={inviteSessionDetails ? (() => {
+          const productName = getDisplayProductName(inviteSessionDetails, productLookup);
+          return productName ? `${productName} • ${inviteSessionDetails.title}` : `Email Stakeholders • ${inviteSessionDetails.title}`;
+        })() : 'Email Stakeholders'}
         maxWidth="max-w-3xl"
       >
         <div className="space-y-6">
@@ -3509,10 +3934,10 @@ export default function SessionSelectionScreen() {
                               e.stopPropagation();
                               toggleStakeholderSelection(stakeholder.user_email);
                             }}
-                            className="flex-shrink-0 ml-4"
+                            className="flex-shrink-0 ml-4 w-5 h-5 flex items-center justify-center"
                           >
                             {isChecked ? (
-                              <CheckCircle className="w-5 h-5 text-green-600" />
+                              <CheckSquare className="w-5 h-5 text-green-600" />
                             ) : (
                               <Square className="w-5 h-5 text-gray-400" />
                             )}
@@ -3543,23 +3968,13 @@ export default function SessionSelectionScreen() {
                     onChange={(e) => setInviteEmailBody(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-[#2D4660]"
                     rows={10}
+                    placeholder="Enter your custom message here. A 'Go Vote!' button will be automatically added below your message."
                   />
-                  {inviteSessionLink && (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(inviteSessionLink);
-                          // You could add a toast notification here if desired
-                        }}
-                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
-                        title="Click to copy link"
-                      >
-                        <Mail className="h-3 w-3 mr-1.5" />
-                        Copy Invite Link
-                      </button>
-                    </div>
-                  )}
+                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                    <p className="text-xs text-blue-800">
+                      <strong>Note:</strong> A gold "Go Vote!" button will be automatically added to the email below your message. You don't need to include the link in your text.
+                    </p>
+                  </div>
                 </div>
               </div>
             </>
@@ -3588,22 +4003,41 @@ export default function SessionSelectionScreen() {
         title=""
         hideHeader
         maxWidth="max-w-md"
+        hideCloseButton={false}
       >
-        <div className="text-center py-6 px-4">
-          <div className="mx-auto h-16 w-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
-            <CheckCircle className="h-10 w-10 text-green-600" />
+        <div className="py-6 px-4">
+          <div className="text-center mb-6">
+            <div className="mx-auto h-16 w-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
+              <CheckCircle className="h-10 w-10 text-green-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">Invites Sent!</h3>
+            <p className="text-sm text-gray-600">
+              Successfully emailed {inviteSuccessSummary?.count ?? 0} stakeholder
+              {inviteSuccessSummary?.count === 1 ? '' : 's'} for{' '}
+              <span className="font-semibold text-gray-900">{inviteSuccessSummary?.sessionTitle}</span>.
+            </p>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">Invites Sent!</h3>
-          <p className="text-sm text-gray-600">
-            Successfully emailed {inviteSuccessSummary?.count ?? 0} stakeholder
-            {inviteSuccessSummary?.count === 1 ? '' : 's'} for{' '}
-            <span className="font-semibold text-gray-900">{inviteSuccessSummary?.sessionTitle}</span>.
-          </p>
-          <div className="mt-6">
-            <Button variant="primary" onClick={closeInviteSuccessModal}>
-              Close
-            </Button>
-          </div>
+          
+          {inviteSuccessSummary?.stakeholders && inviteSuccessSummary.stakeholders.length > 0 && (
+            <div className="mt-6 border-t border-gray-200 pt-6">
+              <h4 className="text-sm font-semibold text-gray-900 mb-3">Recipients:</h4>
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {inviteSuccessSummary.stakeholders.map((stakeholder, index) => (
+                  <div key={index} className="flex items-start py-2 px-3 bg-gray-50 rounded-md">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {stakeholder.name}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {stakeholder.email}
+                      </p>
+                    </div>
+                    <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0 ml-2 mt-1" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
 

@@ -13,7 +13,7 @@ import {
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database, Search, Shield, List, Lightbulb, Crown
+  Cloud, Database, Search, Shield, List, Lightbulb, Crown, Image, Paperclip, Trophy
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -23,6 +23,7 @@ import * as db from '../services/databaseService';
 import * as azureService from '../services/azureDevOpsService';
 import { getNewMillProjects } from '../utils/azureProjects';
 import { formatDate, isPastDate } from '../utils/date';
+import { sendInvitationEmail } from '../services/emailService';
 
 // Import context
 import { useSession } from '../contexts/SessionContext';
@@ -151,13 +152,13 @@ const getRoleBadgeInfo = (
   isStakeholder: boolean
 ): RoleBadgeInfo | null => {
   if (isSystemAdmin) {
-    return { label: 'System Admin', className: 'bg-purple-100 text-purple-800' };
+    return { label: 'System Admin', className: 'bg-[#C89212] text-white' };
   }
   if (isSessionAdmin) {
-    return { label: 'Session Admin', className: 'bg-blue-100 text-blue-800' };
+    return { label: 'Session Admin', className: 'bg-[#576C71] text-white' };
   }
   if (isStakeholder) {
-    return { label: 'Stakeholder', className: 'bg-green-100 text-green-800' };
+    return { label: 'Stakeholder', className: 'bg-[#8B5A4A] text-white' };
   }
   return null;
 };
@@ -351,7 +352,7 @@ class Modal extends Component<ModalProps> {
     
     return (
       <div className="fixed inset-0 z-50 overflow-y-auto">
-        <div className="flex items-center justify-center min-h-screen p-4 text-center">
+        <div className="flex items-start justify-center min-h-screen p-4 text-center pt-8 sm:pt-16">
           {/* Always show backdrop for lightbox effect */}
           <div 
             className="fixed inset-0 transition-opacity bg-black/50"
@@ -359,7 +360,7 @@ class Modal extends Component<ModalProps> {
             aria-hidden="true"
           ></div>
           
-          <div className={`inline-block w-full ${maxWidth} ${hideHeader ? 'p-6' : 'p-6'} my-8 overflow-visible text-left align-middle transition-all transform bg-white shadow-xl rounded-lg relative z-10`}>
+          <div className={`inline-block w-full ${maxWidth} ${hideHeader ? 'p-6' : 'p-6'} mb-8 overflow-visible text-left align-middle transition-all transform bg-white shadow-xl rounded-lg relative z-10`}>
             {!hideHeader ? (
               <div className="flex items-start justify-between mb-5">
                 <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
@@ -383,15 +384,17 @@ class Modal extends Component<ModalProps> {
                 )}
               </div>
             ) : (
-              // Show only close button when header is hidden
-              <div className="flex justify-end -mt-2 -mr-2">
-                <button
-                  onClick={onClose}
-                  className="text-gray-400 hover:text-gray-500 focus:outline-none"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
+              // Show only close button when header is hidden (unless hideCloseButton is true)
+              !hideCloseButton && (
+                <div className="flex justify-end -mt-2 -mr-2">
+                  <button
+                    onClick={onClose}
+                    className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              )
             )}
             
             <div className={hideHeader ? "-mt-4" : "mt-2 overflow-visible"}>
@@ -956,9 +959,11 @@ function ResultsScreen({
         </div>
       </div>
 
-      <div className="relative z-10 bg-white rounded-lg shadow-md p-4 mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-[#2d4660]">{votingSession.title}</h2>
+      <div className="relative z-10 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-[#2D4660]">
+            Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
+          </h2>
           <div className="text-sm text-gray-600">
             <span className="mr-2">Votes per user: {effectiveVotesPerUser}</span>
             {votingSession.isActive ? (
@@ -971,7 +976,34 @@ function ResultsScreen({
           </div>
         </div>
         
-        <p className="text-gray-600 mb-4">{votingSession.goal}</p>
+        {votingSession.goal && votingSession.goal.trim() && (
+          <div className="pt-3 border-t border-gray-200">
+            <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
+              <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
+              <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
+              <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
+              <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
+
+              <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+                <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
+                  <div className="relative">
+                    <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
+                      <Trophy className="h-8 w-8 md:h-10 md:w-10" />
+                    </div>
+                    <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
+                    <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
+                    <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
+                      {votingSession.goal}
+                    </h3>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         
         {votingSession.isActive && (
           <div className={`${getDeadlineBgColor(daysRemaining)} relative z-10 rounded-md p-3 mb-4 inline-block border ${daysRemaining <= 2 ? 'border-[#6A4234]/20' : daysRemaining <= 4 ? 'border-[#C89212]/20' : 'border-[#1E5461]/20'}`}>
@@ -1143,14 +1175,13 @@ function Footer({
     onClick?: () => void;
   }> = [];
 
-  if (onSelectStakeholder || currentRole === 'stakeholder') {
-    roleButtons.push({
-      key: 'stakeholder',
-      label: 'Stakeholder View',
-      icon: <Users className="h-4 w-4 inline mr-2" />,
-      onClick: onSelectStakeholder
-    });
-  }
+  // Always include Stakeholder View button
+  roleButtons.push({
+    key: 'stakeholder',
+    label: 'Stakeholder View',
+    icon: <Users className="h-4 w-4 inline mr-2" />,
+    onClick: onSelectStakeholder
+  });
 
   if (onSelectSessionAdmin || currentRole === 'session-admin') {
     roleButtons.push({
@@ -1880,6 +1911,10 @@ const VotingScreen = React.memo(function VotingScreen({
   const [suggestionSubmitting, setSuggestionSubmitting] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [suggestionSuccess, setSuggestionSuccess] = useState(false);
+  const [showThankYouModal, setShowThankYouModal] = useState(false);
+  const [suggestionAttachments, setSuggestionAttachments] = useState<File[]>([]);
+  const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
 
@@ -2003,6 +2038,12 @@ const VotingScreen = React.memo(function VotingScreen({
 
   const closeSuggestModal = useCallback(() => {
     if (!suggestionSubmitting) {
+      // Clean up preview URLs
+      attachmentPreviewUrls.forEach(url => {
+        if (url) {
+          URL.revokeObjectURL(url);
+        }
+      });
       setShowSuggestModal(false);
       setSuggestionError(null);
       setSuggestionSuccess(false);
@@ -2010,8 +2051,77 @@ const VotingScreen = React.memo(function VotingScreen({
       setSuggestionDetails('');
       setSuggestionWhatWouldItDo('');
       setSuggestionHowWouldItWork('');
+      setSuggestionAttachments([]);
+      setAttachmentPreviewUrls([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
-  }, [suggestionSubmitting]);
+  }, [suggestionSubmitting, attachmentPreviewUrls]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const validFiles: File[] = [];
+    const previewUrls: string[] = [];
+    
+    // Filter valid file types (images and PDFs)
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+    
+    files.forEach(file => {
+      if (validTypes.includes(file.type)) {
+        validFiles.push(file);
+        // Create preview URL for images only
+        if (file.type.startsWith('image/')) {
+          previewUrls.push(URL.createObjectURL(file));
+        } else {
+          previewUrls.push(''); // Empty string for PDFs
+        }
+      }
+    });
+
+    // Limit to 3 total files
+    const remainingSlots = 3 - suggestionAttachments.length;
+    const filesToAdd = validFiles.slice(0, remainingSlots);
+    const urlsToAdd = previewUrls.slice(0, remainingSlots);
+    
+    setSuggestionAttachments(prev => [...prev, ...filesToAdd]);
+    setAttachmentPreviewUrls(prev => [...prev, ...urlsToAdd]);
+    
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [suggestionAttachments]);
+
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setSuggestionAttachments(prev => {
+      const fileToRemove = prev[index];
+      // Clean up object URL if it's an image
+      if (fileToRemove && fileToRemove.type.startsWith('image/')) {
+        setAttachmentPreviewUrls(prevUrls => {
+          const urlToRevoke = prevUrls[index];
+          if (urlToRevoke) {
+            URL.revokeObjectURL(urlToRevoke);
+          }
+          return prevUrls.filter((_, i) => i !== index);
+        });
+      } else {
+        setAttachmentPreviewUrls(prevUrls => prevUrls.filter((_, i) => i !== index));
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  }, []);
+
+  // Cleanup object URLs when component unmounts or modal closes
+  useEffect(() => {
+    return () => {
+      attachmentPreviewUrls.forEach(url => {
+        if (url) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, [attachmentPreviewUrls]);
 
   const handleSubmitSuggestion = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -2035,6 +2145,43 @@ const VotingScreen = React.memo(function VotingScreen({
       setSuggestionSubmitting(true);
       setSuggestionError(null);
 
+      // Upload attachments to Supabase storage
+      const attachmentUrls: string[] = [];
+      if (suggestionAttachments.length > 0) {
+        for (let i = 0; i < suggestionAttachments.length; i++) {
+          const file = suggestionAttachments[i];
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${Date.now()}-${i}.${fileExt}`;
+          const filePath = `suggestions/${sessionId}/${fileName}`;
+
+          try {
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('feature-attachments')
+              .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: false
+              });
+
+            if (uploadError) {
+              console.error('Error uploading file:', uploadError);
+              // If bucket doesn't exist, show a warning but continue
+              if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('not found')) {
+                console.warn('Storage bucket "feature-attachments" not found. Please create it in Supabase Storage.');
+              }
+              // Continue with other files even if one fails
+            } else {
+              const { data: { publicUrl } } = supabase.storage
+                .from('feature-attachments')
+                .getPublicUrl(filePath);
+              attachmentUrls.push(publicUrl);
+            }
+          } catch (error: any) {
+            console.error('Error uploading file:', error);
+            // Continue with submission even if attachments fail
+          }
+        }
+      }
+
       const savedSuggestion = await db.createFeatureSuggestion({
         session_id: sessionId,
         title: trimmedTitle,
@@ -2043,16 +2190,155 @@ const VotingScreen = React.memo(function VotingScreen({
         requester_name: currentUser?.name ?? null,
         requester_email: currentUser?.email ?? null,
         whatWouldItDo: trimmedWhatWouldItDo || null,
-        howWouldItWork: trimmedHowWouldItWork || null
+        howWouldItWork: trimmedHowWouldItWork || null,
+        attachment_urls: attachmentUrls.length > 0 ? attachmentUrls : null
       });
+
+      // Get session admins and send emails
+      try {
+        const sessionAdmins = await db.getSessionAdmins(sessionId);
+        const adminEmails = sessionAdmins
+          .map(admin => admin.user?.email)
+          .filter((email): email is string => Boolean(email));
+
+        if (adminEmails.length > 0) {
+          const sessionName = votingSession?.title || 'this session';
+          const requesterName = currentUser?.name || 'A user';
+          const requesterEmail = currentUser?.email || '';
+          const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
+          const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+          const adminUrl = `${window.location.origin}${basename}/admin`;
+          
+          // Escape HTML to prevent XSS
+          const escapeHtml = (text: string) => {
+            return text
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#039;');
+          };
+          
+          const convertTextToHtml = (text: string) => {
+            return escapeHtml(text).replace(/\n/g, '<br />');
+          };
+          
+          const emailHtml = `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center" style="padding: 48px 20px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
+        <!-- Logo Header -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 20px; font-weight: bold; color: #2d4660; margin-top: 16px;">Feature Voting System</div>
+            <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">has a</div>
+            <div style="font-size: 25px; font-weight: bold; color: #2d4660; margin-top: 4px;">New Feature Suggestion</div>
+            <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">for the</div>
+            <div style="font-size: 30px; font-weight: bold; color: #2d4660; margin-top: 4px;">${escapeHtml(sessionName)}</div>
+          </td>
+        </tr>
+        
+        <!-- Main Content -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333; line-height: 1.6;">
+              <strong style="color: #2d4660;">${escapeHtml(requesterName)}</strong>${requesterEmail ? ` (${escapeHtml(requesterEmail)})` : ''} has submitted a new feature suggestion.
+            </p>
+            
+            <!-- Suggestion Details Box -->
+            <div style="background-color: #f3f4f6; padding: 20px; border-radius: 6px; margin: 24px 0; border-left: 4px solid #C89212;">
+              <h3 style="color: #2d4660; margin: 0 0 16px 0; font-size: 18px; font-weight: bold;">${escapeHtml(trimmedTitle)}</h3>
+              
+              ${trimmedDetails ? `
+              <p style="margin: 0 0 12px 0; font-size: 14px; color: #111827; line-height: 1.6;">
+                <strong style="color: #2d4660;">Problem it solves:</strong><br />
+                <span style="color: #374151;">${convertTextToHtml(trimmedDetails)}</span>
+              </p>
+              ` : ''}
+              
+              ${trimmedWhatWouldItDo ? `
+              <p style="margin: 0 0 12px 0; font-size: 14px; color: #111827; line-height: 1.6;">
+                <strong style="color: #2d4660;">What it would do:</strong><br />
+                <span style="color: #374151;">${convertTextToHtml(trimmedWhatWouldItDo)}</span>
+              </p>
+              ` : ''}
+              
+              ${trimmedHowWouldItWork ? `
+              <p style="margin: 0 0 12px 0; font-size: 14px; color: #111827; line-height: 1.6;">
+                <strong style="color: #2d4660;">How it would work:</strong><br />
+                <span style="color: #374151;">${convertTextToHtml(trimmedHowWouldItWork)}</span>
+              </p>
+              ` : ''}
+              
+              ${attachmentUrls.length > 0 ? `
+              <p style="margin: 12px 0 0 0; font-size: 14px; color: #111827; line-height: 1.6;">
+                <strong style="color: #2d4660;">Attachments:</strong> ${attachmentUrls.length} file(s) - View on admin page
+              </p>
+              ` : ''}
+            </div>
+            
+            <!-- Go to Admin Dashboard Button -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
+              <tr>
+                <td align="center">
+                  <a href="${adminUrl}" style="display: inline-block; padding: 12px 24px; background-color: #C89212; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Go to Admin Dashboard</a>
+                </td>
+              </tr>
+            </table>
+            
+            <p style="margin: 24px 0 0 0; font-size: 14px; color: #6b7280; line-height: 1.6;">
+              You can review and manage this suggestion from the admin dashboard.
+            </p>
+          </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+
+          // Send emails to all admins
+          await Promise.all(
+            adminEmails.map(email =>
+              sendInvitationEmail({
+                to: email,
+                subject: `New Feature Suggestion: ${trimmedTitle}`,
+                html: emailHtml
+              }).catch(err => {
+                console.error(`Failed to send email to ${email}:`, err);
+                // Don't fail the whole submission if email fails
+              })
+            )
+          );
+        }
+      } catch (emailError) {
+        console.error('Error sending admin emails:', emailError);
+        // Don't fail the submission if email fails
+      }
 
       onSuggestionSubmitted?.(savedSuggestion);
 
-      setSuggestionSuccess(true);
+      // Close the suggest modal and show thank you modal
+      setShowSuggestModal(false);
       setSuggestionTitle('');
       setSuggestionDetails('');
       setSuggestionWhatWouldItDo('');
       setSuggestionHowWouldItWork('');
+      setSuggestionAttachments([]);
+      setAttachmentPreviewUrls([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      setShowThankYouModal(true);
     } catch (error) {
       console.error('Error submitting feature suggestion:', error);
       setSuggestionError('We were unable to submit your suggestion. Please try again in a moment.');
@@ -2064,9 +2350,10 @@ const VotingScreen = React.memo(function VotingScreen({
     suggestionTitle,
     suggestionWhatWouldItDo,
     suggestionHowWouldItWork,
+    suggestionAttachments,
     currentUser,
     sessionId,
-    suggestionSubmitting,
+    votingSession,
     onSuggestionSubmitted
   ]);
   
@@ -2226,24 +2513,95 @@ const VotingScreen = React.memo(function VotingScreen({
         </div>
       </div>
 
-      <div className="relative z-10 mb-6 bg-white rounded-lg shadow-md p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-2">
-            <h2 className="text-xl font-semibold text-[#2d4660] mb-2">{votingSession.title}</h2>
-            <p className="text-gray-600">{votingSession.goal}</p>
-          </div>
-          
-          <div className="flex flex-col justify-center">
-            <DeadlineDisplay endDate={votingSession.endDate} />
-            
-            <div className="flex items-center mt-3">
-              <Vote className="h-4 w-4 mr-2 text-[#2d4660]" />
-              <p className="text-gray-700">
-                You have <span className="font-bold text-[#2d4660]">{remainingVotes} / {effectiveVotesPerUser}</span> votes remaining
-              </p>
+      <div className="relative z-10 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-[#2D4660]">
+            Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
+          </h2>
+        </div>
+        
+        {votingSession.goal && votingSession.goal.trim() && (
+          <div className="pt-3 border-t border-gray-200 mb-4">
+            <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
+              <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
+              <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
+              <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
+              <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
+
+              <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+                <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
+                  <div className="relative">
+                    <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
+                      <Trophy className="h-8 w-8 md:h-10 md:w-10" />
+                    </div>
+                    <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
+                    <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
+                    <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
+                      {votingSession.goal}
+                    </h3>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
+        
+        {(() => {
+          const daysRemaining = getDaysRemaining(votingSession.endDate);
+          const deadlineColor = getDeadlineColor(daysRemaining);
+          const deadlineBgColor = getDeadlineBgColor(daysRemaining);
+          
+          return (
+            <div className={`${deadlineBgColor} rounded-md p-3 md:p-4 border ${
+              daysRemaining <= 2 ? 'border-[#6A4234]/20' : 
+              daysRemaining <= 4 ? 'border-[#C89212]/20' : 
+              'border-[#1E5461]/20'
+            }`}>
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
+                <div className="flex items-center flex-shrink-0">
+                  <Calendar className={`h-5 w-5 mr-2 ${deadlineColor}`} />
+                  <div className="leading-tight">
+                    <span className={`font-medium ${deadlineColor}`}>
+                      Voting ends: {formatDate(votingSession.endDate)}
+                    </span>
+                    <div className="text-sm -mt-0.5">
+                      {daysRemaining <= 0 ? (
+                        <span className="text-red-600 font-medium">Voting ends today!</span>
+                      ) : (
+                        <span className={`${deadlineColor}`}>
+                          <span className="font-semibold text-lg">{daysRemaining}</span> {daysRemaining === 1 ? 'day' : 'days'} remaining
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center flex-1 min-w-0 md:justify-end" style={{ paddingLeft: '60px', width: '100px' }}>
+                  <div className="leading-tight w-full" style={{ width: '120px' }}>
+                    <div className="flex items-center">
+                      <Vote className={`h-[30px] w-[30px] mr-2 ${deadlineColor}`} style={{ marginLeft: '-88px' }} />
+                      <div className="text-sm -mt-0.5 leading-none flex-1">
+                        <div className="flex items-baseline justify-center" style={{ marginLeft: '-12px' }}>
+                          <span className={`${deadlineColor} mr-1`} style={{ fontSize: '14px', marginLeft: '-48px' }}>You have</span>
+                          <span className={`${deadlineColor} font-semibold text-2xl`}>
+                            {remainingVotes}
+                          </span>
+                          <span className={`${deadlineColor} font-semibold text-lg ml-1`}>
+                            / {effectiveVotesPerUser}
+                          </span>
+                        </div>
+                        <span className={`${deadlineColor} block -mt-0.5 text-center`} style={{ fontSize: '14px' }}>votes remaining</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {!votingIsActive && (
@@ -2352,12 +2710,6 @@ const VotingScreen = React.memo(function VotingScreen({
             </div>
           )}
 
-          {suggestionSuccess && (
-            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-md px-3 py-2">
-              Thank you! Your suggestion has been recorded.
-            </div>
-          )}
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Feature title
@@ -2368,7 +2720,7 @@ const VotingScreen = React.memo(function VotingScreen({
               onChange={(e) => setSuggestionTitle(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md"
               placeholder="Give your feature a name"
-              disabled={suggestionSubmitting || suggestionSuccess}
+              disabled={suggestionSubmitting}
             />
           </div>
 
@@ -2382,7 +2734,7 @@ const VotingScreen = React.memo(function VotingScreen({
               className="w-full px-3 py-2 border border-gray-300 rounded-md"
               rows={4}
               placeholder="Share a few details so we understand the request."
-              disabled={suggestionSubmitting || suggestionSuccess}
+              disabled={suggestionSubmitting}
             />
           </div>
 
@@ -2396,7 +2748,7 @@ const VotingScreen = React.memo(function VotingScreen({
               className="w-full px-3 py-2 border border-gray-300 rounded-md"
               rows={3}
               placeholder="Describe the functionality or outcome users would experience."
-              disabled={suggestionSubmitting || suggestionSuccess}
+              disabled={suggestionSubmitting}
             />
           </div>
 
@@ -2410,8 +2762,77 @@ const VotingScreen = React.memo(function VotingScreen({
               className="w-full px-3 py-2 border border-gray-300 rounded-md"
               rows={3}
               placeholder="Share any ideas on workflow, technical approach, or integration."
-              disabled={suggestionSubmitting || suggestionSuccess}
+              disabled={suggestionSubmitting}
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Attach Images or PDFs (optional, up to 3)
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf"
+              multiple
+              onChange={handleFileSelect}
+              disabled={suggestionSubmitting || suggestionAttachments.length >= 3}
+              className="hidden"
+              id="suggestion-file-input"
+            />
+            <label
+              htmlFor="suggestion-file-input"
+              className={`inline-flex items-center px-4 py-2 border border-gray-300 rounded-md cursor-pointer ${
+                suggestionSubmitting || suggestionAttachments.length >= 3
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Paperclip className="h-4 w-4 mr-2" />
+              {suggestionAttachments.length >= 3 ? 'Maximum 3 files' : 'Attach Files'}
+            </label>
+            
+            {suggestionAttachments.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-3">
+                {suggestionAttachments.map((file, index) => {
+                  const isImage = file.type.startsWith('image/');
+                  const isPDF = file.type === 'application/pdf';
+                  const previewUrl = attachmentPreviewUrls[index] || null;
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="relative group border border-gray-300 rounded-md overflow-hidden"
+                      style={{ width: '100px', height: '100px' }}
+                    >
+                      {isImage && previewUrl ? (
+                        <img
+                          src={previewUrl}
+                          alt={file.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : isPDF ? (
+                        <div className="w-full h-full flex items-center justify-center bg-red-50">
+                          <Paperclip className="h-8 w-8 text-red-600" />
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(index)}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        style={{ width: '20px', height: '20px' }}
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">
+                        {file.name.length > 15 ? `${file.name.substring(0, 15)}...` : file.name}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2">
@@ -2423,19 +2844,39 @@ const VotingScreen = React.memo(function VotingScreen({
             >
               Close
             </Button>
-            {!suggestionSuccess && (
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={suggestionSubmitting}
-                className="flex items-center"
-              >
-                {suggestionSubmitting && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
-                Submit Suggestion
-              </Button>
-            )}
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={suggestionSubmitting}
+              className="flex items-center"
+            >
+              {suggestionSubmitting && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
+              Submit Suggestion
+            </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Thank You Modal */}
+      <Modal
+        isOpen={showThankYouModal}
+        onClose={() => setShowThankYouModal(false)}
+        title=""
+        maxWidth="max-w-md"
+        hideHeader={true}
+      >
+        <div className="text-center py-6">
+          <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+            <CheckCircle className="h-10 w-10 text-green-600" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Thank You!</h3>
+          <p className="text-gray-600 mb-1">
+            Your feature suggestion has been submitted successfully.
+          </p>
+          <p className="text-sm text-gray-500">
+            The session admins have been notified and will review your suggestion.
+          </p>
+        </div>
       </Modal>
     </div>
   );
@@ -2653,6 +3094,15 @@ useEffect(() => {
     handleCallback();
   }, [currentSession, navigate, azureDevOpsConfig]);
 
+  // Ensure view is set correctly based on adminMode
+  useEffect(() => {
+    if (adminMode && view !== 'admin') {
+      setView('admin');
+    } else if (!adminMode && !resultsMode && view === 'admin') {
+      setView('voting');
+    }
+  }, [adminMode, resultsMode, view]);
+
   const handleInitiateOAuth = useCallback((action?: 'preview' | 'sync') => {
     localStorage.setItem('azureDevOpsAuthInProgress', 'true');
     if (action) {
@@ -2742,16 +3192,37 @@ useEffect(() => {
     try {
       const sessions = await db.getAllSessions();
       const now = new Date();
-      const options = sessions
-        .filter(session => session.id !== currentSession.id && new Date(session.start_date) > now)
-        .map(session => ({
-          id: session.id,
-          title: session.title,
-          startDate: session.start_date
-        }));
-      setFutureSessions(options);
+      
+      // Filter and verify sessions exist
+      const validOptions = [];
+      for (const session of sessions) {
+        // Skip current session
+        if (session.id === currentSession.id) continue;
+        
+        // Only include future sessions
+        const startDate = new Date(session.start_date);
+        if (startDate <= now) continue;
+        
+        // Verify session still exists in database
+        try {
+          const verifiedSession = await db.getSessionById(session.id);
+          if (verifiedSession) {
+            validOptions.push({
+              id: session.id,
+              title: session.title,
+              startDate: session.start_date
+            });
+          }
+        } catch (verifyError) {
+          // Session doesn't exist, skip it
+          console.warn(`Session ${session.id} no longer exists, skipping from future sessions list`);
+        }
+      }
+      
+      setFutureSessions(validOptions);
     } catch (error) {
       console.error('Error loading future sessions:', error);
+      setFutureSessions([]); // Set empty array on error
     }
   }, [currentSession]);
 
@@ -2766,6 +3237,7 @@ useEffect(() => {
     summary?: string | null;
     whatWouldItDo?: string | null;
     howWouldItWork?: string | null;
+    attachment_urls?: string[] | null;
   }) => {
     await db.updateFeatureSuggestion(id, updates);
     await loadFeatureSuggestions();
@@ -3483,16 +3955,19 @@ useEffect(() => {
   }, [azureDevOpsConfig.enabled, azureDevOpsConfig.accessToken, handlePreviewAzureDevOpsFeatures, handleFetchAzureDevOpsFeatures]);
 
   const handleToggleAdmin = useCallback(() => {
-    setIsAdmin(true);
-    setAdminPerspective(isSystemAdmin ? 'system' : 'session');
-    setView('admin');
-  }, [isSystemAdmin]);
+    navigate('/admin');
+  }, [navigate]);
 
   const handleShowVoting = useCallback(() => {
+    // If we're on the admin page, navigate to /vote instead of changing view state
+    if (adminMode) {
+      navigate('/vote');
+      return;
+    }
     setIsAdmin(false);
     setAdminPerspective(isSystemAdmin ? 'system' : 'session');
     setView('voting');
-  }, [isSystemAdmin]);
+  }, [isSystemAdmin, adminMode, navigate]);
 
   const handleSelectSessionPerspective = useCallback(() => {
     setIsAdmin(true);
@@ -3943,55 +4418,10 @@ const handleDeleteSession = useCallback(async () => {
   }, [currentSession, navigate]);
 
   const renderContent = useMemo(() => {
-    switch (view) {
-      case 'voting':
-        return (
-          <VotingScreen 
-            features={features} 
-            currentUser={currentUser} 
-            pendingVotes={pendingVotes}
-            pendingUsedVotes={pendingUsedVotes}
-            onVote={handlePendingVote}
-            onSubmitVotes={handleSubmitVotes}
-            onToggleAdmin={handleToggleAdmin}
-            isAdmin={isAdmin}
-            votingSession={votingSession}
-            navigate={navigate}
-            effectiveVotesPerUser={effectiveVotesPerUser}
-            sessionId={currentSession?.id || ''}
-            onLogout={handleLogout}
-            onSuggestionSubmitted={handleSuggestionSubmitted}
-            isSystemAdmin={isSystemAdmin}
-            isSessionAdmin={sessionAdminRole}
-            isStakeholder={isStakeholder}
-          />
-        );
-      case 'results':
-        return (
-          <ResultsScreen 
-            features={features} 
-            onResetVotes={initiateResetVotes}
-            onResetAllVotes={initiateResetAllVotes}
-            onBack={resultsMode ? () => navigate('../admin') : () => setView('admin')}
-            showVotersList={showVotersList}
-            setShowVotersList={setShowVotersList}
-            votingSession={votingSession}
-            effectiveVotesPerUser={effectiveVotesPerUser}
-            onLogout={handleLogout}
-          />
-        );
-      case 'thankyou':
-        return (
-          <ThankYouScreen
-            navigate={navigate}
-            votingSession={votingSession}
-          />
-        );
-      case 'admin':
-      default:
-        if (adminMode) {
-          return (
-            <AdminDashboard 
+    // When adminMode is true, always render AdminDashboard regardless of view state
+    if (adminMode) {
+      return (
+        <AdminDashboard 
               features={features} 
               onAddFeature={handleAddFeature} 
               onUpdateFeature={handleUpdateFeature} 
@@ -4037,22 +4467,79 @@ const handleDeleteSession = useCallback(async () => {
               adminPerspective={adminPerspective}
               projectOptions={availableProjects}
             />
-          );
-        }
+      );
+    }
 
+    // For non-admin mode, use the switch statement based on view
+    // If view is 'admin' but we're not in adminMode, default to 'voting'
+    const effectiveView = (view === 'admin' && !adminMode) ? 'voting' : view;
+    
+    switch (effectiveView) {
+      case 'voting':
         return (
-          <div className="max-w-3xl mx-auto text-center py-20 px-6">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#2d4660]/10 text-[#2d4660] mb-6">
-              <Shield className="h-8 w-8" />
-            </div>
-            <h2 className="text-2xl font-semibold text-[#2d4660] mb-4">Admin tools live on the Admin Dashboard</h2>
-            <p className="text-gray-600 mb-6">
-              You are viewing the voting experience. To manage sessions, stakeholders, or Azure DevOps connections, open the Admin dashboard from the Admin application.
-            </p>
-            <Button variant="primary" onClick={() => navigate('/admin')}>
-              Go to Admin Dashboard
-            </Button>
-          </div>
+          <VotingScreen 
+            features={features} 
+            currentUser={currentUser} 
+            pendingVotes={pendingVotes}
+            pendingUsedVotes={pendingUsedVotes}
+            onVote={handlePendingVote}
+            onSubmitVotes={handleSubmitVotes}
+            onToggleAdmin={handleToggleAdmin}
+            isAdmin={isAdmin}
+            votingSession={votingSession}
+            navigate={navigate}
+            effectiveVotesPerUser={effectiveVotesPerUser}
+            sessionId={currentSession?.id || ''}
+            onLogout={handleLogout}
+            onSuggestionSubmitted={handleSuggestionSubmitted}
+            isSystemAdmin={isSystemAdmin}
+            isSessionAdmin={sessionAdminRole}
+            isStakeholder={isStakeholder}
+          />
+        );
+      case 'results':
+        return (
+          <ResultsScreen 
+            features={features} 
+            onResetVotes={initiateResetVotes}
+            onResetAllVotes={initiateResetAllVotes}
+            onBack={resultsMode ? () => navigate('../admin') : () => setView('admin')}
+            showVotersList={showVotersList}
+            setShowVotersList={setShowVotersList}
+            votingSession={votingSession}
+            effectiveVotesPerUser={effectiveVotesPerUser}
+            onLogout={handleLogout}
+          />
+        );
+      case 'thankyou':
+        return (
+          <ThankYouScreen
+            navigate={navigate}
+            votingSession={votingSession}
+          />
+        );
+      default:
+        // This should never happen, but fallback to voting screen
+        return (
+          <VotingScreen 
+            features={features} 
+            currentUser={currentUser} 
+            pendingVotes={pendingVotes}
+            pendingUsedVotes={pendingUsedVotes}
+            onVote={handlePendingVote}
+            onSubmitVotes={handleSubmitVotes}
+            onToggleAdmin={handleToggleAdmin}
+            isAdmin={isAdmin}
+            votingSession={votingSession}
+            navigate={navigate}
+            effectiveVotesPerUser={effectiveVotesPerUser}
+            sessionId={currentSession?.id || ''}
+            onLogout={handleLogout}
+            onSuggestionSubmitted={handleSuggestionSubmitted}
+            isSystemAdmin={isSystemAdmin}
+            isSessionAdmin={sessionAdminRole}
+            isStakeholder={isStakeholder}
+          />
         );
     }
   }, [
@@ -4114,10 +4601,10 @@ const handleDeleteSession = useCallback(async () => {
       
       <Footer 
         currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
-        onSelectStakeholder={isAdmin ? undefined : handleShowVoting}
+        onSelectStakeholder={handleShowVoting}
         onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
         onSelectSystemAdmin={isSystemAdmin ? handleSelectSystemPerspective : undefined}
-        showRoleToggle={isSystemAdmin || (isAdmin && adminPerspective === 'system')}
+        showRoleToggle={true}
       />
       
       <ConfirmDialog

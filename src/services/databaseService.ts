@@ -36,6 +36,7 @@ function mapRowToSuggestion(row: any): FeatureSuggestion {
     requester_id: payload.requesterId ?? null,
     requester_name: payload.requesterName ?? null,
     requester_email: payload.requesterEmail ?? null,
+    attachment_urls: payload.attachmentUrls ?? null,
     created_at: row.created_at
   };
 }
@@ -1414,6 +1415,7 @@ export async function createFeatureSuggestion(suggestion: {
   requester_email?: string | null;
   whatWouldItDo?: string | null;
   howWouldItWork?: string | null;
+  attachment_urls?: string[] | null;
 }): Promise<FeatureSuggestion> {
   const payload = {
     summary: suggestion.description ?? null,
@@ -1421,7 +1423,8 @@ export async function createFeatureSuggestion(suggestion: {
     howWouldItWork: suggestion.howWouldItWork ?? null,
     requesterId: suggestion.requester_id ?? null,
     requesterName: suggestion.requester_name ?? null,
-    requesterEmail: suggestion.requester_email ?? null
+    requesterEmail: suggestion.requester_email ?? null,
+    attachmentUrls: suggestion.attachment_urls ?? null
   };
 
   const { data, error } = await supabase
@@ -1451,6 +1454,7 @@ export async function updateFeatureSuggestion(id: string, updates: {
   howWouldItWork?: string | null;
   requester_name?: string | null;
   requester_email?: string | null;
+  attachment_urls?: string[] | null;
 }): Promise<FeatureSuggestion> {
   const { data: existing, error: fetchError } = await supabase
     .from('features')
@@ -1476,7 +1480,8 @@ export async function updateFeatureSuggestion(id: string, updates: {
     howWouldItWork: updates.howWouldItWork ?? payload.howWouldItWork ?? null,
     requesterId: payload.requesterId ?? null,
     requesterName: updates.requester_name ?? payload.requesterName ?? null,
-    requesterEmail: updates.requester_email ?? payload.requesterEmail ?? null
+    requesterEmail: updates.requester_email ?? payload.requesterEmail ?? null,
+    attachmentUrls: updates.attachment_urls !== undefined ? updates.attachment_urls : (payload.attachmentUrls ?? null)
   };
 
   const { data, error } = await supabase

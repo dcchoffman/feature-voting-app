@@ -1971,7 +1971,7 @@ export default function UsersManagementScreen() {
               onClick={() => navigate('/sessions')}
             />
             <div className="flex-1 min-w-0">
-              <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
+            <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
               <p className="text-sm text-gray-600 mt-1">
                 {currentUser?.name}
                 {isSystemAdmin && (
@@ -2141,7 +2141,7 @@ export default function UsersManagementScreen() {
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex-1 min-w-0 pr-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-base font-semibold text-gray-900 truncate">
+                      <h3 className="text-base font-semibold text-gray-900 truncate">
                           {user.name || user.email}
                         </h3>
                         {user.id === currentUser?.id && (

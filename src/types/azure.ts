@@ -64,6 +64,7 @@ export interface FeatureSuggestion {
   requester_id: string | null;
   requester_name: string | null;
   requester_email: string | null;
+  attachment_urls: string[] | null;
   created_at: string;
 }
 

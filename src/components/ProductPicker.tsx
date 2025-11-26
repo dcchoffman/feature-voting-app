@@ -158,7 +158,7 @@ export function ProductPicker({
         }
       `}</style>
 
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative" ref={dropdownRef} style={!showHeaderRow ? { marginTop: '-12px' } : undefined}>
         {showHeaderRow && (
           <div className="flex items-center justify-between mb-1 gap-3">
             {hasLabel && (
@@ -309,6 +309,7 @@ export function ProductPicker({
         {menuOpen && !isSelectorDisabled && (
           <div
             className="product-picker__menu absolute left-0 z-50 mt-2 w-full overflow-hidden rounded-md border border-gray-200 bg-white"
+            style={{ marginTop: '-10px' }}
             role="listbox"
           >
             <div className="max-h-60 overflow-y-auto py-1">

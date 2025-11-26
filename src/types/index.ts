@@ -30,6 +30,7 @@ export interface VotingSession {
   start_date: string;
   end_date: string;
   is_active: boolean;
+  status?: 'draft' | 'active' | 'upcoming' | 'closed' | null; // Session status
   created_by?: string; // user_id of creator
   access_type: 'public' | 'invite-only';
   session_code: string; // Unique code for sharing

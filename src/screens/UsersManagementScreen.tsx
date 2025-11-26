@@ -1004,11 +1004,9 @@ export default function UsersManagementScreen() {
           case 'system-admin':
             return user.roles.isSystemAdmin;
           case 'session-admin':
-            return user.roles.sessionAdminCount > 0 && !user.roles.isSystemAdmin;
+            return user.roles.sessionAdminCount > 0;
           case 'stakeholder':
-            return user.roles.stakeholderSessionCount > 0 && 
-                   user.roles.sessionAdminCount === 0 && 
-                   !user.roles.isSystemAdmin;
+            return user.roles.stakeholderSessionCount > 0;
           case 'none':
             return !user.roles.isSystemAdmin &&
                    user.roles.sessionAdminCount === 0 &&

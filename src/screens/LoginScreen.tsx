@@ -24,7 +24,6 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showRequestAccessModal, setShowRequestAccessModal] = useState(false);
-  const [grantAccessSuccess, setGrantAccessSuccess] = useState<{ roleName: string; productName: string; requesterName: string; requesterEmail: string } | null>(null);
   const { currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -199,23 +198,10 @@ Login: ${loginUrl}
 This is an automated message from the Feature Voting System.
           `;
 
-          try {
-            await sendInvitationEmail({
-              to: email,
-              subject: `Access Granted - ${productName} - Feature Voting System`,
-              text: requesterEmailText,
-              html: requesterEmailHtml
-            });
-          } catch (emailError) {
-            console.error('Error sending access granted email:', emailError);
-            // Don't fail the whole operation if email fails
-          }
-
-          // Send confirmation email to the admin who granted access
+          // Send both emails in parallel - requester and admin confirmation
           const adminEmail = currentUser?.email;
-          if (adminEmail) {
-            try {
-              const adminConfirmationHtml = `
+          
+          const adminConfirmationHtml = adminEmail ? `
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
   <tr>
     <td align="center" style="padding: 48px 20px;">
@@ -280,9 +266,9 @@ This is an automated message from the Feature Voting System.
       </table>
     </td>
   </tr>
-</table>`;
+</table>` : null;
 
-              const adminConfirmationText = `
+          const adminConfirmationText = adminEmail ? `
 Access Granted Confirmation - Feature Voting System
 
 Hello,
@@ -300,24 +286,37 @@ The requester has been notified and can now access all voting sessions for this 
 Login: ${loginUrl}
 
 This is an automated message from the Feature Voting System.
-              `;
+          ` : null;
 
-              await sendInvitationEmail({
+          // Send both emails in parallel
+          const emailPromises = [
+            sendInvitationEmail({
+              to: email,
+              subject: `Access Granted - ${productName} - Feature Voting System`,
+              text: requesterEmailText,
+              html: requesterEmailHtml
+            })
+          ];
+
+          if (adminEmail && adminConfirmationHtml && adminConfirmationText) {
+            emailPromises.push(
+              sendInvitationEmail({
                 to: adminEmail,
                 subject: `Access Granted: ${requesterName} - ${productName} - Feature Voting System`,
                 text: adminConfirmationText,
                 html: adminConfirmationHtml
-              });
-            } catch (adminEmailError) {
-              console.error('Error sending admin confirmation email:', adminEmailError);
-              // Don't fail the whole operation if admin email fails
-            }
+              })
+            );
           }
 
-          // Show success modal
-          setGrantAccessSuccess({ roleName, productName, requesterName, requesterEmail: email });
-          
-          // Clean up URL
+          try {
+            await Promise.all(emailPromises);
+          } catch (emailError) {
+            console.error('Error sending emails:', emailError);
+            // Don't fail the whole operation if email fails
+          }
+
+          // Clean up URL and navigate away
           navigate('/login', { replace: true });
         } catch (err: any) {
           console.error('Error granting access:', err);
@@ -617,34 +616,6 @@ This is an automated message from the Feature Voting System.
         onClose={React.useCallback(() => setShowRequestAccessModal(false), [])}
       />
 
-      {/* Grant Access Success Modal */}
-      {grantAccessSuccess && (
-        <Modal
-          isOpen={true}
-          onClose={() => setGrantAccessSuccess(null)}
-          title=""
-          maxWidth="max-w-md"
-          hideHeader={true}
-          hideCloseButton={false}
-        >
-          <div className="text-center pb-6">
-            <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Access Granted Successfully!</h3>
-            <p className="text-sm text-gray-600 mb-1">
-              Successfully granted <span className="font-semibold text-green-700">{grantAccessSuccess.roleName}</span> access to
-            </p>
-            <p className="text-base font-semibold text-gray-900 mb-1">{grantAccessSuccess.requesterName}</p>
-            <p className="text-xs text-gray-500 mb-3">{grantAccessSuccess.requesterEmail}</p>
-            <p className="text-sm text-gray-600 mb-1">
-              for all sessions in
-            </p>
-            <p className="text-lg font-semibold text-green-700 mb-4">{grantAccessSuccess.productName}</p>
-            <p className="text-sm text-gray-600">
-              An email has been sent to the requester.
-            </p>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

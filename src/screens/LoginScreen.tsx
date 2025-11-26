@@ -199,10 +199,25 @@ Login: ${loginUrl}
 This is an automated message from the Feature Voting System.
           `;
 
-          // Send both emails in parallel - requester and admin confirmation
-          const adminEmail = currentUser?.email;
+          // Get all session admins for this product to send confirmation emails
+          let adminEmails: string[] = [];
+          try {
+            const sessionAdmins = await db.getSessionAdminsForProduct(productId);
+            adminEmails = Array.from(new Set(
+              sessionAdmins
+                .map(admin => admin.user?.email)
+                .filter((email): email is string => !!email)
+                .map(email => email.toLowerCase())
+            ));
+          } catch (err) {
+            console.error('Error getting session admins for product:', err);
+            // Fallback to current user email if available
+            if (currentUser?.email) {
+              adminEmails = [currentUser.email.toLowerCase()];
+            }
+          }
           
-          const adminConfirmationHtml = adminEmail ? `
+          const adminConfirmationHtml = adminEmails.length > 0 ? `
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
   <tr>
     <td align="center" style="padding: 48px 20px;">
@@ -269,7 +284,7 @@ This is an automated message from the Feature Voting System.
   </tr>
 </table>` : null;
 
-          const adminConfirmationText = adminEmail ? `
+          const adminConfirmationText = adminEmails.length > 0 ? `
 Access Granted Confirmation - Feature Voting System
 
 Hello,
@@ -289,7 +304,7 @@ Login: ${loginUrl}
 This is an automated message from the Feature Voting System.
           ` : null;
 
-          // Send both emails in parallel
+          // Send both emails in parallel - requester and all admin confirmations
           const emailPromises = [
             sendInvitationEmail({
               to: email,
@@ -299,15 +314,18 @@ This is an automated message from the Feature Voting System.
             })
           ];
 
-          if (adminEmail && adminConfirmationHtml && adminConfirmationText) {
-            emailPromises.push(
-              sendInvitationEmail({
-                to: adminEmail,
-                subject: `Access Granted: ${requesterName} - ${productName} - Feature Voting System`,
-                text: adminConfirmationText,
-                html: adminConfirmationHtml
-              })
-            );
+          // Send confirmation email to all session admins for this product
+          if (adminEmails.length > 0 && adminConfirmationHtml && adminConfirmationText) {
+            adminEmails.forEach(adminEmail => {
+              emailPromises.push(
+                sendInvitationEmail({
+                  to: adminEmail,
+                  subject: `Access Granted: ${requesterName} - ${productName} - Feature Voting System`,
+                  text: adminConfirmationText,
+                  html: adminConfirmationHtml
+                })
+              );
+            });
           }
 
           try {

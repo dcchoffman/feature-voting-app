@@ -676,6 +676,8 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
       
       const htmlContent = `
 <style>
+  .logo-light { display: block !important; }
+  .logo-dark { display: none !important; }
   @media (prefers-color-scheme: dark) {
     .logo-light { display: none !important; }
     .logo-dark { display: block !important; }
@@ -685,7 +687,6 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
     .email-text-muted-dark { color: #a0a0a0 !important; }
     .email-header-bg-dark { background-color: #2d2d2d !important; }
   }
-  .logo-dark { display: none !important; }
 </style>
 <table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-bg-dark" style="background-color: #f9fafb !important; font-family: Arial, sans-serif;">
   <tr>
@@ -694,8 +695,10 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
         <!-- Logo Header - Matching Login Page -->
         <tr>
           <td class="email-header-bg-dark" style="background-color: #ffffff !important; padding: 32px 40px 24px 40px; text-align: center;">
-            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" class="logo-light" style="height: 96px; width: auto; max-width: 300px; display: block !important; margin: 0 auto; border: 0;" />
-            <img src="${logoUrlDark}" alt="New Millennium Building Systems" width="300" height="96" class="logo-dark" style="height: 96px; width: auto; max-width: 300px; display: none !important; margin: 0 auto; border: 0;" />
+            <!-- Light mode logo (default) -->
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" class="logo-light" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <!-- Dark mode logo (hidden by default, shown in dark mode) -->
+            <img src="${logoUrlDark}" alt="New Millennium Building Systems" width="300" height="96" class="logo-dark" style="height: 96px; width: auto; max-width: 300px; display: none; margin: 0 auto; border: 0;" />
             <div class="email-text-dark" style="font-size: 20px; font-weight: bold; color: #2d4660 !important; margin-top: 16px; margin-bottom: 4px;">Feature Voting System</div>
             <div class="email-text-muted-dark" style="font-size: 11px; color: #6b7280 !important; margin-bottom: 2px;">has a</div>
             <div class="email-text-dark" style="font-size: 25px; font-weight: bold; color: #2d4660 !important; margin-bottom: 2px;">Access Request Notification</div>

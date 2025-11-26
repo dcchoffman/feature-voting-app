@@ -964,9 +964,31 @@ export default function SessionSelectionScreen() {
       `You're invited to participate in the "${session.title}" feature voting session.\n\n` +
       (session.goal ? `Goal: ${session.goal}\n\n` : '') +
       `Voting Period: ${formatDate(session.start_date)} - ${formatDate(session.end_date)}\n\n` +
-      `Click the link below to sign in and cast your votes:\n${inviteUrl}\n\n` +
+      `Click the button below to sign in and cast your votes.\n\n` +
       `Need help? Reach out to the session admin team.\n\n` +
       `Thanks,\n${currentUser?.name || 'Feature Voting System'}`
+    );
+  };
+
+  const getDefaultInviteBodyHtml = (session: any, inviteUrl: string) => {
+    const textBody = getDefaultInviteBody(session, inviteUrl);
+    const htmlBody = convertTextToHtml(textBody);
+    
+    // Replace the button placeholder with an actual HTML button
+    const buttonHtml = `
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
+        <tr>
+          <td align="center">
+            <a href="${inviteUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Sign In to Vote</a>
+          </td>
+        </tr>
+      </table>
+    `;
+    
+    // Insert button before "Need help?" text
+    return htmlBody.replace(
+      /Need help\?/,
+      buttonHtml + '<br />Need help?'
     );
   };
 
@@ -1063,7 +1085,30 @@ export default function SessionSelectionScreen() {
     const sessionTitle = inviteSessionDetails.title;
 
     const baseBody = inviteEmailBody || getDefaultInviteBody(inviteSessionDetails, inviteSessionLink);
-    const htmlBody = convertTextToHtml(baseBody);
+    // Use HTML version with button if using default body, otherwise convert the custom body
+    // If custom body contains the invite link, replace it with a button
+    let htmlBody: string;
+    if (inviteEmailBody) {
+      // Custom body - convert to HTML and replace any URL with a button
+      let customHtml = convertTextToHtml(baseBody);
+      // Replace any occurrence of the invite link with a button
+      if (inviteSessionLink && customHtml.includes(inviteSessionLink)) {
+        const buttonHtml = `
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 16px 0;">
+            <tr>
+              <td align="center">
+                <a href="${inviteSessionLink}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Sign In to Vote</a>
+              </td>
+            </tr>
+          </table>
+        `;
+        customHtml = customHtml.replace(new RegExp(escapeHtml(inviteSessionLink), 'g'), buttonHtml);
+      }
+      htmlBody = customHtml;
+    } else {
+      // Default body - use the HTML version with button
+      htmlBody = getDefaultInviteBodyHtml(inviteSessionDetails, inviteSessionLink);
+    }
     const subject = inviteEmailSubject || getDefaultInviteSubject(inviteSessionDetails);
 
     try {
@@ -3448,11 +3493,11 @@ export default function SessionSelectionScreen() {
                       const normalizedEmail = stakeholder.user_email.toLowerCase();
                       const isChecked = selectedStakeholderEmails.includes(normalizedEmail);
                       return (
-                        <label
+                        <div
                           key={stakeholder.id}
-                          className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50"
+                          className="flex items-center justify-between px-4 py-3 hover:bg-gray-50"
                         >
-                          <div>
+                          <div className="flex-1 cursor-pointer" onClick={() => toggleStakeholderSelection(stakeholder.user_email)}>
                             <p className="text-sm font-medium text-gray-900">
                               {stakeholder.user_name || 'Unnamed Stakeholder'}
                             </p>
@@ -3460,8 +3505,11 @@ export default function SessionSelectionScreen() {
                           </div>
                           <button
                             type="button"
-                            onClick={() => toggleStakeholderSelection(stakeholder.user_email)}
-                            className="flex-shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleStakeholderSelection(stakeholder.user_email);
+                            }}
+                            className="flex-shrink-0 ml-4"
                           >
                             {isChecked ? (
                               <CheckCircle className="w-5 h-5 text-green-600" />
@@ -3469,7 +3517,7 @@ export default function SessionSelectionScreen() {
                               <Square className="w-5 h-5 text-gray-400" />
                             )}
                           </button>
-                        </label>
+                        </div>
                       );
                     })
                   )}
@@ -3497,12 +3545,20 @@ export default function SessionSelectionScreen() {
                     rows={10}
                   />
                   {inviteSessionLink && (
-                    <p className="text-xs text-gray-500 mt-2 break-words">
-                      Invite link:&nbsp;
-                      <a href={inviteSessionLink} target="_blank" rel="noreferrer" className="text-blue-600">
-                        {inviteSessionLink}
-                      </a>
-                    </p>
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(inviteSessionLink);
+                          // You could add a toast notification here if desired
+                        }}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                        title="Click to copy link"
+                      >
+                        <Mail className="h-3 w-3 mr-1.5" />
+                        Copy Invite Link
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

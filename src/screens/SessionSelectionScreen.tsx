@@ -7,7 +7,7 @@ import { Footer, Modal, Button } from '../screens/FeatureVoting';
 import { getDisplayProductName } from '../utils/productDisplay';
 import { getProductColor } from '../utils/productColors';
 import { isFallbackSystemAdmin } from '../utils/systemAdmins';
-import type { Product } from '../types';
+import type { Product, SessionStakeholder } from '../types';
 import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
@@ -16,6 +16,7 @@ import {
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 import colorPickerIcon from '../assets/colorpicker.png';
+import { sendInvitationEmail } from '../services/emailService';
 
 export default function SessionSelectionScreen() {
   const { currentUser, setCurrentSession, refreshSessions, setCurrentUser, isLoading: contextLoading } = useSession();
@@ -75,6 +76,20 @@ export default function SessionSelectionScreen() {
   const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
   const [showEditProductColorPicker, setShowEditProductColorPicker] = useState(false);
   const [editTempColor, setEditTempColor] = useState<string>('#2D4660');
+  const [showStakeholderInviteModal, setShowStakeholderInviteModal] = useState(false);
+  const [inviteStakeholders, setInviteStakeholders] = useState<SessionStakeholder[]>([]);
+  const [selectedStakeholderEmails, setSelectedStakeholderEmails] = useState<string[]>([]);
+  const [inviteEmailSubject, setInviteEmailSubject] = useState('');
+  const [inviteEmailBody, setInviteEmailBody] = useState('');
+  const [inviteSessionLink, setInviteSessionLink] = useState('');
+  const [inviteModalLoading, setInviteModalLoading] = useState(false);
+  const [inviteModalError, setInviteModalError] = useState('');
+  const [inviteSessionDetails, setInviteSessionDetails] = useState<any | null>(null);
+  const [isSendingInvites, setIsSendingInvites] = useState(false);
+  const [inviteSuccessSummary, setInviteSuccessSummary] = useState<{ sessionTitle: string; count: number } | null>(null);
+  const closeInviteSuccessModal = () => setInviteSuccessSummary(null);
+  const inviteStakeholderEmails = inviteStakeholders.map((stakeholder) => stakeholder.user_email.toLowerCase());
+  const allStakeholdersSelected = inviteStakeholderEmails.length > 0 && inviteStakeholderEmails.every((email) => selectedStakeholderEmails.includes(email));
 
   // Handle OAuth errors from Azure AD redirect
   useEffect(() => {
@@ -926,30 +941,139 @@ export default function SessionSelectionScreen() {
     });
   };
 
-  const handleEmailInvite = (e: React.MouseEvent, session: any) => {
+  const escapeHtml = (value: string) => {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const convertTextToHtml = (value: string) => {
+    return escapeHtml(value).replace(/\n/g, '<br />');
+  };
+
+  const getDefaultInviteSubject = (session: any) => {
+    return `You're invited to vote: ${session.title}`;
+  };
+
+  const getDefaultInviteBody = (session: any, inviteUrl: string) => {
+    return (
+      `Hello,\n\n` +
+      `You're invited to participate in the "${session.title}" feature voting session.\n\n` +
+      (session.goal ? `Goal: ${session.goal}\n\n` : '') +
+      `Voting Period: ${formatDate(session.start_date)} - ${formatDate(session.end_date)}\n\n` +
+      `Click the link below to sign in and cast your votes:\n${inviteUrl}\n\n` +
+      `Need help? Reach out to the session admin team.\n\n` +
+      `Thanks,\n${currentUser?.name || 'Feature Voting System'}`
+    );
+  };
+
+  const handleEmailInvite = async (e: React.MouseEvent, session: any) => {
     e.stopPropagation();
 
-    // Include basename for GitHub Pages
     const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
     const inviteUrl = `${window.location.origin}${basename}/login?session=${session.session_code}`;
-    const subject = encodeURIComponent(`You're invited to vote: ${session.title}`);
-    const body = encodeURIComponent(
-      `Hi,\n\nYou've been invited to participate in a feature voting session.\n\n` +
-      `Session: ${session.title}\n` +
-      `Goal: ${session.goal}\n\n` +
-      `To get started, copy and paste this link into your browser:\n\n` +
-      `${inviteUrl}\n\n` +
-      `Voting Period: ${formatDate(session.start_date)} - ${formatDate(session.end_date)}\n\n` +
-      `Best regards,\n${currentUser?.name}`
-    );
 
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    setInviteModalError('');
+    setInviteSessionDetails(session);
+    setInviteSessionLink(inviteUrl);
+    setInviteEmailSubject(getDefaultInviteSubject(session));
+    setInviteEmailBody(getDefaultInviteBody(session, inviteUrl));
+    setShowStakeholderInviteModal(true);
+    setInviteModalLoading(true);
+    setInviteStakeholders([]);
+    setSelectedStakeholderEmails([]);
+
+    try {
+      const stakeholders = await db.getSessionStakeholders(session.id);
+      const validStakeholders = stakeholders.filter((stakeholder) => !!stakeholder.user_email);
+      setInviteStakeholders(validStakeholders);
+      setSelectedStakeholderEmails(validStakeholders.map((stakeholder) => stakeholder.user_email.toLowerCase()));
+      if (validStakeholders.length === 0) {
+        setInviteModalError('No stakeholders found for this session. Add stakeholders first, then send invites.');
+      }
+    } catch (error: any) {
+      console.error('Error loading stakeholders:', error);
+      setInviteModalError(error.message || 'Failed to load stakeholders for this session.');
+    } finally {
+      setInviteModalLoading(false);
+    }
   };
 
   const handleViewResults = (e: React.MouseEvent, session: any) => {
     e.stopPropagation();
     setCurrentSession(session);
     navigate('/results');
+  };
+
+  const closeStakeholderInviteModal = () => {
+    setShowStakeholderInviteModal(false);
+    setInviteStakeholders([]);
+    setSelectedStakeholderEmails([]);
+    setInviteSessionDetails(null);
+    setInviteModalError('');
+  };
+
+  const toggleStakeholderSelection = (email: string) => {
+    setSelectedStakeholderEmails((prev) => {
+      const normalized = email.toLowerCase();
+      if (prev.includes(normalized)) {
+        return prev.filter((value) => value !== normalized);
+      }
+      return [...prev, normalized];
+    });
+  };
+
+  const toggleAllStakeholders = () => {
+    if (allStakeholdersSelected) {
+      setSelectedStakeholderEmails([]);
+    } else {
+      setSelectedStakeholderEmails(inviteStakeholderEmails);
+    }
+  };
+
+  const handleSendStakeholderInvites = async () => {
+    if (!inviteSessionDetails) return;
+
+    if (selectedStakeholderEmails.length === 0) {
+      setInviteModalError('Select at least one stakeholder to email.');
+      return;
+    }
+
+    setInviteModalError('');
+    setIsSendingInvites(true);
+    const recipientCount = selectedStakeholderEmails.length;
+    const sessionTitle = inviteSessionDetails.title;
+
+    const baseBody = inviteEmailBody || getDefaultInviteBody(inviteSessionDetails, inviteSessionLink);
+    const htmlBody = convertTextToHtml(baseBody);
+    const subject = inviteEmailSubject || getDefaultInviteSubject(inviteSessionDetails);
+
+    try {
+      await Promise.all(
+        selectedStakeholderEmails.map((email) =>
+          sendInvitationEmail({
+            to: email,
+            subject,
+            text: baseBody,
+            html: `<div style="font-family: Arial, sans-serif; font-size: 14px; color: #111827; line-height: 1.6;">${htmlBody}</div>`
+          })
+        )
+      );
+
+      closeStakeholderInviteModal();
+      setInviteSuccessSummary({
+        sessionTitle,
+        count: recipientCount
+      });
+    } catch (error: any) {
+      console.error('Error sending stakeholder invites:', error);
+      setInviteModalError(error.message || 'Failed to send invites. Please try again.');
+    } finally {
+      setIsSendingInvites(false);
+    }
   };
 
   const handleManageAdmins = (e: React.MouseEvent, session: any) => {
@@ -3259,6 +3383,153 @@ export default function SessionSelectionScreen() {
         onSelectSystemAdmin={isSystemAdmin ? () => setViewMode('system-admin') : undefined}
         showRoleToggle={hasAdminAccess || isSystemAdmin}
       />
+
+      <Modal
+        isOpen={showStakeholderInviteModal}
+        onClose={() => {
+          if (!isSendingInvites) {
+            closeStakeholderInviteModal();
+          }
+        }}
+        title={inviteSessionDetails ? `Email Stakeholders • ${inviteSessionDetails.title}` : 'Email Stakeholders'}
+        maxWidth="max-w-3xl"
+      >
+        <div className="space-y-6">
+          {inviteModalError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">
+              {inviteModalError}
+            </div>
+          )}
+
+          {inviteModalLoading ? (
+            <div className="py-12 flex flex-col items-center justify-center text-gray-600">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#2D4660] mb-3"></div>
+              Loading stakeholders...
+            </div>
+          ) : (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-gray-900">
+                    Stakeholders ({inviteStakeholders.length})
+                  </h4>
+                  {inviteStakeholders.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleAllStakeholders}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      {allStakeholdersSelected ? 'Deselect All' : 'Select All'}
+                    </button>
+                  )}
+                </div>
+                <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-100">
+                  {inviteStakeholders.length === 0 ? (
+                    <div className="p-4 text-sm text-gray-500 text-center">
+                      No stakeholders are assigned to this session yet.
+                    </div>
+                  ) : (
+                    inviteStakeholders.map((stakeholder) => {
+                      const normalizedEmail = stakeholder.user_email.toLowerCase();
+                      const isChecked = selectedStakeholderEmails.includes(normalizedEmail);
+                      return (
+                        <label
+                          key={stakeholder.id}
+                          className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">
+                              {stakeholder.user_name || 'Unnamed Stakeholder'}
+                            </p>
+                            <p className="text-xs text-gray-500">{stakeholder.user_email}</p>
+                          </div>
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 text-[#2D4660] border-gray-300 rounded focus:ring-[#2D4660]"
+                            checked={isChecked}
+                            onChange={() => toggleStakeholderSelection(stakeholder.user_email)}
+                          />
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                  <input
+                    type="text"
+                    value={inviteEmailSubject}
+                    onChange={(e) => setInviteEmailSubject(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-[#2D4660]"
+                    placeholder="Email subject"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email Body</label>
+                  <textarea
+                    value={inviteEmailBody}
+                    onChange={(e) => setInviteEmailBody(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-[#2D4660]"
+                    rows={10}
+                  />
+                  {inviteSessionLink && (
+                    <p className="text-xs text-gray-500 mt-2 break-words">
+                      Invite link:&nbsp;
+                      <a href={inviteSessionLink} target="_blank" rel="noreferrer" className="text-blue-600">
+                        {inviteSessionLink}
+                      </a>
+                    </p>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 pt-6 border-t mt-6">
+          <Button variant="secondary" onClick={closeStakeholderInviteModal} disabled={isSendingInvites}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleSendStakeholderInvites}
+            disabled={isSendingInvites || inviteStakeholders.length === 0 || selectedStakeholderEmails.length === 0}
+          >
+            {isSendingInvites
+              ? 'Sending...'
+              : `Send to ${selectedStakeholderEmails.length} Stakeholder${selectedStakeholderEmails.length === 1 ? '' : 's'}`}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!inviteSuccessSummary}
+        onClose={closeInviteSuccessModal}
+        title=""
+        hideHeader
+        maxWidth="max-w-md"
+      >
+        <div className="text-center py-6 px-4">
+          <div className="mx-auto h-16 w-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
+            <CheckCircle className="h-10 w-10 text-green-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Invites Sent!</h3>
+          <p className="text-sm text-gray-600">
+            Successfully emailed {inviteSuccessSummary?.count ?? 0} stakeholder
+            {inviteSuccessSummary?.count === 1 ? '' : 's'} for{' '}
+            <span className="font-semibold text-gray-900">{inviteSuccessSummary?.sessionTitle}</span>.
+          </p>
+          <div className="mt-6">
+            <Button variant="primary" onClick={closeInviteSuccessModal}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {productToDelete && (
         <Modal

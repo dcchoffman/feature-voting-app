@@ -1941,7 +1941,7 @@ export function AdminDashboard({
   projectOptions
 }: AdminDashboardProps) {
   const navigate = useNavigate();
-  const { currentUser, currentSession } = useSession();
+  const { currentUser, currentSession, setCurrentSession } = useSession();
   
   const [selectedProject, setSelectedProject] = useState(() => {
     if (azureDevOpsConfig.project) return azureDevOpsConfig.project;
@@ -2317,6 +2317,22 @@ export function AdminDashboard({
     loadStatusNotes();
   }, [loadStatusNotes]);
 
+  const handleManageAdmins = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (currentSession) {
+      setCurrentSession(currentSession);
+    }
+    navigate('/users?filter=session-admin');
+  }, [currentSession, setCurrentSession, navigate]);
+
+  const handleManageStakeholders = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (currentSession) {
+      setCurrentSession(currentSession);
+    }
+    navigate('/users?filter=stakeholder');
+  }, [currentSession, setCurrentSession, navigate]);
+
   const logStatusNote = useCallback(async (note: {
     type: 'reopen' | 'ended-early';
     reason: string;
@@ -2634,12 +2650,14 @@ export function AdminDashboard({
               <p className="text-sm text-gray-600 mt-1">
                 {currentUser.name}
                 {isSystemAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
+                    <Crown className="h-3.5 w-3.5 mr-1" />
                     System Admin
                   </span>
                 )}
                 {!isSystemAdmin && isSessionAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
+                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
+                    <Shield className="h-3.5 w-3.5 mr-1" />
                     Session Admin
                   </span>
                 )}
@@ -2818,6 +2836,20 @@ export function AdminDashboard({
           <div ref={sessionActionsMenuRef} className="relative z-40">
             {/* Desktop buttons */}
             <div className="hidden md:flex space-x-2">
+            <button
+              onClick={handleManageAdmins}
+              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-[#576C71] text-white hover:bg-[#1E5461]"
+            >
+              <Shield className="h-4 w-4 mr-2" />
+              Admins
+            </button>
+            <button
+              onClick={handleManageStakeholders}
+              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-[#1E5461] text-white hover:bg-[#576C71]"
+            >
+              <Users className="h-4 w-4 mr-2" />
+              Stakeholders
+            </button>
               {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
             <Button 
               variant="gold"
@@ -2853,6 +2885,20 @@ export function AdminDashboard({
             {sessionActionsMenuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
                 <div className="py-1">
+                  <button
+                    onClick={(e) => { setSessionActionsMenuOpen(false); handleManageAdmins(e); }}
+                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <Shield className="h-4 w-4 mr-2 text-gray-700" />
+                    Admins
+                  </button>
+                  <button
+                    onClick={(e) => { setSessionActionsMenuOpen(false); handleManageStakeholders(e); }}
+                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  >
+                    <Users className="h-4 w-4 mr-2 text-gray-700" />
+                    Stakeholders
+                  </button>
                   {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
                     <button
                       onClick={() => { setSessionActionsMenuOpen(false); onShowResults(); }}

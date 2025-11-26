@@ -1975,12 +1975,14 @@ export default function UsersManagementScreen() {
               <p className="text-sm text-gray-600 mt-1">
                 {currentUser?.name}
                 {isSystemAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
+                    <Crown className="h-3.5 w-3.5 mr-1" />
                     System Admin
                   </span>
                 )}
                 {!isSystemAdmin && isSessionAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
+                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
+                    <Shield className="h-3.5 w-3.5 mr-1" />
                     Session Admin
                   </span>
                 )}

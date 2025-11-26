@@ -13,7 +13,7 @@ import {
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database, Search, Shield, List, Lightbulb, Crown, Image, Paperclip, Trophy
+  Cloud, Database, Search, Shield, List, Lightbulb, Crown, Image, Paperclip, Trophy, User as UserIcon
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -144,6 +144,7 @@ const initialUsers: User[] = [
 interface RoleBadgeInfo {
   label: string;
   className: string;
+  icon: React.ReactNode;
 }
 
 const getRoleBadgeInfo = (
@@ -152,13 +153,25 @@ const getRoleBadgeInfo = (
   isStakeholder: boolean
 ): RoleBadgeInfo | null => {
   if (isSystemAdmin) {
-    return { label: 'System Admin', className: 'bg-[#C89212] text-white' };
+    return { 
+      label: 'System Admin', 
+      className: 'bg-[#C89212] text-white',
+      icon: <Crown className="h-3.5 w-3.5 mr-1" />
+    };
   }
   if (isSessionAdmin) {
-    return { label: 'Session Admin', className: 'bg-[#576C71] text-white' };
+    return { 
+      label: 'Session Admin', 
+      className: 'bg-[#576C71] text-white',
+      icon: <Shield className="h-3.5 w-3.5 mr-1" />
+    };
   }
   if (isStakeholder) {
-    return { label: 'Stakeholder', className: 'bg-[#8B5A4A] text-white' };
+    return { 
+      label: 'Stakeholder', 
+      className: 'bg-[#8B5A4A] text-white',
+      icon: <UserIcon className="h-3.5 w-3.5 mr-1" />
+    };
   }
   return null;
 };
@@ -817,6 +830,10 @@ interface ResultsScreenProps {
   votingSession: VotingSession;
   effectiveVotesPerUser: number;
   onLogout: () => void;
+  currentUser?: any;
+  isSystemAdmin: boolean;
+  isSessionAdmin: boolean;
+  isStakeholder: boolean;
 }
 
 function ResultsScreen({ 
@@ -828,7 +845,11 @@ function ResultsScreen({
   setShowVotersList,
   votingSession,
   effectiveVotesPerUser,
-  onLogout
+  onLogout,
+  currentUser,
+  isSystemAdmin,
+  isSessionAdmin,
+  isStakeholder
 }: ResultsScreenProps) {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -877,10 +898,10 @@ function ResultsScreen({
         />
       </div>
       
-      {/* Title with back button - mobile menu in same row */}
+      {/* Title with user info - mobile menu in same row */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center">
-          {/* Mobile: small logo next to back button and title */}
+          {/* Mobile: small logo next to title */}
           <ImageWithFallback
             src={mobileLogo}
             alt="New Millennium Building Systems Logo"
@@ -888,15 +909,27 @@ function ResultsScreen({
             style={{ width: '40px', height: '40px', objectFit: 'contain' }}
             onClick={() => navigate('/sessions')}
           />
-          <button 
-            onClick={onBack}
-            className="mr-2 p-1 rounded-full hover:bg-gray-200 cursor-pointer"
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">
-            {isPastDate(votingSession.endDate) ? 'Final Voting Results' : 'Current Voting Results'}
-          </h1>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">
+              {isPastDate(votingSession.endDate) ? 'Final Voting Results' : 'Current Voting Results'}
+            </h1>
+            {currentUser && (
+              <p className="text-sm text-gray-600 mt-1">
+                {currentUser.name}
+                {(() => {
+                  const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
+                  return roleBadge && (
+                    <span
+                      className={`ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${roleBadge.className}`}
+                    >
+                      {roleBadge.icon}
+                      {roleBadge.label}
+                    </span>
+                  );
+                })()}
+              </p>
+            )}
+          </div>
         </div>
         <div ref={mobileMenuRef} className="relative z-40">
           {/* Desktop buttons */}
@@ -972,60 +1005,27 @@ function ResultsScreen({
           <h2 className="text-xl font-semibold text-[#2D4660]">
             Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
           </h2>
-          <div className="text-sm text-gray-600">
-            <span className="mr-2">Votes per user: {effectiveVotesPerUser}</span>
-            {votingSession.isActive ? (
-              <span className="text-[#1E5461] font-medium">Voting Active</span>
-            ) : isPastDate(votingSession.endDate) ? (
-              <span className="text-[#591D0F] font-medium">Voting Closed</span>
-            ) : (
-              <span className="text-[#C89212] font-medium">Voting Upcoming</span>
-            )}
-          </div>
-        </div>
-        
-        {votingSession.goal && votingSession.goal.trim() && (
-          <div className="pt-3 border-t border-gray-200">
-            <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
-              <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
-              <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
-              <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
-              <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
-
-              <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-                <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
-                  <div className="relative">
-                    <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
-                      <Trophy className="h-8 w-8 md:h-10 md:w-10" />
-                    </div>
-                    <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
-                    <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
-                    <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
-                      {votingSession.goal}
-                    </h3>
-                  </div>
+          {votingSession.isActive && (
+            <div className={`${getDeadlineBgColor(daysRemaining)} relative z-10 rounded-md p-3 inline-block border ${daysRemaining <= 2 ? 'border-[#6A4234]/20' : daysRemaining <= 4 ? 'border-[#C89212]/20' : 'border-[#1E5461]/20'}`}>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center">
+                  <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
+                  <span className={`${deadlineColor} font-medium`}>
+                    {daysRemaining <= 0 
+                      ? "Voting ends today!" 
+                      : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining until ${formatDate(votingSession.endDate)}`
+                    }
+                  </span>
                 </div>
+                <span className={`${deadlineColor} font-medium`}>Voting Active</span>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
         
-        {votingSession.isActive && (
-          <div className={`${getDeadlineBgColor(daysRemaining)} relative z-10 rounded-md p-3 mb-4 inline-block border ${daysRemaining <= 2 ? 'border-[#6A4234]/20' : daysRemaining <= 4 ? 'border-[#C89212]/20' : 'border-[#1E5461]/20'}`}>
-            <div className="flex items-center">
-              <Calendar className={`h-4 w-4 mr-2 ${deadlineColor}`} />
-              <span className={`${deadlineColor} font-medium`}>
-                {daysRemaining <= 0 
-                  ? "Voting ends today!" 
-                  : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining until ${formatDate(votingSession.endDate)}`
-                }
-              </span>
-            </div>
-          </div>
-        )}
+        <div className="text-sm text-gray-600 mb-4">
+          <span>Votes per user: {effectiveVotesPerUser}</span>
+        </div>
         
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
@@ -1743,8 +1743,9 @@ function AlreadyVotedScreen({
               )}
               {roleBadge && (
                 <span
-                  className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge.className}`}
+                  className={`ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${roleBadge.className}`}
                 >
+                  {roleBadge.icon}
                   {roleBadge.label}
                 </span>
               )}
@@ -2440,8 +2441,9 @@ const VotingScreen = React.memo(function VotingScreen({
               )}
               {roleBadge && (
                 <span
-                  className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge.className}`}
+                  className={`ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${roleBadge.className}`}
                 >
+                  {roleBadge.icon}
                   {roleBadge.label}
                 </span>
               )}
@@ -3113,9 +3115,11 @@ useEffect(() => {
     handleCallback();
   }, [currentSession, navigate, azureDevOpsConfig]);
 
-  // Ensure view is set correctly based on adminMode
+  // Ensure view is set correctly based on adminMode and resultsMode
   useEffect(() => {
-    if (adminMode && view !== 'admin') {
+    if (resultsMode && view !== 'results') {
+      setView('results');
+    } else if (adminMode && view !== 'admin') {
       setView('admin');
     } else if (!adminMode && !resultsMode && view === 'admin') {
       setView('voting');
@@ -4429,12 +4433,15 @@ const handleDeleteSession = useCallback(async () => {
   }, [currentSession]);
 
   const handleShowResultsPage = useCallback(() => {
-    if (currentSession) {
+    // When on /admin route, always navigate to /results
+    if (adminMode) {
+      navigate('/results');
+    } else if (currentSession) {
       navigate('/results');
     } else {
       setView('results');
     }
-  }, [currentSession, navigate]);
+  }, [adminMode, currentSession, navigate]);
 
   const renderContent = useMemo(() => {
     // When adminMode is true, always render AdminDashboard regardless of view state
@@ -4528,6 +4535,10 @@ const handleDeleteSession = useCallback(async () => {
             votingSession={votingSession}
             effectiveVotesPerUser={effectiveVotesPerUser}
             onLogout={handleLogout}
+            currentUser={currentUser}
+            isSystemAdmin={isSystemAdmin}
+            isSessionAdmin={sessionAdminRole}
+            isStakeholder={isStakeholder}
           />
         );
       case 'thankyou':

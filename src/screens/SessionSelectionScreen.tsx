@@ -11,7 +11,7 @@ import type { Product, SessionStakeholder } from '../types';
 import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
-  CheckSquare, CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star, Square
+  CheckSquare, CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star, Square, Crown, User as UserIcon
 } from 'lucide-react';
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -1950,17 +1950,20 @@ export default function SessionSelectionScreen() {
             <p className="text-sm text-gray-600">
               Welcome, {currentUser?.name}
               {isSystemAdmin && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
+                  <Crown className="h-3.5 w-3.5 mr-1" />
                   System Admin
                 </span>
               )}
               {!isSystemAdmin && adminSessions.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
+                <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
+                  <Shield className="h-3.5 w-3.5 mr-1" />
                   Session Admin
                 </span>
               )}
               {!isSystemAdmin && adminSessions.length === 0 && stakeholderOnlySessions.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#8B5A4A] text-white">
+                <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#8B5A4A] text-white">
+                  <UserIcon className="h-3.5 w-3.5 mr-1" />
                   Stakeholder
                 </span>
               )}

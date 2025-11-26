@@ -24,6 +24,7 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showRequestAccessModal, setShowRequestAccessModal] = useState(false);
+  const [grantAccessSuccess, setGrantAccessSuccess] = useState<{ roleName: string; productName: string; requesterName: string; requesterEmail: string } | null>(null);
   const { currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -316,7 +317,10 @@ This is an automated message from the Feature Voting System.
             // Don't fail the whole operation if email fails
           }
 
-          // Clean up URL and navigate away
+          // Show success modal
+          setGrantAccessSuccess({ roleName, productName, requesterName, requesterEmail: email });
+          
+          // Clean up URL
           navigate('/login', { replace: true });
         } catch (err: any) {
           console.error('Error granting access:', err);
@@ -616,6 +620,34 @@ This is an automated message from the Feature Voting System.
         onClose={React.useCallback(() => setShowRequestAccessModal(false), [])}
       />
 
+      {/* Grant Access Success Modal */}
+      {grantAccessSuccess && (
+        <Modal
+          isOpen={true}
+          onClose={() => setGrantAccessSuccess(null)}
+          title=""
+          maxWidth="max-w-md"
+          hideHeader={true}
+          hideCloseButton={false}
+        >
+          <div className="text-center pb-6">
+            <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Access Granted Successfully!</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Successfully granted <span className="font-semibold text-green-700">{grantAccessSuccess.roleName}</span> access to
+            </p>
+            <p className="text-base font-semibold text-gray-900 mb-1">{grantAccessSuccess.requesterName}</p>
+            <p className="text-xs text-gray-500 mb-3">{grantAccessSuccess.requesterEmail}</p>
+            <p className="text-sm text-gray-600 mb-1">
+              for all sessions in
+            </p>
+            <p className="text-lg font-semibold text-green-700 mb-4">{grantAccessSuccess.productName}</p>
+            <p className="text-sm text-gray-600">
+              Emails have been sent to both the requester and admin.
+            </p>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

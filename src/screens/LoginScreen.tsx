@@ -672,65 +672,48 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
       // Using table-based layout for better email client compatibility
       // Use GitHub Pages URL for images to ensure they're accessible in emails
       const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
-      const logoUrlDark = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo-dark.png'; // Dark mode logo
       
       const htmlContent = `
-<style>
-  .logo-light { display: block !important; }
-  .logo-dark { display: none !important; }
-  @media (prefers-color-scheme: dark) {
-    .logo-light { display: none !important; }
-    .logo-dark { display: block !important; }
-    .email-bg-dark { background-color: #1a1a1a !important; }
-    .email-card-dark { background-color: #2d2d2d !important; }
-    .email-text-dark { color: #e5e5e5 !important; }
-    .email-text-muted-dark { color: #a0a0a0 !important; }
-    .email-header-bg-dark { background-color: #2d2d2d !important; }
-  }
-</style>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-bg-dark" style="background-color: #f9fafb !important; font-family: Arial, sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
   <tr>
     <td align="center" style="padding: 48px 20px;">
-      <table width="600" cellpadding="0" cellspacing="0" border="0" class="email-card-dark" style="background-color: #ffffff !important; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
         <!-- Logo Header - Matching Login Page -->
         <tr>
-          <td class="email-header-bg-dark" style="background-color: #ffffff !important; padding: 32px 40px 24px 40px; text-align: center;">
-            <!-- Light mode logo (default) -->
-            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" class="logo-light" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
-            <!-- Dark mode logo (hidden by default, shown in dark mode) -->
-            <img src="${logoUrlDark}" alt="New Millennium Building Systems" width="300" height="96" class="logo-dark" style="height: 96px; width: auto; max-width: 300px; display: none; margin: 0 auto; border: 0;" />
-            <div class="email-text-dark" style="font-size: 20px; font-weight: bold; color: #2d4660 !important; margin-top: 16px; margin-bottom: 4px;">Feature Voting System</div>
-            <div class="email-text-muted-dark" style="font-size: 11px; color: #6b7280 !important; margin-bottom: 2px;">has a</div>
-            <div class="email-text-dark" style="font-size: 25px; font-weight: bold; color: #2d4660 !important; margin-bottom: 2px;">Access Request Notification</div>
-            <div class="email-text-muted-dark" style="font-size: 11px; color: #6b7280 !important; margin-bottom: 2px;">for the</div>
-            <div class="email-text-dark" style="font-size: 30px; font-weight: bold; color: #2d4660 !important; margin-bottom: 8px;">${productName}</div>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 20px; font-weight: bold; color: #2d4660; margin-top: 16px; margin-bottom: 4px;">Feature Voting System</div>
+            <div style="font-size: 11px; color: #6b7280; margin-bottom: 2px;">has a</div>
+            <div style="font-size: 25px; font-weight: bold; color: #2d4660; margin-bottom: 2px;">Access Request Notification</div>
+            <div style="font-size: 11px; color: #6b7280; margin-bottom: 2px;">for the</div>
+            <div style="font-size: 30px; font-weight: bold; color: #2d4660; margin-bottom: 8px;">${productName}</div>
           </td>
         </tr>
         
         <!-- Main Content -->
         <tr>
-          <td class="email-card-dark" style="background-color: #ffffff !important; padding: 40px;">
-            <p class="email-text-dark" style="margin: 0 0 16px 0; font-size: 16px; color: #333 !important;">Hello,</p>
-            <p class="email-text-dark" style="margin: 0 0 24px 0; font-size: 16px; color: #333 !important;">A new access request has been submitted for <strong style="color: #2d4660;">${productName}</strong>.</p>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello,</p>
+            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333;">A new access request has been submitted for <strong style="color: #2d4660;">${productName}</strong>.</p>
             
             <!-- User Details - Labels less prominent, values emphasized -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: white; border-left: 4px solid #2d4660; border-radius: 4px; margin: 20px 0;">
               <tr>
                 <td style="padding: 20px;">
                   <div style="margin: 10px 0;">
-                    <span class="email-text-muted-dark" style="font-weight: normal; color: #6b7280 !important; font-size: 13px;">Requester Name:</span> <span class="email-text-dark" style="color: #1f2937 !important; font-weight: 600; font-size: 15px;">${requestName}</span>
+                    <span style="font-weight: normal; color: #6b7280; font-size: 13px;">Requester Name:</span> <span style="color: #1f2937; font-weight: 600; font-size: 15px;">${requestName}</span>
                   </div>
                   <div style="margin: 10px 0;">
-                    <span class="email-text-muted-dark" style="font-weight: normal; color: #6b7280 !important; font-size: 13px;">Requester Email:</span> <span class="email-text-dark" style="color: #1f2937 !important; font-weight: 600; font-size: 15px;">${requestEmail}</span>
+                    <span style="font-weight: normal; color: #6b7280; font-size: 13px;">Requester Email:</span> <span style="color: #1f2937; font-weight: 600; font-size: 15px;">${requestEmail}</span>
                   </div>
                   <div style="margin: 10px 0;">
-                    <span class="email-text-muted-dark" style="font-weight: normal; color: #6b7280 !important; font-size: 13px;">Product:</span> <span class="email-text-dark" style="color: #1f2937 !important; font-weight: 600; font-size: 15px;">${productName}</span>
+                    <span style="font-weight: normal; color: #6b7280; font-size: 13px;">Product:</span> <span style="color: #1f2937; font-weight: 600; font-size: 15px;">${productName}</span>
                   </div>
                 </td>
               </tr>
             </table>
 
-            <p class="email-text-dark" style="margin: 24px 0; font-size: 16px; color: #333 !important; line-height: 1.6;">To grant access, click one of the buttons below.<br />Access will be granted <b>immediately</b> to all sessions for this product,<br /><b>and an email notification will be sent to the requester.</b></p>
+            <p style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">To grant access, click one of the buttons below.<br />Access will be granted <b>immediately</b> to all sessions for this product,<br /><b>and an email notification will be sent to the requester.</b></p>
             
             <!-- Action Buttons - Gold buttons for granting access (same size) -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
@@ -749,7 +732,7 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
             </table>
             
             <!-- Helpful Text -->
-            <p class="email-text-muted-dark" style="margin: 24px 0 16px 0; font-size: 14px; color: #6b7280 !important; line-height: 1.6; text-align: center;">
+            <p style="margin: 24px 0 16px 0; font-size: 14px; color: #6b7280; line-height: 1.6; text-align: center;">
               Click either button above to quickly grant access,<br />or use the link below to manage sessions and users in the system.
             </p>
             
@@ -766,9 +749,9 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
         
         <!-- Footer -->
         <tr>
-          <td class="email-bg-dark" style="background-color: #f9fafb !important; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280 !important;">
-            <p class="email-text-muted-dark" style="margin: 0 0 8px 0; color: #6b7280 !important;">This is an automated message from the Feature Voting System.</p>
-            <p class="email-text-muted-dark" style="margin: 0; color: #9ca3af !important;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
           </td>
         </tr>
       </table>

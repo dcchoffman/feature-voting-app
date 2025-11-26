@@ -11,7 +11,7 @@ import type { Product, SessionStakeholder } from '../types';
 import ProductPicker from '../components/ProductPicker';
 import {
   Calendar, Clock, Users, Vote, Settings, LogOut,
-  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star
+  CheckCircle, AlertCircle, Plus, Mail, List, Info, BarChart2, BadgeCheck, Shield, ChevronDown, Pencil, Sparkles, Star, Square
 } from 'lucide-react';
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -989,10 +989,25 @@ export default function SessionSelectionScreen() {
     try {
       const stakeholders = await db.getSessionStakeholders(session.id);
       const validStakeholders = stakeholders.filter((stakeholder) => !!stakeholder.user_email);
-      setInviteStakeholders(validStakeholders);
-      setSelectedStakeholderEmails(validStakeholders.map((stakeholder) => stakeholder.user_email.toLowerCase()));
-      if (validStakeholders.length === 0) {
-        setInviteModalError('No stakeholders found for this session. Add stakeholders first, then send invites.');
+      
+      // Filter to only show stakeholders that have corresponding user records
+      // This prevents showing orphaned stakeholders from deleted users
+      const allUsers = await db.getAllUsers();
+      const userEmailSet = new Set(allUsers.map(user => user.email.toLowerCase()));
+      
+      const activeStakeholders = validStakeholders.filter((stakeholder) => 
+        userEmailSet.has(stakeholder.user_email.toLowerCase())
+      );
+      
+      setInviteStakeholders(activeStakeholders);
+      setSelectedStakeholderEmails(activeStakeholders.map((stakeholder) => stakeholder.user_email.toLowerCase()));
+      
+      if (activeStakeholders.length === 0) {
+        if (validStakeholders.length > 0) {
+          setInviteModalError('No active stakeholders found for this session. Some stakeholders may have been deleted. Add stakeholders first, then send invites.');
+        } else {
+          setInviteModalError('No stakeholders found for this session. Add stakeholders first, then send invites.');
+        }
       }
     } catch (error: any) {
       console.error('Error loading stakeholders:', error);
@@ -3443,12 +3458,17 @@ export default function SessionSelectionScreen() {
                             </p>
                             <p className="text-xs text-gray-500">{stakeholder.user_email}</p>
                           </div>
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 text-[#2D4660] border-gray-300 rounded focus:ring-[#2D4660]"
-                            checked={isChecked}
-                            onChange={() => toggleStakeholderSelection(stakeholder.user_email)}
-                          />
+                          <button
+                            type="button"
+                            onClick={() => toggleStakeholderSelection(stakeholder.user_email)}
+                            className="flex-shrink-0"
+                          >
+                            {isChecked ? (
+                              <CheckCircle className="w-5 h-5 text-green-600" />
+                            ) : (
+                              <Square className="w-5 h-5 text-gray-400" />
+                            )}
+                          </button>
                         </label>
                       );
                     })

@@ -211,6 +211,109 @@ This is an automated message from the Feature Voting System.
             // Don't fail the whole operation if email fails
           }
 
+          // Send confirmation email to the admin who granted access
+          const adminEmail = currentUser?.email;
+          if (adminEmail) {
+            try {
+              const adminConfirmationHtml = `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center" style="padding: 48px 20px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
+        <!-- Logo Header -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 24px; font-weight: bold; color: #2d4660; margin-top: 16px;">Access Granted Confirmation</div>
+          </td>
+        </tr>
+        
+        <!-- Main Content -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello,</p>
+            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333; line-height: 1.6;">You have successfully granted <strong style="color: #2d4660;">${roleName}</strong> access to <strong style="color: #2d4660;">${requesterName}</strong> (${email}) for all sessions in <strong style="color: #2d4660;">${productName}</strong>.</p>
+            
+            <!-- Status Box -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0fdf4; border-left: 4px solid #22c55e; border-radius: 4px; margin: 20px 0;">
+              <tr>
+                <td style="padding: 20px;">
+                  <div style="margin: 10px 0;">
+                    <strong style="color: #166534; font-size: 14px;">✓ Access Granted</strong>
+                  </div>
+                  <div style="margin: 10px 0; color: #166534; font-size: 13px;">
+                    Role: <strong>${roleName}</strong>
+                  </div>
+                  <div style="margin: 10px 0; color: #166534; font-size: 13px;">
+                    User: <strong>${requesterName}</strong> (${email})
+                  </div>
+                  <div style="margin: 10px 0; color: #166534; font-size: 13px;">
+                    Product: <strong>${productName}</strong>
+                  </div>
+                  <div style="margin: 10px 0; color: #166534; font-size: 13px;">
+                    Status: <strong>Email notification sent to requester</strong>
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">The requester has been notified and can now access all voting sessions for this product.</p>
+            
+            <!-- Go to System Button -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
+              <tr>
+                <td align="center">
+                  <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Go to Feature Voting System</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+
+              const adminConfirmationText = `
+Access Granted Confirmation - Feature Voting System
+
+Hello,
+
+You have successfully granted ${roleName} access to ${requesterName} (${email}) for all sessions in ${productName}.
+
+Status: Access Granted
+Role: ${roleName}
+User: ${requesterName} (${email})
+Product: ${productName}
+Email notification sent to requester: Yes
+
+The requester has been notified and can now access all voting sessions for this product.
+
+Login: ${loginUrl}
+
+This is an automated message from the Feature Voting System.
+              `;
+
+              await sendInvitationEmail({
+                to: adminEmail,
+                subject: `Access Granted: ${requesterName} - ${productName} - Feature Voting System`,
+                text: adminConfirmationText,
+                html: adminConfirmationHtml
+              });
+            } catch (adminEmailError) {
+              console.error('Error sending admin confirmation email:', adminEmailError);
+              // Don't fail the whole operation if admin email fails
+            }
+          }
+
           // Show success modal
           setGrantAccessSuccess({ roleName, productName, requesterName, requesterEmail: email });
           

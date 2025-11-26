@@ -192,6 +192,14 @@ const getDeadlineBgColor = (daysRemaining: number): string => {
   return 'bg-[#1E5461]/10';
 };
 
+const getDeadlineBgColorSolid = (daysRemaining: number): string => {
+  // Calculate solid color equivalent of 10% opacity over white
+  if (daysRemaining <= 0) return 'bg-[#EEE8E7]'; // #591D0F/10 over white
+  if (daysRemaining <= 2) return 'bg-[#F0ECEB]'; // #6A4234/10 over white
+  if (daysRemaining <= 4) return 'bg-[#FAF4E7]'; // #C89212/10 over white
+  return 'bg-[#E9EEEF]'; // #1E5461/10 over white
+};
+
 const isDateInRange = (startDate: string, endDate: string): boolean => {
   const start = new Date(startDate);
   const end = new Date(endDate);
@@ -2409,7 +2417,7 @@ const VotingScreen = React.memo(function VotingScreen({
       </div>
       
       {/* Title and buttons - mobile menu in same row */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-start md:items-center mb-6">
         <div className="flex items-start md:items-center">
           {/* Mobile: small logo next to title */}
           <ImageWithFallback
@@ -2440,7 +2448,7 @@ const VotingScreen = React.memo(function VotingScreen({
             </p>
           </div>
         </div>
-        <div ref={mobileMenuRef} className="relative z-40">
+        <div ref={mobileMenuRef} className="relative z-40 flex items-start md:items-center">
           {/* Desktop buttons */}
           <div className="hidden md:flex items-center space-x-2">
             {isAdmin && (
@@ -2579,13 +2587,13 @@ const VotingScreen = React.memo(function VotingScreen({
                   </div>
                 </div>
                 
-                <div className="flex items-center flex-1 min-w-0 md:justify-end" style={{ paddingLeft: '60px', width: '100px' }}>
-                  <div className="leading-tight w-full" style={{ width: '120px' }}>
-                    <div className="flex items-center">
-                      <Vote className={`h-[30px] w-[30px] mr-2 ${deadlineColor}`} style={{ marginLeft: '-88px' }} />
-                      <div className="text-sm -mt-0.5 leading-none flex-1">
-                        <div className="flex items-baseline justify-center" style={{ marginLeft: '-12px' }}>
-                          <span className={`${deadlineColor} mr-1`} style={{ fontSize: '14px', marginLeft: '-48px' }}>You have</span>
+                <div className="flex items-center justify-center md:justify-end flex-1 min-w-0">
+                  <div className="leading-tight">
+                    <div className="flex items-center justify-center md:justify-start">
+                      <Vote className={`h-[30px] w-[30px] mr-2 ${deadlineColor}`} />
+                      <div className="text-sm -mt-0.5 leading-none">
+                        <div className="flex items-baseline justify-center md:justify-start">
+                          <span className={`${deadlineColor} mr-1`} style={{ fontSize: '14px' }}>You have</span>
                           <span className={`${deadlineColor} font-semibold text-2xl`}>
                             {remainingVotes}
                           </span>
@@ -2656,41 +2664,52 @@ const VotingScreen = React.memo(function VotingScreen({
         })}
       </div>
       
-      {pendingUsedVotes > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-4">
-          <div className="container mx-auto max-w-6xl flex items-center justify-between">
-            <div>
-              {!allVotesUsed && (
-                <div className="flex items-center">
-                  <AlertTriangle className="h-5 w-5 text-[#C89212] mr-2" />
-                  <span className="text-gray-700">
-                    You still have <span className="font-semibold text-[#C89212]">{remainingVotes}</span> votes remaining.
-                  </span>
+      {pendingUsedVotes > 0 && (() => {
+        const daysRemaining = getDaysRemaining(votingSession.endDate);
+        const deadlineColor = getDeadlineColor(daysRemaining);
+        const deadlineBgColorSolid = getDeadlineBgColorSolid(daysRemaining);
+        
+        return (
+          <div className={`fixed bottom-0 left-0 right-0 ${deadlineBgColorSolid} rounded-t-md border-t ${
+            daysRemaining <= 2 ? 'border-[#6A4234]/20' : 
+            daysRemaining <= 4 ? 'border-[#C89212]/20' : 
+            'border-[#1E5461]/20'
+          } p-3 md:p-4 z-50`}>
+            <div className="container mx-auto max-w-6xl flex items-center justify-center">
+              <div className="flex items-center flex-1 min-w-0 justify-center" style={{ paddingLeft: '60px', width: '100px' }}>
+                <div className="leading-tight w-full" style={{ width: '120px' }}>
+                  <div className="flex items-center">
+                    <Vote className={`h-[30px] w-[30px] mr-2 ${deadlineColor}`} style={{ marginLeft: '-88px' }} />
+                    <div className="text-sm -mt-0.5 leading-none flex-1">
+                      <div className="flex items-baseline justify-center" style={{ marginLeft: '-12px' }}>
+                        <span className={`${deadlineColor} mr-1`} style={{ fontSize: '14px', marginLeft: '-48px' }}>You have</span>
+                        <span className={`${deadlineColor} font-semibold text-2xl`}>
+                          {remainingVotes}
+                        </span>
+                        <span className={`${deadlineColor} font-semibold text-lg ml-1`}>
+                          / {effectiveVotesPerUser}
+                        </span>
+                      </div>
+                      <span className={`${deadlineColor} block -mt-0.5 text-center`} style={{ fontSize: '14px' }}>votes remaining</span>
+                    </div>
+                  </div>
                 </div>
-              )}
-              {allVotesUsed && (
-                <div className="flex items-center">
-                  <CheckCircle className="h-5 w-5 text-[#1E5461] mr-2" />
-                  <span className="text-gray-700">
-                    All votes allocated! You can now submit your votes.
-                  </span>
-                </div>
-              )}
+              </div>
+              <button
+                onClick={onSubmitVotes}
+                className={`py-3 px-6 rounded-lg font-medium cursor-pointer ${
+                  allVotesUsed
+                    ? 'bg-[#1E5461] hover:bg-[#173B65] text-white'
+                    : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                }`}
+                disabled={!allVotesUsed}
+              >
+                Submit Votes
+              </button>
             </div>
-            <button
-              onClick={onSubmitVotes}
-              className={`py-3 px-6 rounded-lg font-medium cursor-pointer ${
-                allVotesUsed
-                  ? 'bg-[#1E5461] hover:bg-[#173B65] text-white'
-                  : 'bg-gray-300 text-gray-600 cursor-not-allowed'
-              }`}
-              disabled={!allVotesUsed}
-            >
-              Submit Votes
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <Modal
         isOpen={showSuggestModal}

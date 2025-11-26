@@ -491,6 +491,34 @@ export async function getSessionByCode(code: string): Promise<VotingSession | nu
   return data ? normalizeSessionRow(data as SessionRow) : null;
 }
 
+export async function getSessionsByProduct(productId: string): Promise<VotingSession[]> {
+  try {
+    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/voting_sessions?product_id=eq.${productId}&select=${encodeURIComponent(SESSION_SELECT)}&order=created_at.desc`;
+    const apiHeaders = {
+      'apikey': (supabase as any).supabaseKey,
+      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+      'Content-Type': 'application/json',
+    };
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: apiHeaders
+    });
+  
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[databaseService] getSessionsByProduct API error:', response.status, errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return normalizeSessionRows(data as SessionRow[]);
+  } catch (error) {
+    console.error('[databaseService] Exception in getSessionsByProduct:', error);
+    throw error;
+  }
+}
+
 export async function getSessionsForUser(userId: string): Promise<VotingSession[]> {
   try {
   // Check if user is system admin first - system admins see ALL sessions

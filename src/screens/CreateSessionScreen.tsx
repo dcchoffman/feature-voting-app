@@ -53,6 +53,25 @@ export default function CreateSessionScreen() {
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false);
+  const [isSessionAdmin, setIsSessionAdmin] = useState(false);
+
+  useEffect(() => {
+    const checkRoles = async () => {
+      if (!currentUser) return;
+      const sysAdmin = await db.isUserSystemAdmin(currentUser.id);
+      setIsSystemAdmin(sysAdmin);
+      
+      // Check if session admin
+      const { data } = await supabase
+        .from('session_admins')
+        .select('session_id')
+        .eq('user_id', currentUser.id)
+        .limit(1);
+      setIsSessionAdmin(data && data.length > 0);
+    };
+    checkRoles();
+  }, [currentUser]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -300,7 +319,24 @@ export default function CreateSessionScreen() {
           >
             <ChevronLeft className="h-6 w-6" />
           </button>
-          <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Create Voting Session</h1>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Create Voting Session</h1>
+            {currentUser && (
+              <p className="text-sm text-gray-600 mt-1">
+                {currentUser.name}
+                {isSystemAdmin && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                    System Admin
+                  </span>
+                )}
+                {!isSystemAdmin && isSessionAdmin && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
+                    Session Admin
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
         </div>
         <button
           onClick={handleLogout}

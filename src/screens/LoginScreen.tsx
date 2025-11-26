@@ -16,6 +16,7 @@ import microsoftLogo from '../assets/microsoft.svg';
 import { Modal, Button } from './FeatureVoting';
 import type { Product } from '../types';
 import { getProductColor } from '../utils/productColors';
+import { generateGrantAccessToken } from '../utils/grantAccessToken';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -23,7 +24,8 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showRequestAccessModal, setShowRequestAccessModal] = useState(false);
-  const { setCurrentUser, setCurrentSession } = useSession();
+  const [grantAccessSuccess, setGrantAccessSuccess] = useState<{ roleName: string; productName: string; requesterName: string; requesterEmail: string } | null>(null);
+  const { currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -58,6 +60,172 @@ export default function LoginScreen() {
       
       // Clean up the URL - React Router handles basename automatically
       navigate('/login', { replace: true });
+    }
+  }, [searchParams, navigate]);
+
+  // Handle grant access actions from email buttons
+  useEffect(() => {
+    const token = searchParams.get('token');
+    const action = searchParams.get('action');
+    const email = searchParams.get('email');
+    const productId = searchParams.get('product');
+
+    if (token && action && email && productId && (action === 'grant-admin' || action === 'grant-stakeholder')) {
+      const grantAccess = async () => {
+        try {
+          setIsLoading(true);
+          setError('');
+
+          // Get Supabase URL for Edge Function
+          const supabaseUrl = (supabase as any).supabaseUrl;
+          const grantAccessUrl = `${supabaseUrl}/functions/v1/grant-access`;
+
+          // Call Edge Function to grant access (bypasses RLS)
+          let response;
+          try {
+            response = await fetch(grantAccessUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
+              },
+              body: JSON.stringify({
+                token,
+                action,
+                email,
+                productId
+              })
+            });
+          } catch (fetchError: any) {
+            // Handle CORS or network errors
+            if (fetchError.message?.includes('CORS') || fetchError.message?.includes('Failed to fetch')) {
+              throw new Error('The grant access function is not available. Please ensure the Edge Function is deployed. Error: ' + fetchError.message);
+            }
+            throw fetchError;
+          }
+
+          if (!response.ok) {
+            let errorMessage = 'Failed to grant access';
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorMessage;
+            } catch {
+              errorMessage = `Server returned ${response.status}: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
+          }
+
+          const result = await response.json();
+
+          // Extract name from email (fallback)
+          const fallbackName = email.split('@')[0].replace(/\./g, ' ');
+          const productName = result.productName || 'the product';
+          const roleName = action === 'grant-admin' ? 'Session Admin' : 'Stakeholder';
+
+          // Get requester name (try to get from user, otherwise use fallback)
+          let requesterName = fallbackName;
+          try {
+            const user = await db.getUserByEmail(email);
+            if (user) {
+              requesterName = user.name;
+            }
+          } catch (err) {
+            // Use fallback name if user lookup fails
+          }
+
+          // Send email to requester
+          const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+          const loginUrl = `${window.location.origin}${basename}/login`;
+          const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
+          const curveImageUrl = 'https://dcchoffman.github.io/feature-voting-app/bottom-left-curve.png';
+
+          const requesterEmailHtml = `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+  <tr>
+    <td align="center" style="padding: 48px 20px;">
+      <div style="position: relative; display: inline-block;">
+        <div style="position: absolute; bottom: 0; left: 0; width: 300px; height: 200px; background-image: url('${curveImageUrl}'); background-position: bottom left; background-repeat: no-repeat; background-size: contain; opacity: 0.2; z-index: 0; pointer-events: none;"></div>
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); position: relative; z-index: 1;">
+        <!-- Logo Header -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div style="font-size: 24px; font-weight: bold; color: #2d4660; margin-top: 16px;">Access Granted</div>
+          </td>
+        </tr>
+        
+        <!-- Main Content -->
+        <tr>
+          <td style="background-color: #ffffff; padding: 40px;">
+            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello ${requesterName},</p>
+            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333; line-height: 1.6;">Your access request has been approved! You have been granted <strong style="color: #2d4660;">${roleName}</strong> access to all voting sessions for <strong style="color: #2d4660;">${productName}</strong>.</p>
+            
+            <p style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">You can now log in to the Feature Voting System to access your sessions.</p>
+            
+            <!-- Login Button -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
+              <tr>
+                <td align="center">
+                  <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Log In to Feature Voting System</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; position: relative;">
+            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+
+          const requesterEmailText = `
+Access Granted - Feature Voting System
+
+Hello ${requesterName},
+
+Your access request has been approved! You have been granted ${roleName} access to all voting sessions for ${productName}.
+
+You can now log in to the Feature Voting System to access your sessions.
+
+Login: ${loginUrl}
+
+This is an automated message from the Feature Voting System.
+          `;
+
+          try {
+            await sendInvitationEmail({
+              to: email,
+              subject: `Access Granted - ${productName} - Feature Voting System`,
+              text: requesterEmailText,
+              html: requesterEmailHtml
+            });
+          } catch (emailError) {
+            console.error('Error sending access granted email:', emailError);
+            // Don't fail the whole operation if email fails
+          }
+
+          // Show success modal
+          setGrantAccessSuccess({ roleName, productName, requesterName, requesterEmail: email });
+          
+          // Clean up URL
+          navigate('/login', { replace: true });
+        } catch (err: any) {
+          console.error('Error granting access:', err);
+          setError(err.message || 'Failed to grant access. Please try again.');
+          navigate('/login', { replace: true });
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      grantAccess();
     }
   }, [searchParams, navigate]);
 
@@ -345,6 +513,35 @@ export default function LoginScreen() {
         isOpen={showRequestAccessModal}
         onClose={React.useCallback(() => setShowRequestAccessModal(false), [])}
       />
+
+      {/* Grant Access Success Modal */}
+      {grantAccessSuccess && (
+        <Modal
+          isOpen={true}
+          onClose={() => setGrantAccessSuccess(null)}
+          title=""
+          maxWidth="max-w-md"
+          hideHeader={true}
+          hideCloseButton={false}
+        >
+          <div className="text-center pb-6">
+            <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Access Granted Successfully!</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Successfully granted <span className="font-semibold text-green-700">{grantAccessSuccess.roleName}</span> access to
+            </p>
+            <p className="text-base font-semibold text-gray-900 mb-1">{grantAccessSuccess.requesterName}</p>
+            <p className="text-xs text-gray-500 mb-3">{grantAccessSuccess.requesterEmail}</p>
+            <p className="text-sm text-gray-600 mb-1">
+              for all sessions in
+            </p>
+            <p className="text-lg font-semibold text-green-700 mb-4">{grantAccessSuccess.productName}</p>
+            <p className="text-sm text-gray-600">
+              An email has been sent to the requester.
+            </p>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -463,52 +660,98 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
       const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
       const loginUrl = `${window.location.origin}${basename}/login`;
 
+      // Generate secure tokens for grant access links
+      const adminToken = await generateGrantAccessToken(requestEmail, selectedProductId, 'grant-admin');
+      const stakeholderToken = await generateGrantAccessToken(requestEmail, selectedProductId, 'grant-stakeholder');
+      
+      // Get Supabase URL for Edge Function
+      const supabaseUrl = (supabase as any).supabaseUrl;
+      const grantAccessUrl = `${supabaseUrl}/functions/v1/grant-access`;
+
       // Create HTML email content with inline styles (matching EmailJS template format)
       // Using table-based layout for better email client compatibility
       // Use GitHub Pages URL for images to ensure they're accessible in emails
       const logoUrl = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo1.png';
-      const curveImageUrl = 'https://dcchoffman.github.io/feature-voting-app/bottom-left-curve.png';
+      const logoUrlDark = 'https://dcchoffman.github.io/feature-voting-app/New-Millennium-color-logo-dark.png'; // Dark mode logo
       
       const htmlContent = `
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
+<style>
+  @media (prefers-color-scheme: dark) {
+    .logo-light { display: none !important; }
+    .logo-dark { display: block !important; }
+    .email-bg { background-color: #1a1a1a !important; }
+    .email-card { background-color: #2d2d2d !important; }
+    .email-text { color: #e5e5e5 !important; }
+    .email-text-muted { color: #a0a0a0 !important; }
+    .email-header-bg { background-color: #2d2d2d !important; }
+  }
+  .logo-dark { display: none !important; }
+</style>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-bg" style="background-color: #f9fafb; font-family: Arial, sans-serif;">
   <tr>
     <td align="center" style="padding: 48px 20px;">
-      <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); position: relative;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" class="email-card" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
         <!-- Logo Header - Matching Login Page -->
         <tr>
-          <td style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
-            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
-            <div style="font-size: 30px; font-weight: bold; color: #2d4660; margin-top: 16px; margin-bottom: 8px;">Feature Voting System</div>
-            <div style="font-size: 14px; color: #6b7280; margin-top: 8px;">Access Request Notification</div>
+          <td class="email-header-bg" style="background-color: #ffffff; padding: 32px 40px 24px 40px; text-align: center;">
+            <img src="${logoUrl}" alt="New Millennium Building Systems" width="300" height="96" class="logo-light" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <img src="${logoUrlDark}" alt="New Millennium Building Systems" width="300" height="96" class="logo-dark" style="height: 96px; width: auto; max-width: 300px; display: block; margin: 0 auto; border: 0;" />
+            <div class="email-text" style="font-size: 20px; font-weight: bold; color: #2d4660; margin-top: 16px; margin-bottom: 4px;">Feature Voting System</div>
+            <div class="email-text-muted" style="font-size: 11px; color: #6b7280; margin-bottom: 2px;">has a</div>
+            <div class="email-text" style="font-size: 25px; font-weight: bold; color: #2d4660; margin-bottom: 2px;">Access Request Notification</div>
+            <div class="email-text-muted" style="font-size: 11px; color: #6b7280; margin-bottom: 2px;">for the</div>
+            <div class="email-text" style="font-size: 30px; font-weight: bold; color: #2d4660; margin-bottom: 8px;">${productName}</div>
           </td>
         </tr>
         
         <!-- Main Content -->
         <tr>
-          <td style="background-color: #ffffff; padding: 40px;">
-            <p style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello,</p>
-            <p style="margin: 0 0 24px 0; font-size: 16px; color: #333;">A new access request has been submitted for <strong style="color: #2d4660;">${productName}</strong>.</p>
+          <td class="email-card" style="background-color: #ffffff; padding: 40px;">
+            <p class="email-text" style="margin: 0 0 16px 0; font-size: 16px; color: #333;">Hello,</p>
+            <p class="email-text" style="margin: 0 0 24px 0; font-size: 16px; color: #333;">A new access request has been submitted for <strong style="color: #2d4660;">${productName}</strong>.</p>
             
-            <!-- User Details - Keeping as requested -->
+            <!-- User Details - Labels less prominent, values emphasized -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: white; border-left: 4px solid #2d4660; border-radius: 4px; margin: 20px 0;">
               <tr>
                 <td style="padding: 20px;">
                   <div style="margin: 10px 0;">
-                    <span style="font-weight: bold; color: #2d4660;">Requester Name:</span> <span style="color: #333;">${requestName}</span>
+                    <span class="email-text-muted" style="font-weight: normal; color: #6b7280; font-size: 13px;">Requester Name:</span> <span class="email-text" style="color: #1f2937; font-weight: 600; font-size: 15px;">${requestName}</span>
                   </div>
                   <div style="margin: 10px 0;">
-                    <span style="font-weight: bold; color: #2d4660;">Requester Email:</span> <span style="color: #333;">${requestEmail}</span>
+                    <span class="email-text-muted" style="font-weight: normal; color: #6b7280; font-size: 13px;">Requester Email:</span> <span class="email-text" style="color: #1f2937; font-weight: 600; font-size: 15px;">${requestEmail}</span>
                   </div>
                   <div style="margin: 10px 0;">
-                    <span style="font-weight: bold; color: #2d4660;">Product:</span> <span style="color: #333;">${productName}</span>
+                    <span class="email-text-muted" style="font-weight: normal; color: #6b7280; font-size: 13px;">Product:</span> <span class="email-text" style="color: #1f2937; font-weight: 600; font-size: 15px;">${productName}</span>
                   </div>
                 </td>
               </tr>
             </table>
 
-            <p style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">To grant access, please add this user as a stakeholder or admin to the relevant voting sessions for this product.</p>
+            <p class="email-text" style="margin: 24px 0; font-size: 16px; color: #333; line-height: 1.6;">To grant access, click one of the buttons below.<br />Access will be granted <b>immediately</b> to all sessions for this product,<br /><b>and an email notification will be sent to the requester.</b></p>
             
+            <!-- Action Buttons - Gold buttons for granting access (same size) -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 32px 0;">
+              <tr>
+                <td width="50%" align="left" valign="top" style="padding-right: 10px;">
+                  <a href="${loginUrl}?token=${adminToken}&action=grant-admin&email=${encodeURIComponent(requestEmail)}&product=${encodeURIComponent(selectedProductId)}" style="display: inline-block; padding: 12px 20px; background-color: #C89212; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 13px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); text-align: center; line-height: 1.5; width: 100%; max-width: 240px; min-width: 240px;">
+                    Grant Access as<br /><span style="font-size: 18px; font-weight: 700;">Session Admin</span>
+                  </a>
+                </td>
+                <td width="50%" align="right" valign="top" style="padding-left: 10px;">
+                  <a href="${loginUrl}?token=${stakeholderToken}&action=grant-stakeholder&email=${encodeURIComponent(requestEmail)}&product=${encodeURIComponent(selectedProductId)}" style="display: inline-block; padding: 12px 20px; background-color: #C89212; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 13px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); text-align: center; line-height: 1.5; width: 100%; max-width: 240px; min-width: 240px;">
+                    Grant Access as<br /><span style="font-size: 18px; font-weight: 700;">Stakeholder</span>
+                  </a>
+                </td>
+              </tr>
+            </table>
+            
+            <!-- Helpful Text -->
+            <p class="email-text-muted" style="margin: 24px 0 16px 0; font-size: 14px; color: #6b7280; line-height: 1.6; text-align: center;">
+              Click either button above to quickly grant access,<br />or use the link below to manage sessions and users in the system.
+            </p>
+            
+            <!-- Go to System Button -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
               <tr>
                 <td align="center">
                   <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #2d4660; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">Go to Feature Voting System</a>
@@ -520,16 +763,9 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
         
         <!-- Footer -->
         <tr>
-          <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
-            <p style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
-            <p style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
-          </td>
-        </tr>
-        
-        <!-- Bottom-left curve image -->
-        <tr>
-          <td style="position: relative; height: 200px; overflow: hidden; background-color: #f9fafb;">
-            <img src="${curveImageUrl}" alt="" width="600" style="max-width: 600px; width: 100%; height: auto; opacity: 0.2; border: 0;" />
+          <td class="email-bg" style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p class="email-text-muted" style="margin: 0 0 8px 0;">This is an automated message from the Feature Voting System.</p>
+            <p class="email-text-muted" style="margin: 0; color: #9ca3af;">© ${new Date().getFullYear()} New Millennium Building Systems</p>
           </td>
         </tr>
       </table>

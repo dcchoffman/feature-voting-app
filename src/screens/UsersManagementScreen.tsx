@@ -1345,46 +1345,78 @@ export default function UsersManagementScreen() {
     
     setIsDeleting(true);
     try {
-      // Remove from all sessions first
-      for (const session of allSessions) {
-        try {
-          await db.removeSessionAdmin(session.id, userToDelete.id);
-          await db.removeStakeholder(session.id, userToDelete.id);
-        } catch (err) {
-          // Continue even if removal fails
-        }
+      if (!currentUser) {
+        throw new Error('You must be logged in to delete users');
       }
-      
-      // Remove system admin role if applicable
-      if (userToDelete.roles.isSystemAdmin) {
+
+      // Use Edge Function to delete user (bypasses RLS)
+      const supabaseUrl = (supabase as any).supabaseUrl;
+      const deleteUserUrl = `${supabaseUrl}/functions/v1/delete-user`;
+
+      const response = await fetch(deleteUserUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(supabase as any).supabaseKey}`, // Use service key for Edge Function call
+        },
+        body: JSON.stringify({
+          userId: userToDelete.id,
+          currentUserId: currentUser.id
+        })
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to delete user';
         try {
-          await db.removeSystemAdmin(userToDelete.id);
-        } catch (err) {
-          console.error('Error removing system admin role:', err);
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          errorMessage = `Server returned ${response.status}: ${response.statusText}`;
         }
+        throw new Error(errorMessage);
       }
+
+      const result = await response.json();
       
-      // Delete the user record from the users table
-      const { error: deleteError } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', userToDelete.id);
+      // Remove from local state immediately (optimistic update)
+      setUsers(prevUsers => prevUsers.filter(u => u.id !== userToDelete.id));
       
-      if (deleteError) throw deleteError;
-      
-      // Note: The actual auth user deletion would need to be done server-side with admin privileges
-      // For now, we're just removing them from the database and all roles
-      // They won't be able to access anything even if they can still log in
-      
-      // Reload users
-      await loadUsers(allSessions);
-      
-      // Close modal
+      // Close modal first
       setShowDeleteModal(false);
+      const deletedUserId = userToDelete.id;
       setUserToDelete(null);
-    } catch (error) {
+      
+      // Then reload users to ensure consistency
+      try {
+        await loadUsers(allSessions);
+      } catch (reloadError) {
+        console.error('Error reloading users after deletion:', reloadError);
+        // If reload fails, at least we've already removed from state
+      }
+    } catch (error: any) {
       console.error('Error deleting user:', error);
-      alert('Failed to delete user. Please try again.');
+      const errorMessage = error?.message || error?.error?.message || 'Unknown error';
+      
+      // Revert optimistic update if deletion failed
+      setUsers(prevUsers => {
+        // If user was removed optimistically, add them back
+        const wasRemoved = !prevUsers.find(u => u.id === userToDelete?.id);
+        if (wasRemoved && userToDelete) {
+          return [...prevUsers, userToDelete].sort((a, b) => 
+            (a.name || a.email).localeCompare(b.name || b.email)
+          );
+        }
+        return prevUsers;
+      });
+      
+      alert(`Failed to delete user: ${errorMessage}\n\nIf this persists, the deletion may be blocked by database security policies. Please check the console for details.`);
+      
+      // Still try to reload users in case partial deletion occurred
+      try {
+        await loadUsers(allSessions);
+      } catch (reloadError) {
+        console.error('Error reloading users after failed deletion:', reloadError);
+      }
     } finally {
       setIsDeleting(false);
     }
@@ -1940,20 +1972,22 @@ export default function UsersManagementScreen() {
               style={{ width: '36px', height: '36px', objectFit: 'contain' }}
               onClick={() => navigate('/sessions')}
             />
-            <button 
-              onClick={() => {
-                // Check if user has a current session (likely came from AdminDashboard)
-                if (currentSession?.id) {
-                  navigate('/admin');
-                } else {
-                  navigate('/sessions');
-                }
-              }}
-              className="mr-2 p-1 rounded-full hover:bg-gray-200 cursor-pointer flex-shrink-0"
-            >
-              <ChevronLeft className="h-6 w-6" />
-            </button>
-            <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                {currentUser?.name}
+                {isSystemAdmin && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                    System Admin
+                  </span>
+                )}
+                {!isSystemAdmin && isSessionAdmin && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
+                    Session Admin
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
           
           <div ref={mobileMenuRef} className="relative z-40 flex-shrink-0 ml-2">
@@ -2108,25 +2142,42 @@ export default function UsersManagementScreen() {
                 <div className="p-4 border-b border-gray-100">
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex-1 min-w-0 pr-2">
-                      <h3 className="text-base font-semibold text-gray-900 truncate">
-                        {user.name}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-semibold text-gray-900 truncate">
+                          {user.name || user.email}
+                        </h3>
                         {user.id === currentUser?.id && (
-                          <span className="ml-2 text-xs text-[#c59f2d] font-semibold">
+                          <span className="text-xs text-[#c59f2d] font-semibold">
                             (You)
                           </span>
                         )}
+                        {user.roles.isSystemAdmin && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                            System Admin
+                          </span>
+                        )}
+                        {user.roles.sessionAdminCount > 0 && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                            Session Admin ({user.roles.sessionAdminCount})
+                          </span>
+                        )}
+                        {user.roles.stakeholderSessionCount > 0 && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            Stakeholder ({user.roles.stakeholderSessionCount})
+                          </span>
+                        )}
                         {getProtectedAccountLabel(user) && (
-                          <span className="ml-2 text-xs text-[#c59f2d] font-semibold">
+                          <span className="text-xs text-[#c59f2d] font-semibold">
                             ({getProtectedAccountLabel(user)})
                           </span>
                         )}
                         {isDuplicateAccount(user) && (
-                          <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded">
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded">
                             Duplicate ({getDuplicateCount(user)})
                           </span>
                         )}
-                      </h3>
-                      <p className="text-sm text-gray-500 truncate">{user.email}</p>
+                      </div>
+                      <p className="text-sm text-gray-500 truncate mt-1">{user.email}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <div 

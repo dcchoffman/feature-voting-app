@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
+import { supabase } from '../supabaseClient';
 import {
   Plus,
   Edit,
@@ -1847,6 +1848,8 @@ export function AdminDashboard({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [sessionActionsMenuOpen, setSessionActionsMenuOpen] = useState(false);
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false);
+  const [isSessionAdmin, setIsSessionAdmin] = useState(false);
   const sessionActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [suggestionToPromote, setSuggestionToPromote] = useState<FeatureSuggestion | null>(null);
   const [isPromotingSuggestion, setIsPromotingSuggestion] = useState(false);
@@ -1926,6 +1929,23 @@ export function AdminDashboard({
   );
 
   const lastTenantRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const checkRoles = async () => {
+      if (!currentUser) return;
+      const sysAdmin = await db.isUserSystemAdmin(currentUser.id);
+      setIsSystemAdmin(sysAdmin);
+      
+      // Check if session admin
+      const { data } = await supabase
+        .from('session_admins')
+        .select('session_id')
+        .eq('user_id', currentUser.id)
+        .limit(1);
+      setIsSessionAdmin(data && data.length > 0);
+    };
+    checkRoles();
+  }, [currentUser]);
 
   useEffect(() => {
       const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId ?? null;
@@ -2412,7 +2432,24 @@ export function AdminDashboard({
             className="mr-4 md:hidden"
             style={{ width: '40px', height: '40px', objectFit: 'contain' }}
           />
-          <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">Admin Dashboard</h1>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">Admin Dashboard</h1>
+            {currentUser && (
+              <p className="text-sm text-gray-600 mt-1">
+                {currentUser.name}
+                {isSystemAdmin && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
+                    System Admin
+                  </span>
+                )}
+                {!isSystemAdmin && isSessionAdmin && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
+                    Session Admin
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
         </div>
         
         <div ref={mobileMenuRef} className="relative z-40">

@@ -628,9 +628,9 @@ This is an automated message from the Feature Voting System.
                 Request Access
               </button>
             </div>
-            </div>
           </div>
         </div>
+      </div>
       </div>
       
       <RequestAccessModal

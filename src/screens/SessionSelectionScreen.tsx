@@ -1485,13 +1485,21 @@ export default function SessionSelectionScreen() {
   const handleManageAdmins = (e: React.MouseEvent, session: any) => {
     e.stopPropagation();
     setCurrentSession(session);
-    navigate('/users?filter=session-admin');
+    const productId = session.product_id || (session as any).productId || '';
+    const url = productId 
+      ? `/users?filter=session-admin&product=${productId}`
+      : '/users?filter=session-admin';
+    navigate(url);
   };
 
   const handleManageStakeholders = (e: React.MouseEvent, session: any) => {
     e.stopPropagation();
     setCurrentSession(session);
-    navigate('/users?filter=stakeholder');
+    const productId = session.product_id || (session as any).productId || '';
+    const url = productId 
+      ? `/users?filter=stakeholder&product=${productId}`
+      : '/users?filter=stakeholder';
+    navigate(url);
   };
 
   const handleCloseCreateModal = () => {

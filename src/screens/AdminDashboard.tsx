@@ -2322,16 +2322,24 @@ export function AdminDashboard({
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    navigate('/users?filter=session-admin');
-  }, [currentSession, setCurrentSession, navigate]);
+    const productId = votingSession.product_id || (votingSession as any).productId || '';
+    const url = productId 
+      ? `/users?filter=session-admin&product=${productId}`
+      : '/users?filter=session-admin';
+    navigate(url);
+  }, [currentSession, setCurrentSession, navigate, votingSession]);
 
   const handleManageStakeholders = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    navigate('/users?filter=stakeholder');
-  }, [currentSession, setCurrentSession, navigate]);
+    const productId = votingSession.product_id || (votingSession as any).productId || '';
+    const url = productId 
+      ? `/users?filter=stakeholder&product=${productId}`
+      : '/users?filter=stakeholder';
+    navigate(url);
+  }, [currentSession, setCurrentSession, navigate, votingSession]);
 
   const logStatusNote = useCallback(async (note: {
     type: 'reopen' | 'ended-early';

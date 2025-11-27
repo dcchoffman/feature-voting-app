@@ -5,6 +5,7 @@
 // ============================================
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
@@ -12,7 +13,7 @@ import type { User, VotingSession, Product } from '../types';
 import type { UserRoleInfo } from '../services/databaseService';
 import { 
   ChevronLeft, Users, Crown, Shield, ShieldCheck, User as UserIcon,
-  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle, Info, Edit, Plus, Minus
+  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle, Info, Edit, Plus, Minus, FilterX
 } from 'lucide-react';
 import { getProductColor } from '../utils/productColors';
 import { supabase } from '../supabaseClient';
@@ -126,6 +127,115 @@ function ProductSelect({ products, value, onChange, label, error, onProductChang
         </div>
       )}
     </div>
+  );
+}
+
+// Product Filter Dropdown Component
+interface ProductFilterDropdownProps {
+  products: Product[];
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function ProductFilterDropdown({ products, value, onChange }: ProductFilterDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) &&
+          buttonRef.current && !buttonRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      // Calculate position when opening
+      if (buttonRef.current) {
+        const rect = buttonRef.current.getBoundingClientRect();
+        setDropdownPosition({
+          top: rect.bottom + window.scrollY + 4,
+          left: rect.left + window.scrollX,
+          width: rect.width
+        });
+      }
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const selectedProduct = products.find(p => p.id === value);
+
+  const dropdownContent = isOpen ? (
+    <div 
+      ref={dropdownRef}
+      className="fixed bg-white border border-gray-300 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+      style={{ 
+        top: `${dropdownPosition.top}px`,
+        left: `${dropdownPosition.left}px`,
+        width: '300px',
+        zIndex: 99999
+      }}
+    >
+      <div
+        onClick={() => {
+          onChange('');
+          setIsOpen(false);
+        }}
+        className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 ${
+          !value ? 'bg-gray-50' : ''
+        }`}
+      >
+        <span className="text-base text-gray-900">All Products</span>
+        {!value && <CheckCircle className="h-4 w-4 text-gray-400 flex-shrink-0" />}
+      </div>
+      {products.length === 0 ? (
+        <div className="px-4 py-2.5 text-base text-gray-500 text-center">Loading products...</div>
+      ) : (
+        products.map(product => {
+          const colors = getProductColor(product.name, product.color_hex ?? null);
+          const isSelected = value === product.id;
+          return (
+            <div
+              key={product.id}
+              onClick={() => {
+                onChange(product.id);
+                setIsOpen(false);
+              }}
+              className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
+                isSelected ? 'bg-blue-50' : ''
+              }`}
+            >
+              <span
+                className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
+                style={{ backgroundColor: colors.background }}
+              />
+              <span className="text-base text-gray-900 flex-1">{product.name}</span>
+              {isSelected && <CheckCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+            </div>
+          );
+        })
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <div className="relative min-w-[200px]">
+        <div
+          ref={buttonRef}
+          onClick={() => setIsOpen(!isOpen)}
+          className="px-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base bg-white cursor-pointer flex items-center justify-between hover:bg-gray-50"
+        >
+          <span className={`text-base truncate ${!value ? 'text-gray-500' : 'text-gray-900'}`}>
+            {selectedProduct ? selectedProduct.name : 'All Products'}
+          </span>
+          <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+        </div>
+      </div>
+      {isOpen && createPortal(dropdownContent, document.body)}
+    </>
   );
 }
 
@@ -465,6 +575,7 @@ export default function UsersManagementScreen() {
   });
   const [pageTitle, setPageTitle] = useState('User Management');
   const [products, setProducts] = useState<Product[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]); // All products for filter
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [filteredSessionsForProduct, setFilteredSessionsForProduct] = useState<VotingSession[]>([]);
   const [selectedProductIdForSessionAdmin, setSelectedProductIdForSessionAdmin] = useState<string>('');
@@ -473,6 +584,7 @@ export default function UsersManagementScreen() {
   const [successModalData, setSuccessModalData] = useState<{ email: string; userType: string } | null>(null);
   const [useAllSessionsForStakeholder, setUseAllSessionsForStakeholder] = useState<boolean>(true);
   const [useAllSessionsForSessionAdmin, setUseAllSessionsForSessionAdmin] = useState<boolean>(true);
+  const [filterProductId, setFilterProductId] = useState<string>(''); // Product filter for user list
 
   const sessionAdminActive =
     Boolean(selectedProductIdForSessionAdmin) &&
@@ -616,10 +728,13 @@ export default function UsersManagementScreen() {
   const loadProducts = useCallback(async () => {
     try {
       const productsList = await db.getProducts();
+      // Store all products for filter dropdown
+      setAllProducts(productsList);
+      
       // Use already loaded allSessions instead of fetching again
       const now = new Date();
       
-      // Filter products to only show those with active or upcoming sessions
+      // Filter products to only show those with active or upcoming sessions (for add user modal)
       const productsWithSessions = productsList.filter(product => {
         return allSessions.some(session => {
           if (session.product_id !== product.id) return false;
@@ -633,6 +748,18 @@ export default function UsersManagementScreen() {
       console.error('Error loading products:', error);
     }
   }, [allSessions]);
+
+  // Load all products independently (for filter dropdown)
+  const loadAllProducts = useCallback(async () => {
+    try {
+      const productsList = await db.getProducts();
+      console.log('Loaded products:', productsList);
+      setAllProducts(productsList);
+    } catch (error) {
+      console.error('Error loading all products:', error);
+      setAllProducts([]); // Set empty array on error
+    }
+  }, []);
 
   const clearSessionAdminSelections = () => {
     setSelectedProductIdForSessionAdmin('');
@@ -900,6 +1027,9 @@ export default function UsersManagementScreen() {
           loadUsers(allSessionsCheck)
         ]);
       }
+      
+      // Load products after sessions are loaded
+      await loadProducts();
     } catch (error) {
       console.error('Error checking access:', error);
       navigate('/sessions');
@@ -997,28 +1127,95 @@ export default function UsersManagementScreen() {
       );
     }
 
-    // Filter by role
-    if (filterRole !== 'all') {
+    // Filter by role and product together
+    if (filterRole !== 'all' || filterProductId) {
       filtered = filtered.filter(user => {
-        switch (filterRole) {
-          case 'system-admin':
-            return user.roles.isSystemAdmin;
-          case 'session-admin':
-            return user.roles.sessionAdminCount > 0;
-          case 'stakeholder':
-            return user.roles.stakeholderSessionCount > 0;
-          case 'none':
-            return !user.roles.isSystemAdmin &&
-                   user.roles.sessionAdminCount === 0 &&
-                   user.roles.stakeholderSessionCount === 0;
-          default:
-            return true;
+        // Get all sessions the user is associated with
+        const userSessions = [
+          ...(user.adminInSessions || []),
+          ...(user.stakeholderInSessions || [])
+        ];
+        
+        // Filter by product first (if specified)
+        let productFilteredSessions = userSessions;
+        if (filterProductId) {
+          productFilteredSessions = userSessions.filter(session => {
+            const productId = (session as any).product_id || (session as any).productId;
+            return productId === filterProductId;
+          });
         }
+        
+        // If filtering by product and no sessions match, exclude user
+        if (filterProductId && productFilteredSessions.length === 0) {
+          return false;
+        }
+        
+        // Filter by role (checking if user has the role in the filtered sessions)
+        if (filterRole !== 'all') {
+          switch (filterRole) {
+            case 'system-admin':
+              return user.roles.isSystemAdmin;
+            case 'session-admin':
+              // Check if user is admin in any of the product-filtered sessions
+              if (filterProductId) {
+                return productFilteredSessions.some(session => 
+                  user.adminInSessions?.some(adminSession => adminSession.id === session.id)
+                );
+              }
+              return user.roles.sessionAdminCount > 0;
+            case 'stakeholder':
+              // Check if user is stakeholder in any of the product-filtered sessions
+              if (filterProductId) {
+                return productFilteredSessions.some(session => 
+                  user.stakeholderInSessions?.some(stakeholderSession => stakeholderSession.id === session.id)
+                );
+              }
+              return user.roles.stakeholderSessionCount > 0;
+            case 'none':
+              return !user.roles.isSystemAdmin &&
+                     user.roles.sessionAdminCount === 0 &&
+                     user.roles.stakeholderSessionCount === 0;
+            default:
+              return true;
+          }
+        }
+        
+        // If only product filter (no role filter), user passes if they have sessions in that product
+        return true;
       });
     }
 
     setFilteredUsers(filtered);
   };
+
+  // Get products associated with a user
+  const getUserProducts = (user: UserWithRoles): Product[] => {
+    const userSessions = [
+      ...(user.adminInSessions || []),
+      ...(user.stakeholderInSessions || [])
+    ];
+    
+    // Get unique product IDs from user's sessions
+    const productIds = new Set<string>();
+    userSessions.forEach(session => {
+      // Check both product_id and productId (in case of different naming)
+      const productId = (session as any).product_id || (session as any).productId;
+      if (productId) {
+        productIds.add(productId);
+      }
+    });
+    
+    
+    // Return products that match
+    return allProducts.filter(product => productIds.has(product.id));
+  };
+
+  // Load all products when user is available (for filter dropdown)
+  useEffect(() => {
+    if (currentUser) {
+      loadAllProducts();
+    }
+  }, [currentUser, loadAllProducts]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -1041,32 +1238,48 @@ export default function UsersManagementScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
   
-  // Separate useEffect to handle URL filter parameter
+  // Separate useEffect to handle URL filter parameters
   useEffect(() => {
     const filterParam = searchParams.get('filter');
     if (filterParam && ['system-admin', 'session-admin', 'stakeholder', 'none'].includes(filterParam)) {
       setFilterRole(filterParam as any);
+    }
+    
+    // Handle product filter from URL
+    const productParam = searchParams.get('product');
+    if (productParam) {
+      setFilterProductId(productParam);
     }
   }, [searchParams]);
 
   // Ensure session-admin mode never exposes system-admin filter
   // Session admins can only filter by 'stakeholder' or 'none'
   // When switching to system-admin, always default to 'all'
+  // BUT: Don't override if we have a filter from URL params
   useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    // If there's a filter in the URL, don't override it
+    if (filterParam) {
+      return;
+    }
+    
     if (viewMode === 'session-admin') {
       if (filterRole === 'system-admin' || filterRole === 'session-admin' || filterRole === 'all') {
         setFilterRole('stakeholder');
       }
     } else if (viewMode === 'system-admin') {
       // When switching to system-admin view, always reset filter to 'all'
-      setFilterRole('all');
+      // But only if there's no filter in the URL
+      if (!searchParams.get('filter')) {
+        setFilterRole('all');
+      }
     }
-  }, [viewMode]);
+  }, [viewMode, searchParams, filterRole]);
 
   // Memoize filterUsers to prevent unnecessary recalculations
   const memoizedFilterUsers = useCallback(() => {
     filterUsers();
-  }, [users, searchQuery, filterRole, viewMode, allSessions, currentUser]);
+  }, [users, searchQuery, filterRole, filterProductId, viewMode, allSessions, currentUser]);
   
   useEffect(() => {
     memoizedFilterUsers();
@@ -2090,8 +2303,8 @@ export default function UsersManagementScreen() {
         </div>
 
         {/* Search and Filter Section */}
-        <div className="relative z-10 bg-white rounded-lg shadow-md p-3 md:p-4 mb-4 md:mb-6">
-          <div className="flex flex-col gap-3 md:flex-row md:gap-4">
+        <div className="relative z-10 bg-white rounded-lg shadow-md p-3 md:p-4 mb-4 md:mb-6" style={{ overflow: 'visible', position: 'relative' }}>
+          <div className="flex flex-col gap-3 md:flex-row md:gap-4" style={{ position: 'relative' }}>
             {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -2112,6 +2325,13 @@ export default function UsersManagementScreen() {
               )}
             </div>
 
+            {/* Product Filter */}
+            <ProductFilterDropdown
+              products={allProducts}
+              value={filterProductId}
+              onChange={setFilterProductId}
+            />
+
             {/* Role Filter */}
             <select
               value={filterRole === 'system-admin' && viewMode === 'session-admin' ? 'session-admin' : filterRole}
@@ -2124,6 +2344,20 @@ export default function UsersManagementScreen() {
               <option value="stakeholder">Stakeholder</option>
               <option value="none">No Role</option>
             </select>
+
+            {/* Clear Filters Button */}
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setFilterProductId('');
+                setFilterRole('all');
+              }}
+              disabled={!searchQuery && !filterProductId && filterRole === 'all'}
+              className="inline-flex items-center justify-center px-3 py-2.5 md:py-2 border border-gray-300 rounded-lg bg-white text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 disabled:hover:bg-white"
+              title="Clear all filters"
+            >
+              <FilterX className="h-5 w-5" />
+            </button>
           </div>
         </div>
 
@@ -2131,7 +2365,7 @@ export default function UsersManagementScreen() {
         <div className="md:hidden space-y-3 relative z-10 overflow-visible">
           {filteredUsers.length === 0 ? (
             <div className="bg-white rounded-lg shadow-md p-8 text-center text-gray-500">
-              {searchQuery || filterRole !== 'all' 
+              {searchQuery || filterRole !== 'all' || filterProductId
                 ? 'No users found matching your filters.' 
                 : 'No users found.'}
             </div>
@@ -2178,6 +2412,33 @@ export default function UsersManagementScreen() {
                         )}
                       </div>
                       <p className="text-sm text-gray-500 truncate mt-1">{user.email}</p>
+                      {(() => {
+                        const userProducts = getUserProducts(user);
+                        if (userProducts.length > 0) {
+                          return (
+                            <div className="text-sm text-gray-600 mt-1">
+                              <span className="font-medium">
+                                {userProducts.length === 1 ? 'Product:' : 'Products:'}
+                              </span>
+                              <ul className="list-none mt-1 space-y-0.5">
+                                {userProducts.map(p => {
+                                  const productColors = getProductColor(p.name, p.color_hex ?? null);
+                                  return (
+                                    <li key={p.id} className="text-gray-600 flex items-center gap-2">
+                                      <span
+                                        className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
+                                        style={{ backgroundColor: productColors.background }}
+                                      />
+                                      {p.name}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <div 
@@ -2689,7 +2950,7 @@ export default function UsersManagementScreen() {
                 {filteredUsers.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                      {searchQuery || filterRole !== 'all' 
+                      {searchQuery || filterRole !== 'all' || filterProductId
                         ? 'No users found matching your filters.' 
                         : 'No users found.'}
                     </td>
@@ -2723,6 +2984,33 @@ export default function UsersManagementScreen() {
                             )}
                           </div>
                           <div className="text-sm text-gray-500">{user.email}</div>
+                          {(() => {
+                            const userProducts = getUserProducts(user);
+                            if (userProducts.length > 0) {
+                              return (
+                                <div className="text-sm text-gray-600 mt-1">
+                                  <span className="font-medium">
+                                    {userProducts.length === 1 ? 'Product:' : 'Products:'}
+                                  </span>
+                                  <ul className="list-none mt-1 space-y-0.5">
+                                    {userProducts.map(p => {
+                                      const productColors = getProductColor(p.name, p.color_hex ?? null);
+                                      return (
+                                        <li key={p.id} className="text-gray-600 flex items-center gap-2">
+                                          <span
+                                            className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
+                                            style={{ backgroundColor: productColors.background }}
+                                          />
+                                          {p.name}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap align-top">

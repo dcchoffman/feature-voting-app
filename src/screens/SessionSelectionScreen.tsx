@@ -29,6 +29,8 @@ export default function SessionSelectionScreen() {
   const [sessionRoles, setSessionRoles] = useState<Record<string, { isAdmin: boolean; isStakeholder: boolean }>>({});
   const [featureCounts, setFeatureCounts] = useState<Record<string, number>>({});
   const [votingStatus, setVotingStatus] = useState<Record<string, boolean>>({});
+  const [adminCounts, setAdminCounts] = useState<Record<string, number>>({});
+  const [stakeholderCounts, setStakeholderCounts] = useState<Record<string, number>>({});
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [viewMode, setViewMode] = useState<'admin' | 'stakeholder' | 'system-admin'>('admin');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -931,11 +933,13 @@ export default function SessionSelectionScreen() {
       const roles: Record<string, { isAdmin: boolean; isStakeholder: boolean }> = {};
       const counts: Record<string, number> = {};
       const votedStatus: Record<string, boolean> = {};
+      const adminCountsMap: Record<string, number> = {};
+      const stakeholderCountsMap: Record<string, number> = {};
 
       for (let i = 0; i < freshSessions.length; i++) {
         const session = freshSessions[i];
         try {
-        const [isAdmin, isStakeholder, features, votes] = await Promise.all([
+        const [isAdmin, isStakeholder, features, votes, admins, stakeholders] = await Promise.all([
           // System admins have admin access to all sessions
           sysAdmin ? Promise.resolve(true) : db.isUserSessionAdmin(session.id, currentUser.id),
           db.isUserSessionStakeholder(session.id, currentUser.email),
@@ -944,12 +948,16 @@ export default function SessionSelectionScreen() {
               // If votes fail to load, just return empty array
               console.warn(`Failed to load votes for session ${session.id}:`, err);
               return [];
-            })
+            }),
+          db.getSessionAdmins(session.id).catch(() => []),
+          db.getSessionStakeholders(session.id).catch(() => [])
         ]);
 
 
         roles[session.id] = { isAdmin, isStakeholder };
         counts[session.id] = features.length;
+        adminCountsMap[session.id] = admins.length;
+        stakeholderCountsMap[session.id] = stakeholders.length;
         
         // Check if user has voted in this session
         const hasVoted = votes.some((v: any) => v.user_id === currentUser.id);
@@ -960,6 +968,8 @@ export default function SessionSelectionScreen() {
           // Set default values for this session
           roles[session.id] = { isAdmin: false, isStakeholder: false };
           counts[session.id] = 0;
+          adminCountsMap[session.id] = 0;
+          stakeholderCountsMap[session.id] = 0;
           votedStatus[session.id] = false;
         }
       }
@@ -972,6 +982,8 @@ export default function SessionSelectionScreen() {
       setSessionRoles(roles);
       setFeatureCounts(counts);
       setVotingStatus(votedStatus);
+      setAdminCounts(adminCountsMap);
+      setStakeholderCounts(stakeholderCountsMap);
       setProductLookup(productsMap);
       setProductColorLookup(productColorMap);
     } catch (error: any) {
@@ -1747,81 +1759,78 @@ export default function SessionSelectionScreen() {
       <>
         {/* Product Name Tab */}
         {showTab && renderProductTab(productName, productColors, productId)}
-        <div className="p-6 flex flex-col h-full">
-          {/* Action Buttons */}
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              {/* Only show Vote! button for Active sessions (not Upcoming or Closed) */}
-              {status.text === 'Active' && (
-                <div className="relative inline-block" style={{ marginLeft: '-10px', marginTop: '-10px', marginRight: '10px' }}>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                      handleVoteButton(session);
-                  }}
-                    className="inline-flex items-center px-4 py-1 rounded-md text-sm font-semibold transition-colors text-white shadow-md"
-                    style={{ backgroundColor: '#1E6154' }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#1E6154'}
-                >
-                    <Vote className="h-[26px] w-[26px] mr-1.5" />
-                  Vote!
-                </button>
-                  </div>
-                )}
-            </div>
-
-            <div className="flex items-center gap-1">
-              <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
-                <button
-                  onClick={(e) => handleManageAdmins(e, session)}
-                  disabled={isClosed}
-                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    isClosed
-                      ? 'bg-gray-200 text-gray-500'
-                      : 'bg-[#2D4660] text-white hover:bg-[#1D3144]'
-                  }`}
-                  style={isClosed ? { cursor: 'not-allowed' } : {}}
-                >
-                  <Settings className="h-3 w-3 mr-1" />
-                  Admins
-                </button>
-                {isClosed && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                    Session Closed
-                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
-                  </div>
-                )}
-              </div>
-
-              <div className={`relative inline-block ${isClosed ? 'group' : ''}`}>
-                <button
-                  onClick={(e) => handleManageStakeholders(e, session)}
-                  disabled={isClosed}
-                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    isClosed
-                      ? 'bg-gray-200 text-gray-500'
-                      : 'bg-[#1E5461] text-white hover:bg-[#576C71]'
-                  }`}
-                  style={isClosed ? { cursor: 'not-allowed' } : {}}
-                >
-                  <Users className="h-3 w-3 mr-1" />
-                  Stakeholders
-                </button>
-                {isClosed && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                    Session Closed
-                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
-                  </div>
-                )}
-              </div>
-            </div>
+        <div className="flex flex-col h-full">
+          {/* Session Title - Full Width at Top */}
+          <div 
+            className="w-full px-6 py-2 rounded-t-md border-b border-gray-200"
+            style={{
+              backgroundColor: productColors.background,
+              color: productColors.text
+            }}
+          >
+            <h3 className="text-lg font-semibold">
+              {session.title}
+            </h3>
           </div>
+          
+          <div className="p-6 flex flex-col flex-1">
+          
+          {/* Vote Button */}
+          {(() => {
+            const calculateDaysUntilStart = (startDate: string): number => {
+              if (!startDate || isPlaceholderDate(startDate)) return 0;
+              const start = new Date(startDate);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              start.setHours(0, 0, 0, 0);
+              const diffTime = start.getTime() - today.getTime();
+              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              return diffDays;
+            };
 
-          {/* Session Title */}
-          <h3 className="text-lg font-semibold text-[#2D4660] mb-2">
-            {session.title}
-          </h3>
+            let buttonText = 'Cast your Votes';
+            let isDisabled = false;
+            
+            if (status.text === 'Upcoming') {
+              const daysUntil = calculateDaysUntilStart(session.start_date);
+              buttonText = `Cast your Vote in ${daysUntil} ${daysUntil === 1 ? 'day' : 'days'}`;
+              isDisabled = true;
+            } else if (status.text === 'Closed') {
+              buttonText = 'Voting Session Closed';
+              isDisabled = true;
+            } else if (status.text === 'Draft') {
+              buttonText = 'Voting Session Closed';
+              isDisabled = true;
+            } else if (status.text === 'Active') {
+              buttonText = 'Cast your Votes';
+              isDisabled = false;
+            } else {
+              // Other statuses
+              buttonText = 'Voting Session Closed';
+              isDisabled = true;
+            }
+
+            return (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!isDisabled) {
+                    handleVoteButton(session);
+                  }
+                }}
+                disabled={isDisabled}
+                className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors mb-4 ${
+                  isDisabled 
+                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed' 
+                    : 'bg-[#1E6154]/10 hover:bg-[#1E6154]/20 text-[#1E6154]'
+                }`}
+                style={isDisabled ? { cursor: 'not-allowed' } : {}}
+              >
+                <Vote className={`h-4 w-4 mr-2 ${isDisabled ? 'text-gray-500' : 'text-[#1E6154]'}`} />
+                <span className={`text-sm font-medium ${isDisabled ? 'text-gray-500' : 'text-[#1E6154]'}`}>{buttonText}</span>
+              </button>
+            );
+          })()}
 
           {/* Session Goal */}
           <p className="text-sm text-gray-600 mb-4 line-clamp-2">
@@ -1880,10 +1889,43 @@ export default function SessionSelectionScreen() {
                 )}
               </div>
             </div>
+            
+            {/* Session Admins and Stakeholders Links */}
+            <div className="flex items-center justify-center min-h-[48px] border-t border-gray-200 text-sm text-gray-600">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!isClosed) {
+                    handleManageAdmins(e, session);
+                  }
+                }}
+                disabled={isClosed}
+                className={`flex items-center mr-3 ${isClosed ? 'text-gray-400 cursor-not-allowed' : 'text-[#2D4660] hover:text-[#1D3144] hover:underline cursor-pointer'}`}
+                style={isClosed ? { cursor: 'not-allowed' } : {}}
+              >
+                <Shield className="h-4 w-4 mr-1.5" />
+                {adminCounts[session.id] !== undefined ? adminCounts[session.id] : 0} Session Admin{adminCounts[session.id] !== 1 ? 's' : ''}
+              </button>
+              <span className="text-gray-400">•</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!isClosed) {
+                    handleManageStakeholders(e, session);
+                  }
+                }}
+                disabled={isClosed}
+                className={`flex items-center ml-3 ${isClosed ? 'text-gray-400 cursor-not-allowed' : 'text-[#1E5461] hover:text-[#576C71] hover:underline cursor-pointer'}`}
+                style={isClosed ? { cursor: 'not-allowed' } : {}}
+              >
+                <Users className="h-4 w-4 mr-1.5" />
+                {stakeholderCounts[session.id] !== undefined ? stakeholderCounts[session.id] : 0} Stakeholder{stakeholderCounts[session.id] !== 1 ? 's' : ''}
+              </button>
+            </div>
           </div>
 
           {/* Email Invite */}
-          <div className="mt-4 pt-4 border-t border-gray-200">
+          <div className="pt-4 border-t border-gray-200">
             {(() => {
               const isDraft = isDraftSession(session);
               const shouldDisable = isClosed || isDraft;
@@ -1911,6 +1953,7 @@ export default function SessionSelectionScreen() {
                 </div>
               );
             })()}
+          </div>
           </div>
         </div>
       </>
@@ -2121,11 +2164,14 @@ export default function SessionSelectionScreen() {
                 
                 // Separate multi-session products from single-session products
                 const multiSessionProducts: Array<{ key: string; sessions: any[] }> = [];
+                const singleSessionProductGroups: Array<{ key: string; sessions: any[] }> = [];
                 const singleSessionProducts: any[] = [];
                 
                 Object.entries(productGroups).forEach(([normalizedProductName, sessions]) => {
                   if (sessions.length >= 2) {
                     multiSessionProducts.push({ key: normalizedProductName, sessions });
+                  } else if (sessions.length === 1) {
+                    singleSessionProductGroups.push({ key: normalizedProductName, sessions });
                   } else {
                     singleSessionProducts.push(...sessions);
                   }
@@ -2162,10 +2208,12 @@ export default function SessionSelectionScreen() {
                         <div key={normalizedProductName} className="relative" style={{ marginTop: '50px' }}>
                           {/* Wrapper Container */}
                           <div 
-                            className="rounded-lg rounded-tl-none border border-gray-200 pt-2 px-6 pb-6 relative overflow-visible"
+                            className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
                             style={{ 
                               backgroundColor: lightTintBackground,
-                              borderColor: productColors.border || '#E5E7EB'
+                              borderColor: productColors.border || '#E5E7EB',
+                              paddingLeft: sessions.length === 1 ? '20px' : '24px',
+                              paddingRight: sessions.length === 1 ? '20px' : '24px'
                             }}
                           >
                             {/* Product Name Tab - On Top */}
@@ -2400,6 +2448,128 @@ export default function SessionSelectionScreen() {
                         </div>
                       );
                     })}
+                    
+                    {/* Single-session product groups in a 3-column grid */}
+                    {singleSessionProductGroups.length > 0 && (
+                      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" style={{ marginTop: '50px' }}>
+                        {singleSessionProductGroups.map(({ key: normalizedProductName, sessions }) => {
+                          const productName = getDisplayProductName(sessions[0], productLookup);
+                          const productColorHex = sessions[0]?.product_id ? productColorLookup[sessions[0].product_id] : undefined;
+                          const productColors = getProductColor(productName, productColorHex);
+
+                          // Helper to create light tint background from hex color
+                          const hexToRgba = (hex: string, alpha: number) => {
+                            const normalized = hex.replace('#', '');
+                            const r = parseInt(normalized.substring(0, 2), 16);
+                            const g = parseInt(normalized.substring(2, 4), 16);
+                            const b = parseInt(normalized.substring(4, 6), 16);
+                            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                          };
+                          const lightTintBackground = productColors.background 
+                            ? hexToRgba(productColors.background, 0.1)
+                            : '#F9FAFB';
+
+                          return (
+                            <div key={normalizedProductName} className="relative">
+                              {/* Wrapper Container */}
+                              <div 
+                                className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
+                                style={{ 
+                                  backgroundColor: lightTintBackground,
+                                  borderColor: productColors.border || '#E5E7EB',
+                                  paddingLeft: '20px',
+                                  paddingRight: '20px'
+                                }}
+                              >
+                                {/* Product Name Tab - On Top */}
+                                {renderProductTab(productName, productColors, sessions[0]?.product_id, normalizedProductName)}
+                                
+                                {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) */}
+                                {hasAdminAccess && viewMode !== 'stakeholder' && (
+                                  <div
+                                    className="absolute z-20 bottom-[-20px] left-1/2 -translate-x-1/2 md:bottom-auto md:left-auto md:translate-x-0 md:right-[-20px] md:top-1/2 md:-translate-y-1/2"
+                                  >
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const productId = sessions[0]?.product_id;
+                                        const productName = getDisplayProductName(sessions[0], productLookup);
+                                        if (productId) {
+                                          setSelectedProductId(productId);
+                                        }
+                                        if (productName && productName !== 'No Product') {
+                                          setPendingProductName(productName);
+                                        }
+                                        
+                                        let latestEndDate = parseLocalDate(sessions[0].end_date);
+                                        const newStartDate = addDaysToLocalDate(latestEndDate, 1);
+                                        const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                        
+                                        resetCreateSessionForm();
+                                        setSelectedProductId(productId);
+                                        setModalOpenedFromCirclePlus(true);
+                                        setAllowCreateProduct(false);
+                                        setIsProductLocked(true);
+                                        setShowCreateSessionModal(true);
+                                      }}
+                                      onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
+                                      onMouseLeave={() => setHoveredPlusButton(null)}
+                                      className="flex items-center justify-center w-10 h-10 rounded-full shadow-md"
+                                      style={{
+                                        backgroundColor: productColors.background || '#C89212',
+                                        color: productColors.text || '#FFFFFF'
+                                      }}
+                                      title={`Create new session for ${productName}`}
+                                    >
+                                      <Plus className="h-5 w-5" />
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                {/* Single Session Card */}
+                                {sessions.map((session) => {
+                                  const status = getSessionStatus(session);
+                                  const isClosed = status.text === 'Closed';
+                                  const StatusIcon = status.icon;
+                                  const votesInfo = getEffectiveVotesPerUser(session);
+                                  const hasVoted = votingStatus[session.id];
+                                  const sessionProductName = getDisplayProductName(session, productLookup);
+                                  const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
+                                  const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
+
+                                  return (
+                                    <div
+                                      key={session.id}
+                                      className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                      style={{ 
+                                        borderColor: sessionProductColors.border, 
+                                        borderWidth: '1px',
+                                        opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                                      }}
+                                      onMouseEnter={() => setHoveredSessionCard(session.id)}
+                                      onMouseLeave={() => setHoveredSessionCard(null)}
+                                      onClick={() => handleSelectSession(session)}
+                                    >
+                                      {renderSessionCard(
+                                        session,
+                                        sessionProductName,
+                                        sessionProductColors,
+                                        status,
+                                        StatusIcon,
+                                        votesInfo,
+                                        isClosed,
+                                        false, // showTab = false (tab is on container)
+                                        session.product_id
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     
                     {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
                     {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (
@@ -2762,11 +2932,14 @@ export default function SessionSelectionScreen() {
                     
                     // Separate multi-session products from single-session products
                     const multiSessionProducts: Array<{ key: string; sessions: any[] }> = [];
+                    const singleSessionProductGroups: Array<{ key: string; sessions: any[] }> = [];
                     const singleSessionProducts: any[] = [];
                     
                     Object.entries(productGroups).forEach(([normalizedProductName, sessions]) => {
                       if (sessions.length >= 2) {
                         multiSessionProducts.push({ key: normalizedProductName, sessions });
+                      } else if (sessions.length === 1) {
+                        singleSessionProductGroups.push({ key: normalizedProductName, sessions });
                       } else {
                         singleSessionProducts.push(...sessions);
                       }
@@ -2803,10 +2976,12 @@ export default function SessionSelectionScreen() {
                             <div key={normalizedProductName} className="relative" style={{ marginTop: '50px' }}>
                               {/* Wrapper Container */}
                               <div 
-                                className="rounded-lg rounded-tl-none border border-gray-200 pt-2 px-6 pb-6 relative overflow-visible"
+                                className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
                                 style={{ 
                                   backgroundColor: lightTintBackground,
-                                  borderColor: productColors.border || '#E5E7EB'
+                                  borderColor: productColors.border || '#E5E7EB',
+                                  paddingLeft: sessions.length === 1 ? '20px' : '24px',
+                                  paddingRight: sessions.length === 1 ? '20px' : '24px'
                                 }}
                               >
                                 {/* Product Name Tab - On Top */}
@@ -3128,6 +3303,128 @@ export default function SessionSelectionScreen() {
                             </div>
                           );
                         })}
+                        
+                        {/* Single-session product groups in a 3-column grid */}
+                        {singleSessionProductGroups.length > 0 && (
+                          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" style={{ marginTop: '50px' }}>
+                            {singleSessionProductGroups.map(({ key: normalizedProductName, sessions }) => {
+                              const productName = getDisplayProductName(sessions[0], productLookup);
+                              const productColorHex = sessions[0]?.product_id ? productColorLookup[sessions[0].product_id] : undefined;
+                              const productColors = getProductColor(productName, productColorHex);
+
+                              // Helper to create light tint background from hex color
+                              const hexToRgba = (hex: string, alpha: number) => {
+                                const normalized = hex.replace('#', '');
+                                const r = parseInt(normalized.substring(0, 2), 16);
+                                const g = parseInt(normalized.substring(2, 4), 16);
+                                const b = parseInt(normalized.substring(4, 6), 16);
+                                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                              };
+                              const lightTintBackground = productColors.background 
+                                ? hexToRgba(productColors.background, 0.1)
+                                : '#F9FAFB';
+
+                              return (
+                                <div key={normalizedProductName} className="relative">
+                                  {/* Wrapper Container */}
+                                  <div 
+                                    className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
+                                    style={{ 
+                                      backgroundColor: lightTintBackground,
+                                      borderColor: productColors.border || '#E5E7EB',
+                                      paddingLeft: '20px',
+                                      paddingRight: '20px'
+                                    }}
+                                  >
+                                    {/* Product Name Tab - On Top */}
+                                    {renderProductTab(productName, productColors, sessions[0]?.product_id, normalizedProductName)}
+                                    
+                                    {/* Create Session Button - Circle + button on far right (desktop), bottom center (mobile) */}
+                                    {(isSystemAdmin || viewMode === 'admin' || viewMode === 'system-admin') && (
+                                      <div
+                                        className="absolute z-20 bottom-[-20px] left-1/2 -translate-x-1/2 md:bottom-auto md:left-auto md:translate-x-0 md:right-[-20px] md:top-1/2 md:-translate-y-1/2"
+                                      >
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const productId = sessions[0]?.product_id;
+                                            const productName = getDisplayProductName(sessions[0], productLookup);
+                                            if (productId) {
+                                              setSelectedProductId(productId);
+                                            }
+                                            if (productName && productName !== 'No Product') {
+                                              setPendingProductName(productName);
+                                            }
+                                            
+                                            let latestEndDate = parseLocalDate(sessions[0].end_date);
+                                            const newStartDate = addDaysToLocalDate(latestEndDate, 1);
+                                            const newEndDate = addDaysToLocalDate(newStartDate, 14);
+                                            
+                                            resetCreateSessionForm();
+                                            setSelectedProductId(productId);
+                                            setModalOpenedFromCirclePlus(true);
+                                            setAllowCreateProduct(false);
+                                            setIsProductLocked(true);
+                                            setShowCreateSessionModal(true);
+                                          }}
+                                          onMouseEnter={() => setHoveredPlusButton(normalizedProductName)}
+                                          onMouseLeave={() => setHoveredPlusButton(null)}
+                                          className="flex items-center justify-center w-10 h-10 rounded-full shadow-md"
+                                          style={{
+                                            backgroundColor: productColors.background || '#C89212',
+                                            color: productColors.text || '#FFFFFF'
+                                          }}
+                                          title={`Create new session for ${productName}`}
+                                        >
+                                          <Plus className="h-5 w-5" />
+                                        </button>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Single Session Card */}
+                                    {sessions.map((session) => {
+                                      const status = getSessionStatus(session);
+                                      const isClosed = status.text === 'Closed';
+                                      const StatusIcon = status.icon;
+                                      const votesInfo = getEffectiveVotesPerUser(session);
+                                      const hasVoted = votingStatus[session.id];
+                                      const sessionProductName = getDisplayProductName(session, productLookup);
+                                      const sessionProductColorHex = session.product_id ? productColorLookup[session.product_id] : undefined;
+                                      const sessionProductColors = getProductColor(sessionProductName, sessionProductColorHex);
+
+                                      return (
+                                        <div
+                                          key={session.id}
+                                          className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                          style={{ 
+                                            borderColor: sessionProductColors.border, 
+                                            borderWidth: '1px',
+                                            opacity: isClosed && hoveredSessionCard !== session.id ? 0.75 : 1
+                                          }}
+                                          onMouseEnter={() => setHoveredSessionCard(session.id)}
+                                          onMouseLeave={() => setHoveredSessionCard(null)}
+                                          onClick={() => handleSelectSession(session)}
+                                        >
+                                          {renderSessionCard(
+                                            session,
+                                            sessionProductName,
+                                            sessionProductColors,
+                                            status,
+                                            StatusIcon,
+                                            votesInfo,
+                                            isClosed,
+                                            false, // showTab = false (tab is on container)
+                                            session.product_id
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                         
                         {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
                         {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (

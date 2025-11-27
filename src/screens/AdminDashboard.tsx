@@ -1968,6 +1968,8 @@ export function AdminDashboard({
   const [sessionActionsMenuOpen, setSessionActionsMenuOpen] = useState(false);
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isSessionAdmin, setIsSessionAdmin] = useState(false);
+  const [adminCount, setAdminCount] = useState<number>(0);
+  const [stakeholderCount, setStakeholderCount] = useState<number>(0);
   const sessionActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [suggestionToPromote, setSuggestionToPromote] = useState<FeatureSuggestion | null>(null);
   const [isPromotingSuggestion, setIsPromotingSuggestion] = useState(false);
@@ -2067,6 +2069,49 @@ export function AdminDashboard({
     };
     checkRoles();
   }, [currentUser]);
+
+  const loadCounts = useCallback(async () => {
+    // Get session ID from currentSession (has id) or votingSession (might not have id)
+    const sessionId = currentSession?.id || (votingSession as any)?.id;
+    
+    if (!sessionId) {
+      setAdminCount(0);
+      setStakeholderCount(0);
+      return;
+    }
+    
+    try {
+      const [admins, stakeholders] = await Promise.all([
+        db.getSessionAdmins(sessionId).catch((err) => {
+          console.error('[AdminDashboard] Error loading admins:', err);
+          return [];
+        }),
+        db.getSessionStakeholders(sessionId).catch((err) => {
+          console.error('[AdminDashboard] Error loading stakeholders:', err);
+          return [];
+        })
+      ]);
+      setAdminCount(admins.length);
+      setStakeholderCount(stakeholders.length);
+    } catch (error) {
+      console.error('[AdminDashboard] Error loading admin/stakeholder counts:', error);
+      setAdminCount(0);
+      setStakeholderCount(0);
+    }
+  }, [currentSession?.id, votingSession]);
+
+  useEffect(() => {
+    loadCounts();
+  }, [loadCounts]);
+
+  // Refresh counts when window regains focus (user returns from users page)
+  useEffect(() => {
+    const handleFocus = () => {
+      loadCounts();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadCounts]);
 
   useEffect(() => {
       const tenantId = currentUser?.tenant_id ?? currentUser?.tenantId ?? null;
@@ -2846,17 +2891,23 @@ export function AdminDashboard({
             <div className="hidden md:flex space-x-2">
             <button
               onClick={handleManageAdmins}
-              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-[#576C71] text-white hover:bg-[#1E5461]"
+              className="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-[#576C71] text-white hover:bg-[#1E5461]"
             >
               <Shield className="h-4 w-4 mr-2" />
               Admins
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 z-10">
+                {adminCount}
+              </span>
             </button>
             <button
               onClick={handleManageStakeholders}
-              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-[#1E5461] text-white hover:bg-[#576C71]"
+              className="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-[#1E5461] text-white hover:bg-[#576C71]"
             >
               <Users className="h-4 w-4 mr-2" />
               Stakeholders
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 z-10">
+                {stakeholderCount}
+              </span>
             </button>
               {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
             <Button 
@@ -2895,17 +2946,23 @@ export function AdminDashboard({
                 <div className="py-1">
                   <button
                     onClick={(e) => { setSessionActionsMenuOpen(false); handleManageAdmins(e); }}
-                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                    className="relative w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                   >
                     <Shield className="h-4 w-4 mr-2 text-gray-700" />
                     Admins
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 z-10">
+                      {adminCount}
+                    </span>
                   </button>
                   <button
                     onClick={(e) => { setSessionActionsMenuOpen(false); handleManageStakeholders(e); }}
-                    className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                    className="relative w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                   >
                     <Users className="h-4 w-4 mr-2 text-gray-700" />
                     Stakeholders
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 z-10">
+                      {stakeholderCount}
+                    </span>
                   </button>
                   {!(votingSession.isActive === false && !isPastDate(votingSession.endDate)) && (
                     <button

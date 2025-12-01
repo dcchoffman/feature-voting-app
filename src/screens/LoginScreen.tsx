@@ -9,7 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import * as db from '../services/databaseService';
 import { sendInvitationEmail } from '../services/emailService';
-import { LogIn, Mail, CheckCircle, ChevronDown } from 'lucide-react';
+import { Mail, CheckCircle, ChevronDown } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 import microsoftLogo from '../assets/microsoft.svg';
@@ -19,15 +19,72 @@ import { getProductColor } from '../utils/productColors';
 import { generateGrantAccessToken } from '../utils/grantAccessToken';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMicrosoft, setIsLoadingMicrosoft] = useState(false);
   const [error, setError] = useState('');
   const [showRequestAccessModal, setShowRequestAccessModal] = useState(false);
   const [grantAccessSuccess, setGrantAccessSuccess] = useState<{ roleName: string; productName: string; requesterName: string; requesterEmail: string } | null>(null);
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const { currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      // Get or create user
+      const user = await db.getOrCreateUser(email.toLowerCase(), name);
+      console.log('[LoginScreen] User created/retrieved:', user);
+      setCurrentUser(user);
+
+      // Check if there's a session code in the URL
+      const sessionCode = searchParams.get('session');
+      if (sessionCode) {
+        console.log('[LoginScreen] Session code found, loading session...');
+        // Try to load the session by code
+        const session = await db.getSessionByCode(sessionCode);
+        if (session) {
+          setCurrentSession(session);
+          
+          // Check if user is system admin, session admin, or stakeholder
+          console.log('[LoginScreen] Checking user roles...');
+          const [isSysAdmin, isAdmin, isStakeholder] = await Promise.all([
+            db.isUserSystemAdmin(user.id),
+            db.isUserSessionAdmin(session.id, user.id),
+            db.isUserSessionStakeholder(session.id, user.email)
+          ]);
+
+          // System admins have full access to all sessions
+          if (isSysAdmin || isAdmin) {
+            navigate('/admin');
+          } else if (isStakeholder) {
+            navigate('/vote');
+          } else {
+            // User not authorized for this session
+            setError('You are not authorized to access this voting session.');
+            setIsLoading(false);
+            return;
+          }
+        } else {
+          setError('Invalid session code.');
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        // No session code, go to session list
+        console.log('[LoginScreen] No session code, navigating to /sessions');
+        navigate('/sessions');
+      }
+    } catch (err) {
+      console.error('[LoginScreen] Login error:', err);
+      setError(`Failed to log in: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`);
+      setIsLoading(false);
+    }
+  };
 
   // Check for OAuth errors in URL parameters or sessionStorage
   useEffect(() => {
@@ -353,70 +410,10 @@ This is an automated message from the Feature Voting System.
     }
   }, [searchParams, navigate]);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    console.log('[LoginScreen] ⚡ handleLogin called!', { email, name });
-    e.preventDefault();
-    console.log('[LoginScreen] Form prevented default');
-    setError('');
-    setIsLoading(true);
-    console.log('[LoginScreen] Set loading state');
-
-    try {
-      console.log('[LoginScreen] Starting login process...');
-      // Get or create user
-      console.log('[LoginScreen] Getting or creating user...');
-      const user = await db.getOrCreateUser(email.trim().toLowerCase(), name.trim());
-      console.log('[LoginScreen] User created/retrieved:', user);
-      setCurrentUser(user);
-
-      // Check if there's a session code in the URL
-      const sessionCode = searchParams.get('session');
-      if (sessionCode) {
-        console.log('[LoginScreen] Session code found, loading session...');
-        // Try to load the session by code
-        const session = await db.getSessionByCode(sessionCode);
-        if (session) {
-          setCurrentSession(session);
-          
-          // Check if user is system admin, session admin, or stakeholder
-          console.log('[LoginScreen] Checking user roles...');
-          const [isSysAdmin, isAdmin, isStakeholder] = await Promise.all([
-            db.isUserSystemAdmin(user.id),
-            db.isUserSessionAdmin(session.id, user.id),
-            db.isUserSessionStakeholder(session.id, user.email)
-          ]);
-
-          // System admins have full access to all sessions
-          if (isSysAdmin || isAdmin) {
-            navigate('/admin');
-          } else if (isStakeholder) {
-            navigate('/vote');
-          } else {
-            // User not authorized for this session
-            setError('You are not authorized to access this voting session.');
-            setIsLoading(false);
-            return;
-          }
-        } else {
-          setError('Invalid session code.');
-          setIsLoading(false);
-          return;
-        }
-      } else {
-        // No session code, go to session list
-        console.log('[LoginScreen] No session code, navigating to /sessions');
-        navigate('/sessions');
-      }
-    } catch (err) {
-      console.error('[LoginScreen] Login error:', err);
-      setError(`Failed to log in: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`);
-      setIsLoading(false);
-    }
-  };
 
   const handleAzureLogin = async () => {
     setError('');
-    setIsLoading(true);
+    setIsLoadingMicrosoft(true);
     
     try {
       // Get the basename from the current pathname or default to '/feature-voting-app'
@@ -441,13 +438,13 @@ This is an automated message from the Feature Voting System.
       
       if (error) {
         setError('Failed to sign in with Azure AD. Please try again.');
-        setIsLoading(false);
+        setIsLoadingMicrosoft(false);
       }
       // If successful, user will be redirected to Azure, then back to /sessions
     } catch (err) {
       console.error('Azure login error:', err);
       setError('Failed to sign in with Azure AD. Please try again.');
-      setIsLoading(false);
+      setIsLoadingMicrosoft(false);
     }
   };
 
@@ -476,57 +473,77 @@ This is an automated message from the Feature Voting System.
           <div className="px-4 sm:px-10 pb-8">
             <div className="text-center mb-6">
               <h2 className="text-3xl font-bold text-[#2d4660]">
-          Feature Voting System
-        </h2>
+                Feature Voting System
+              </h2>
               <p className="mt-2 text-sm text-gray-600">
-          Sign in to access your voting sessions
-        </p>
-      </div>
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Full Name
-              </label>
-              <div className="mt-1">
-                <input
-                  id="name"
-                  name="name"
-                  type="text"
-                  autoComplete="name"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  data-lpignore="true"
-                  data-form-type="other"
-                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
-                  placeholder="John Doe"
-                />
-              </div>
+                Sign in to access your voting sessions
+              </p>
             </div>
-
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email Address
-              </label>
-              <div className="mt-1">
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  data-lpignore="true"
-                  data-form-type="other"
-                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
-                  placeholder="your.email@company.com"
-                />
+            
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label htmlFor="login-name" className="block text-sm font-medium text-gray-700">
+                  Full Name
+                </label>
+                <div className="mt-1">
+                  <input
+                    id="login-name"
+                    name="name"
+                    type="text"
+                    autoComplete="name"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+                    placeholder="John Doe"
+                  />
+                </div>
               </div>
-            </div>
-
+              
+              <div>
+                <label htmlFor="login-email" className="block text-sm font-medium text-gray-700">
+                  Email Address
+                </label>
+                <div className="mt-1">
+                  <input
+                    id="login-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+                    placeholder="your.email@company.com"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#2d4660] hover:bg-[#1d3a53] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2d4660] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Signing in...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                      </svg>
+                      Sign In
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+            
             {error && (
-              <div className="rounded-md bg-red-50 p-4">
+              <div className="rounded-md bg-red-50 p-4 mt-6">
                 <div className="flex">
                   <div className="ml-3">
                     <h3 className="text-sm font-medium text-red-800">{error}</h3>
@@ -535,32 +552,11 @@ This is an automated message from the Feature Voting System.
               </div>
             )}
 
-            <div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#2d4660] hover:bg-[#1d3a53] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2d4660] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Signing in...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="h-4 w-4 mr-2" />
-                    Sign In
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-
           <div className="mt-4">
             <button
               type="button"
               onClick={handleAzureLogin}
-              disabled={isLoading}
+              disabled={isLoadingMicrosoft}
               className="microsoft-signin-button"
               style={{
                 width: '100%',
@@ -570,21 +566,21 @@ This is an automated message from the Feature Voting System.
                 justifyContent: 'center',
                 paddingLeft: '12px',
                 paddingRight: '12px',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                opacity: isLoading ? 0.5 : 1
+                cursor: isLoadingMicrosoft ? 'not-allowed' : 'pointer',
+                opacity: isLoadingMicrosoft ? 0.5 : 1
               }}
               onMouseEnter={(e) => {
-                if (!isLoading) {
+                if (!isLoadingMicrosoft) {
                   e.currentTarget.style.backgroundColor = '#F5F5F5';
                 }
               }}
               onMouseLeave={(e) => {
-                if (!isLoading) {
+                if (!isLoadingMicrosoft) {
                   e.currentTarget.style.backgroundColor = '#FFFFFF';
                 }
               }}
             >
-              {isLoading ? (
+              {isLoadingMicrosoft ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2" style={{ borderColor: '#5E5E5E', marginRight: '12px' }}></div>
                   <span style={{ color: '#5E5E5E' }}>Signing in...</span>
@@ -787,10 +783,6 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
       // Generate secure tokens for grant access links
       const adminToken = await generateGrantAccessToken(requestEmail, selectedProductId, 'grant-admin');
       const stakeholderToken = await generateGrantAccessToken(requestEmail, selectedProductId, 'grant-stakeholder');
-      
-      // Get Supabase URL for Edge Function
-      const supabaseUrl = (supabase as any).supabaseUrl;
-      const grantAccessUrl = `${supabaseUrl}/functions/v1/grant-access`;
 
       // Create HTML email content with inline styles (matching EmailJS template format)
       // Using table-based layout for better email client compatibility

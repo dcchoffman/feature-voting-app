@@ -314,12 +314,12 @@ export default function SessionSelectionScreen() {
 
     // For drafts, skip required field validation
     if (!isDraft) {
-      if (!createSessionForm.title.trim()) {
-        errors.title = 'Session title is required';
-      }
-      if (!createSessionForm.goal.trim()) {
-        errors.goal = 'Session goal is required';
-      }
+    if (!createSessionForm.title.trim()) {
+      errors.title = 'Session title is required';
+    }
+    if (!createSessionForm.goal.trim()) {
+      errors.goal = 'Session goal is required';
+    }
     }
 
     // Votes validation (only if not using auto votes)
@@ -347,8 +347,8 @@ export default function SessionSelectionScreen() {
           createSessionForm.startDate.trim() && createSessionForm.endDate.trim()) {
         const start = parseLocalDate(createSessionForm.startDate);
         const end = parseLocalDate(createSessionForm.endDate);
-        if (end <= start) {
-          errors.endDate = 'End date must be after start date';
+    if (end <= start) {
+      errors.endDate = 'End date must be after start date';
         }
       }
     } else {
@@ -364,14 +364,14 @@ export default function SessionSelectionScreen() {
     
     // Product validation (only if not a draft)
     if (!isDraft) {
-      const hasNewProductName = newProductName.trim().length > 0;
-      if (!productError && modalProducts.length > 0 && !selectedProductId && !pendingProduct && !isCreatingNewProduct && !hasNewProductName) {
-        errors.product = 'Please select a product or enter a new product name';
-      }
-      
-      // If user is in "creating new product" mode but hasn't entered a name, show error
-      if (isCreatingNewProduct && !hasNewProductName) {
-        errors.product = 'Please enter a product name or select an existing product';
+    const hasNewProductName = newProductName.trim().length > 0;
+    if (!productError && modalProducts.length > 0 && !selectedProductId && !pendingProduct && !isCreatingNewProduct && !hasNewProductName) {
+      errors.product = 'Please select a product or enter a new product name';
+    }
+    
+    // If user is in "creating new product" mode but hasn't entered a name, show error
+    if (isCreatingNewProduct && !hasNewProductName) {
+      errors.product = 'Please enter a product name or select an existing product';
       }
     }
 
@@ -1739,7 +1739,7 @@ export default function SessionSelectionScreen() {
             <Pencil className="h-4 w-4" style={{ color: productColors.text }} />
           </div>
         )}
-      </div>
+                  </div>
     );
   };
 
@@ -1771,9 +1771,9 @@ export default function SessionSelectionScreen() {
             <h3 className="text-lg font-semibold">
               {session.title}
             </h3>
-          </div>
-          
-          <div className="p-6 flex flex-col flex-1">
+              </div>
+
+          <div className="flex flex-col flex-1" style={{ padding: '15px' }}>
           
           {/* Vote Button */}
           {(() => {
@@ -1811,7 +1811,7 @@ export default function SessionSelectionScreen() {
             }
 
             return (
-              <button
+                <button
                 onClick={(e) => {
                   e.stopPropagation();
                   if (!isDisabled) {
@@ -1828,7 +1828,7 @@ export default function SessionSelectionScreen() {
               >
                 <Vote className={`h-4 w-4 mr-2 ${isDisabled ? 'text-gray-500' : 'text-[#1E6154]'}`} />
                 <span className={`text-sm font-medium ${isDisabled ? 'text-gray-500' : 'text-[#1E6154]'}`}>{buttonText}</span>
-              </button>
+                </button>
             );
           })()}
 
@@ -1848,7 +1848,7 @@ export default function SessionSelectionScreen() {
                 {isPlaceholderDate(session.start_date) || isPlaceholderDate(session.end_date) ? (
                   <span className="text-gray-400 italic">Dates not set</span>
                 ) : (
-                  <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
+                <span>{formatDate(session.start_date)} - {formatDate(session.end_date)}</span>
                 )}
               </div>
               <span className={`inline-flex items-center ${status.text === 'Active' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-xs'} rounded-full font-medium ${status.color}`}>
@@ -1890,38 +1890,32 @@ export default function SessionSelectionScreen() {
               </div>
             </div>
             
-            {/* Session Admins and Stakeholders Links */}
-            <div className="flex items-center justify-center min-h-[48px] border-t border-gray-200 text-sm text-gray-600">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isClosed) {
+            {/* Session Admins and Stakeholders Links - Only show in admin/system-admin view */}
+            {viewMode !== 'stakeholder' && (
+              <div className="flex items-center justify-center min-h-[48px] border-t border-gray-200 text-sm text-gray-600">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleManageAdmins(e, session);
-                  }
-                }}
-                disabled={isClosed}
-                className={`flex items-center mr-3 ${isClosed ? 'text-gray-400 cursor-not-allowed' : 'text-[#2D4660] hover:text-[#1D3144] hover:underline cursor-pointer'}`}
-                style={isClosed ? { cursor: 'not-allowed' } : {}}
-              >
-                <Shield className="h-4 w-4 mr-1.5" />
-                {adminCounts[session.id] !== undefined ? adminCounts[session.id] : 0} Session Admin{adminCounts[session.id] !== 1 ? 's' : ''}
-              </button>
-              <span className="text-gray-400">•</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isClosed) {
+                  }}
+                  className="flex items-center mr-3 text-[#2D4660] hover:text-[#1D3144] hover:underline cursor-pointer"
+                >
+                  <Shield className="h-4 w-4 mr-1.5" />
+                  {adminCounts[session.id] !== undefined ? adminCounts[session.id] : 0} Session Admin{adminCounts[session.id] !== 1 ? 's' : ''}
+                </button>
+                <span className="text-gray-400">•</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleManageStakeholders(e, session);
-                  }
-                }}
-                disabled={isClosed}
-                className={`flex items-center ml-3 ${isClosed ? 'text-gray-400 cursor-not-allowed' : 'text-[#1E5461] hover:text-[#576C71] hover:underline cursor-pointer'}`}
-                style={isClosed ? { cursor: 'not-allowed' } : {}}
-              >
-                <Users className="h-4 w-4 mr-1.5" />
-                {stakeholderCounts[session.id] !== undefined ? stakeholderCounts[session.id] : 0} Stakeholder{stakeholderCounts[session.id] !== 1 ? 's' : ''}
-              </button>
-            </div>
+                  }}
+                  className="flex items-center ml-3 text-[#1E5461] hover:text-[#576C71] hover:underline cursor-pointer"
+                >
+                  <Users className="h-4 w-4 mr-1.5" />
+                  {stakeholderCounts[session.id] !== undefined ? stakeholderCounts[session.id] : 0} Stakeholder{stakeholderCounts[session.id] !== 1 ? 's' : ''}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Email Invite */}
@@ -1931,29 +1925,29 @@ export default function SessionSelectionScreen() {
               const shouldDisable = isClosed || isDraft;
               return (
                 <div className={`relative inline-block w-full ${shouldDisable ? 'group' : ''}`}>
-                  <button
-                    onClick={(e) => handleEmailInvite(e, session)}
+              <button
+                onClick={(e) => handleEmailInvite(e, session)}
                     disabled={shouldDisable}
-                    className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
+                className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
                       shouldDisable
-                        ? 'bg-gray-200 text-gray-500'
-                        : 'bg-blue-50 hover:bg-blue-100'
-                    }`}
+                    ? 'bg-gray-200 text-gray-500'
+                    : 'bg-blue-50 hover:bg-blue-100'
+                }`}
                     style={shouldDisable ? { cursor: 'not-allowed' } : {}}
-                  >
+              >
                     <Mail className={`h-4 w-4 mr-2 ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`} />
                     <span className={`text-sm font-medium ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
-                  </button>
+              </button>
                   {shouldDisable && (
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
                       {isDraft ? 'Draft Session' : 'Session Closed'}
-                      <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
-                    </div>
-                  )}
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
+                </div>
+              )}
                 </div>
               );
             })()}
-          </div>
+            </div>
           </div>
         </div>
       </>
@@ -2208,12 +2202,12 @@ export default function SessionSelectionScreen() {
                         <div key={normalizedProductName} className="relative" style={{ marginTop: '50px' }}>
                           {/* Wrapper Container */}
                           <div 
-                            className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
+                            className="rounded-lg rounded-tl-none border border-gray-200 relative overflow-visible"
                             style={{ 
                               backgroundColor: lightTintBackground,
                               borderColor: productColors.border || '#E5E7EB',
-                              paddingLeft: sessions.length === 1 ? '20px' : '24px',
-                              paddingRight: sessions.length === 1 ? '20px' : '24px'
+                              padding: '24px',
+                              marginTop: viewMode === 'stakeholder' ? '25px' : undefined
                             }}
                           >
                             {/* Product Name Tab - On Top */}
@@ -2309,8 +2303,8 @@ export default function SessionSelectionScreen() {
                             )}
                             
                             {/* Sessions Grid */}
-                            <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                              {sessionsToShow.map((session) => {
+                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                              {sessionsToShow.map((session, index) => {
                                 const status = getSessionStatus(session);
                                 const isClosed = status.text === 'Closed';
                                 const StatusIcon = status.icon;
@@ -2323,7 +2317,7 @@ export default function SessionSelectionScreen() {
                                 return (
                                   <div
                                     key={session.id}
-                                    className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                    className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer border"
                                     style={{ 
                                       borderColor: sessionProductColors.border, 
                                       borderWidth: '1px',
@@ -2333,7 +2327,7 @@ export default function SessionSelectionScreen() {
                                     onMouseLeave={() => setHoveredSessionCard(null)}
                                     onClick={() => handleSelectSession(session)}
                                   >
-                                    <div className="p-6 flex flex-col h-full">
+                                    <div className="flex flex-col h-full" style={{ padding: '15px' }}>
                                       {/* Voting Status Badge */}
                                       <div className="flex justify-end items-start mb-4">
                                         {hasVoted ? (
@@ -2451,7 +2445,7 @@ export default function SessionSelectionScreen() {
                     
                     {/* Single-session product groups in a 3-column grid */}
                     {singleSessionProductGroups.length > 0 && (
-                      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" style={{ marginTop: '50px' }}>
+                      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" style={{ marginTop: viewMode === 'stakeholder' ? '30px' : '50px' }}>
                         {singleSessionProductGroups.map(({ key: normalizedProductName, sessions }) => {
                           const productName = getDisplayProductName(sessions[0], productLookup);
                           const productColorHex = sessions[0]?.product_id ? productColorLookup[sessions[0].product_id] : undefined;
@@ -2473,12 +2467,12 @@ export default function SessionSelectionScreen() {
                             <div key={normalizedProductName} className="relative">
                               {/* Wrapper Container */}
                               <div 
-                                className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
+                                className="rounded-lg rounded-tl-none border border-gray-200 relative overflow-visible"
                                 style={{ 
                                   backgroundColor: lightTintBackground,
                                   borderColor: productColors.border || '#E5E7EB',
-                                  paddingLeft: '20px',
-                                  paddingRight: '20px'
+                                  padding: '24px',
+                                  marginTop: viewMode === 'stakeholder' ? '25px' : undefined
                                 }}
                               >
                                 {/* Product Name Tab - On Top */}
@@ -2540,7 +2534,7 @@ export default function SessionSelectionScreen() {
                                   return (
                                     <div
                                       key={session.id}
-                                      className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                      className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer border"
                                       style={{ 
                                         borderColor: sessionProductColors.border, 
                                         borderWidth: '1px',
@@ -2660,7 +2654,7 @@ export default function SessionSelectionScreen() {
                                   </button>
                               </div>
                               )}
-                              <div className="p-6 flex flex-col h-full">
+                              <div className="flex flex-col h-full" style={{ padding: '15px' }}>
                                 {/* Voting Status Badge */}
                                 <div className="flex justify-end items-start mb-4">
                                   {hasVoted ? (
@@ -2810,7 +2804,7 @@ export default function SessionSelectionScreen() {
                         <BadgeCheck className="h-4 w-4 flex-shrink-0" />
                         <span className="overflow-hidden text-ellipsis">{productName}</span>
                       </div>
-                      <div className="p-6 flex flex-col h-full">
+                      <div className="flex flex-col h-full" style={{ padding: '15px' }}>
                         {/* Voting Status Badge */}
                         <div className="flex justify-end items-start mb-4">
                           {hasVoted ? (
@@ -2976,12 +2970,11 @@ export default function SessionSelectionScreen() {
                             <div key={normalizedProductName} className="relative" style={{ marginTop: '50px' }}>
                               {/* Wrapper Container */}
                               <div 
-                                className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
+                                className="rounded-lg rounded-tl-none border border-gray-200 relative overflow-visible"
                                 style={{ 
                                   backgroundColor: lightTintBackground,
                                   borderColor: productColors.border || '#E5E7EB',
-                                  paddingLeft: sessions.length === 1 ? '20px' : '24px',
-                                  paddingRight: sessions.length === 1 ? '20px' : '24px'
+                                  padding: '24px'
                                 }}
                               >
                                 {/* Product Name Tab - On Top */}
@@ -3077,7 +3070,7 @@ export default function SessionSelectionScreen() {
                                 )}
                                 
                                 {/* Sessions Grid */}
-                                <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                                   {sessionsToShow.map((session) => {
                                     const status = getSessionStatus(session);
                                     const StatusIcon = status.icon;
@@ -3090,7 +3083,7 @@ export default function SessionSelectionScreen() {
                                     return (
                                       <div
                                         key={session.id}
-                                        className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                        className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer border"
                                         style={{ 
                                           borderColor: sessionProductColors.border, 
                                           borderWidth: '1px',
@@ -3207,13 +3200,14 @@ export default function SessionSelectionScreen() {
                                           }}
                                       >
                                         <div 
-                                          className="p-6 flex flex-col h-full items-center justify-center min-h-[200px] relative rounded-lg transition-all duration-300" 
+                                          className="flex flex-col h-full items-center justify-center relative rounded-lg transition-all duration-300"
                                           style={{
-                                          backgroundColor: 'transparent',
-                                          backgroundImage: (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName)
-                                            ? `radial-gradient(circle at center, ${productColors.badgeBackground || 'rgba(200, 146, 18, 0.15)'}, transparent 70%)`
-                                            : 'none'
-                                        }}
+                                            padding: '15px',
+                                            backgroundColor: 'transparent',
+                                            backgroundImage: (hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName)
+                                              ? `radial-gradient(circle at center, ${productColors.badgeBackground || 'rgba(200, 146, 18, 0.15)'}, transparent 70%)`
+                                              : 'none'
+                                          }}
                                       >
                                         {/* Sparkles and Stars - many with variation, all dim */}
                                         {(hoveredPlusButton === normalizedProductName || hoveredThirdCard === normalizedProductName) && (
@@ -3328,12 +3322,11 @@ export default function SessionSelectionScreen() {
                                 <div key={normalizedProductName} className="relative">
                                   {/* Wrapper Container */}
                                   <div 
-                                    className="rounded-lg rounded-tl-none border border-gray-200 pt-2 pb-6 relative overflow-visible"
+                                    className="rounded-lg rounded-tl-none border border-gray-200 relative overflow-visible"
                                     style={{ 
                                       backgroundColor: lightTintBackground,
                                       borderColor: productColors.border || '#E5E7EB',
-                                      paddingLeft: '20px',
-                                      paddingRight: '20px'
+                                      padding: '24px'
                                     }}
                                   >
                                     {/* Product Name Tab - On Top */}
@@ -3395,7 +3388,7 @@ export default function SessionSelectionScreen() {
                                       return (
                                         <div
                                           key={session.id}
-                                          className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                          className="relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow cursor-pointer border"
                                           style={{ 
                                             borderColor: sessionProductColors.border, 
                                             borderWidth: '1px',
@@ -3428,7 +3421,7 @@ export default function SessionSelectionScreen() {
                         
                         {/* Single sessions (both single-product sessions and no-product sessions) in one grid at bottom */}
                         {(singleSessionProducts.length > 0 || sessionsWithoutProducts.length > 0) && (
-                          <div className="grid grid-cols-1 gap-0 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                             {[...singleSessionProducts, ...sessionsWithoutProducts].map((session) => {
                               const status = getSessionStatus(session);
                               const StatusIcon = status.icon;
@@ -3443,7 +3436,7 @@ export default function SessionSelectionScreen() {
                               return (
                                 <div
                                   key={session.id}
-                                  className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer mt-6 border"
+                                  className="relative z-10 bg-white overflow-visible shadow-md rounded-lg rounded-tl-none hover:shadow-lg transition-shadow cursor-pointer border"
                                   style={{ 
                                     borderColor: sessionProductColors.border, 
                                     borderWidth: '1px',
@@ -3518,8 +3511,8 @@ export default function SessionSelectionScreen() {
                             })}
                             {/* Create Session Card - Only show on desktop when there are exactly 2 admin sessions total and single sessions are displayed */}
                             {adminSessionsToDisplay.length === 2 && (singleSessionProducts.length + sessionsWithoutProducts.length) > 0 && (
-                              <div className="hidden lg:block relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow mt-6 border border-gray-200">
-                                <div className="p-6 flex flex-col h-full items-end justify-center min-h-[200px]">
+                              <div className="hidden lg:block relative z-10 bg-white overflow-visible shadow-md rounded-lg hover:shadow-lg transition-shadow border border-gray-200">
+                                <div className="flex flex-col h-full items-end justify-center" style={{ padding: '15px' }}>
                                   <button
                                     onClick={() => {
                                       setAllowCreateProduct(true);
@@ -3913,16 +3906,16 @@ export default function SessionSelectionScreen() {
               </p>
             </div>
             <div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Start Date *
-                  </label>
-                  <input
-                    type="date"
-                    name="startDate"
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date *
+                </label>
+                <input
+                  type="date"
+                  name="startDate"
                     value={createSessionForm.startDate || ''}
-                    onChange={handleCreateSessionChange}
+                  onChange={handleCreateSessionChange}
                     onFocus={(e) => {
                       if (!createSessionForm.startDate) {
                         handleDateFocus('startDate');
@@ -3949,16 +3942,16 @@ export default function SessionSelectionScreen() {
                       {createSessionErrors.startDate}
                     </p>
                   )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    End Date *
-                  </label>
-                  <input
-                    type="date"
-                    name="endDate"
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Date *
+                </label>
+                <input
+                  type="date"
+                  name="endDate"
                     value={createSessionForm.endDate || ''}
-                    onChange={handleCreateSessionChange}
+                  onChange={handleCreateSessionChange}
                     onFocus={(e) => {
                       if (!createSessionForm.endDate) {
                         handleDateFocus('endDate');
@@ -3966,8 +3959,8 @@ export default function SessionSelectionScreen() {
                     }}
                     autoComplete="off"
                     className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-0 focus:border-[#2d4660] [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
-                      createSessionErrors.endDate ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                    createSessionErrors.endDate ? 'border-red-500' : 'border-gray-300'
+                  }`}
                     style={!createSessionForm.endDate ? { 
                       color: 'transparent',
                       position: 'relative'
@@ -3979,14 +3972,14 @@ export default function SessionSelectionScreen() {
                         e.target.style.color = '';
                       }
                     }}
-                  />
-                  {createSessionErrors.endDate && (
-                    <p className="mt-1 text-sm text-red-600 flex items-center">
-                      <AlertCircle className="h-4 w-4 mr-1" />
-                      {createSessionErrors.endDate}
-                    </p>
-                  )}
-                </div>
+                />
+                {createSessionErrors.endDate && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {createSessionErrors.endDate}
+                  </p>
+                )}
+              </div>
               </div>
               {(createSessionForm.startDate || createSessionForm.endDate) && (
                 <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -3399,17 +3399,21 @@ useEffect(() => {
   useEffect(() => {
     async function loadFilterOptions() {
       const fallbackProjects = getNewMillProjects();
+      const currentProject = azureDevOpsConfig.project;
+      
+      // Immediately clear all filter options when project changes
       setAvailableProjects(fallbackProjects);
       setAvailableStates([]);
       setAvailableAreaPaths([]);
       setAvailableTags([]);
 
-      if (azureDevOpsConfig.enabled && azureDevOpsConfig.accessToken && azureDevOpsConfig.project) {
+      if (azureDevOpsConfig.enabled && azureDevOpsConfig.accessToken && currentProject) {
         try {
           const validToken = await ensureValidToken(azureDevOpsConfig);
           const configWithValidToken = {
             ...azureDevOpsConfig,
-            accessToken: validToken
+            accessToken: validToken,
+            project: currentProject // Ensure we use the current project
           };
 
           const [projects, states, areaPaths, tags] = await Promise.all([
@@ -3422,13 +3426,20 @@ useEffect(() => {
             azureService.fetchTags(configWithValidToken)
           ]);
 
-          setAvailableProjects(projects.length > 0 ? projects : fallbackProjects);
-          setAvailableStates(states);
-          setAvailableAreaPaths(areaPaths);
-          setAvailableTags(tags);
+          // Only set options if project hasn't changed during the fetch
+          // This prevents race conditions where old fetches complete after project change
+          if (azureDevOpsConfig.project === currentProject) {
+            setAvailableProjects(projects.length > 0 ? projects : fallbackProjects);
+            setAvailableStates(states);
+            setAvailableAreaPaths(areaPaths);
+            setAvailableTags(tags);
+          }
         } catch (error) {
           console.error('Error loading filter options:', error);
-          setAvailableProjects(fallbackProjects);
+          // Only set fallback projects if project hasn't changed
+          if (azureDevOpsConfig.project === currentProject) {
+            setAvailableProjects(fallbackProjects);
+          }
         }
       }
     }

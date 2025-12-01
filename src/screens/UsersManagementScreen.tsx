@@ -152,13 +152,17 @@ function ProductFilterDropdown({ products, value, onChange }: ProductFilterDropd
     }
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      // Calculate position when opening
+      // Calculate position when opening - use requestAnimationFrame to avoid forced reflow
       if (buttonRef.current) {
-        const rect = buttonRef.current.getBoundingClientRect();
-        setDropdownPosition({
-          top: rect.bottom + window.scrollY + 4,
-          left: rect.left + window.scrollX,
-          width: rect.width
+        requestAnimationFrame(() => {
+          if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setDropdownPosition({
+              top: rect.bottom + window.scrollY + 4,
+              left: rect.left + window.scrollX,
+              width: rect.width
+            });
+          }
         });
       }
     }
@@ -490,6 +494,7 @@ export default function UsersManagementScreen() {
   const [filterRole, setFilterRole] = useState<'all' | 'system-admin' | 'session-admin' | 'stakeholder' | 'none'>('all');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [dropdownPositions, setDropdownPositions] = useState<Record<string, { top?: string; right?: string; left?: string }>>({});
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const [expandedSessions, setExpandedSessions] = useState<{ userId: string; role: 'admin' | 'stakeholder' } | null>(null);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null); // Format: "userId-sessionId"
@@ -697,6 +702,42 @@ export default function UsersManagementScreen() {
       document.removeEventListener('touchstart', handleOutside as any);
     };
   }, [mobileMenuOpen]);
+
+  // Calculate dropdown position when it opens - use requestAnimationFrame to avoid forced reflow
+  useEffect(() => {
+    if (!openDropdown) {
+      setDropdownPositions({});
+      return;
+    }
+
+    const calculatePosition = () => {
+      const ref = dropdownRefs.current[openDropdown];
+      if (!ref) return;
+
+      requestAnimationFrame(() => {
+        const rect = ref.getBoundingClientRect();
+        if (window.innerWidth < 768) {
+          // Mobile: use fixed positioning
+          setDropdownPositions({
+            [openDropdown]: {
+              top: `${rect.bottom + 4}px`,
+              right: `${window.innerWidth - rect.right + 4}px`,
+              left: 'auto'
+            }
+          });
+        } else {
+          // Desktop: use absolute positioning (default)
+          setDropdownPositions({
+            [openDropdown]: {}
+          });
+        }
+      });
+    };
+
+    // Small delay to ensure DOM is ready
+    const timeoutId = setTimeout(calculatePosition, 0);
+    return () => clearTimeout(timeoutId);
+  }, [openDropdown]);
 
   // Handle dropdown close when clicking outside
   useEffect(() => {
@@ -1152,10 +1193,10 @@ export default function UsersManagementScreen() {
         
         // Filter by role (checking if user has the role in the filtered sessions)
         if (filterRole !== 'all') {
-          switch (filterRole) {
-            case 'system-admin':
-              return user.roles.isSystemAdmin;
-            case 'session-admin':
+        switch (filterRole) {
+          case 'system-admin':
+            return user.roles.isSystemAdmin;
+          case 'session-admin':
               // Check if user is admin in any of the product-filtered sessions
               if (filterProductId) {
                 return productFilteredSessions.some(session => 
@@ -1163,7 +1204,7 @@ export default function UsersManagementScreen() {
                 );
               }
               return user.roles.sessionAdminCount > 0;
-            case 'stakeholder':
+          case 'stakeholder':
               // Check if user is stakeholder in any of the product-filtered sessions
               if (filterProductId) {
                 return productFilteredSessions.some(session => 
@@ -1171,13 +1212,13 @@ export default function UsersManagementScreen() {
                 );
               }
               return user.roles.stakeholderSessionCount > 0;
-            case 'none':
-              return !user.roles.isSystemAdmin &&
-                     user.roles.sessionAdminCount === 0 &&
-                     user.roles.stakeholderSessionCount === 0;
-            default:
-              return true;
-          }
+          case 'none':
+            return !user.roles.isSystemAdmin &&
+                   user.roles.sessionAdminCount === 0 &&
+                   user.roles.stakeholderSessionCount === 0;
+          default:
+            return true;
+        }
         }
         
         // If only product filter (no role filter), user passes if they have sessions in that product
@@ -1272,7 +1313,7 @@ export default function UsersManagementScreen() {
       // But only if there's no filter in the URL
       if (!searchParams.get('filter')) {
         setFilterRole('all');
-      }
+    }
     }
   }, [viewMode, searchParams, filterRole]);
 
@@ -2410,7 +2451,7 @@ export default function UsersManagementScreen() {
                             Duplicate ({getDuplicateCount(user)})
                           </span>
                         )}
-                      </div>
+                    </div>
                       <p className="text-sm text-gray-500 truncate mt-1">{user.email}</p>
                       {(() => {
                         const userProducts = getUserProducts(user);
@@ -2459,21 +2500,7 @@ export default function UsersManagementScreen() {
                         {openDropdown === user.id && user.id !== currentUser?.id && (
                           <div 
                             className="fixed md:absolute md:right-0 md:mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]" 
-                            style={(() => {
-                              const ref = dropdownRefs.current[user.id];
-                              if (!ref) return {};
-                              const rect = ref.getBoundingClientRect();
-                              if (window.innerWidth < 768) {
-                                // Mobile: use fixed positioning
-                                return {
-                                  top: `${rect.bottom + 4}px`,
-                                  right: `${window.innerWidth - rect.right + 4}px`,
-                                  left: 'auto'
-                                };
-                              }
-                              // Desktop: use absolute positioning (default)
-                              return {};
-                            })()}
+                            style={dropdownPositions[user.id] || {}}
                           >
                             <div className="py-1">
                               <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-200">

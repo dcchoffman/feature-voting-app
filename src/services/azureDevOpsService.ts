@@ -346,7 +346,7 @@ export async function fetchAreaPathsForTypeAndStates(
       return [];
     }
 
-    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.AreaPath&api-version=7.1`;
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.AreaPath,System.TeamProject&api-version=7.1`;
 
     const batchResponse = await fetch(batchUrl, {
       headers: {
@@ -362,9 +362,17 @@ export async function fetchAreaPathsForTypeAndStates(
 
     const workItems = await batchResponse.json();
     const areaPathsSet = new Set<string>();
+    const currentProject = config.project?.toLowerCase() || '';
 
     if (workItems.value && Array.isArray(workItems.value)) {
       workItems.value.forEach((item: any) => {
+        // Verify the work item belongs to the current project
+        const workItemProject = item.fields?.['System.TeamProject']?.toLowerCase() || '';
+        if (workItemProject !== currentProject) {
+          // Skip work items from other projects
+          return;
+        }
+        
         const areaPath = item.fields?.['System.AreaPath'];
         if (areaPath) {
           areaPathsSet.add(areaPath);
@@ -423,7 +431,7 @@ export async function fetchTypesAndAreaPathsForStates(
       return { types: [], areaPaths: [], tags: [] };
     }
 
-    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.AreaPath,System.Tags&api-version=7.1`;
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.AreaPath,System.Tags,System.TeamProject&api-version=7.1`;
 
     const batchResponse = await fetch(batchUrl, {
       headers: {
@@ -441,9 +449,17 @@ export async function fetchTypesAndAreaPathsForStates(
     const typesSet = new Set<string>();
     const areaPathsSet = new Set<string>();
     const tagsSet = new Set<string>();
+    const currentProject = config.project?.toLowerCase() || '';
 
     if (workItems.value && Array.isArray(workItems.value)) {
       workItems.value.forEach((item: any) => {
+        // Verify the work item belongs to the current project
+        const workItemProject = item.fields?.['System.TeamProject']?.toLowerCase() || '';
+        if (workItemProject !== currentProject) {
+          // Skip work items from other projects
+          return;
+        }
+        
         const type = item.fields?.['System.WorkItemType'];
         const areaPath = item.fields?.['System.AreaPath'];
         const tags = item.fields?.['System.Tags'];
@@ -542,7 +558,7 @@ export async function fetchTypesAndStatesForAreaPath(
 
     // Fetch work item details to get types and states (limit to 200 items)
     const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
-    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.State&api-version=7.1`;
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.State,System.TeamProject&api-version=7.1`;
 
     const batchResponse = await fetch(batchUrl, {
       headers: {
@@ -559,12 +575,21 @@ export async function fetchTypesAndStatesForAreaPath(
     const workItems = await batchResponse.json();
     
     // Extract unique types and states
+    // Only include work items that belong to the current project
     const typesSet = new Set<string>();
     const statesSet = new Set<string>();
+    const currentProject = config.project?.toLowerCase() || '';
     
     if (workItems.value && Array.isArray(workItems.value)) {
       workItems.value.forEach((item: any) => {
         if (item.fields) {
+          // Verify the work item belongs to the current project
+          const workItemProject = item.fields['System.TeamProject']?.toLowerCase() || '';
+          if (workItemProject !== currentProject) {
+            // Skip work items from other projects
+            return;
+          }
+          
           if (item.fields['System.WorkItemType']) {
             typesSet.add(item.fields['System.WorkItemType']);
           }
@@ -624,7 +649,7 @@ export async function fetchTypesAndStatesForTags(
 
     // Fetch work item details to get types, states, and area paths (limit to 200 items)
     const ids = data.workItems.map((wi: any) => wi.id).slice(0, 200);
-    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.State,System.AreaPath&api-version=7.1`;
+    const batchUrl = `https://dev.azure.com/${config.organization}/${config.project}/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.WorkItemType,System.State,System.AreaPath,System.TeamProject&api-version=7.1`;
 
     const batchResponse = await fetch(batchUrl, {
       headers: {
@@ -641,13 +666,22 @@ export async function fetchTypesAndStatesForTags(
     const workItems = await batchResponse.json();
     
     // Extract unique types, states, and area paths
+    // Only include work items that belong to the current project
     const typesSet = new Set<string>();
     const statesSet = new Set<string>();
     const areaPathsSet = new Set<string>();
+    const currentProject = config.project?.toLowerCase() || '';
     
     if (workItems.value && Array.isArray(workItems.value)) {
       workItems.value.forEach((item: any) => {
         if (item.fields) {
+          // Verify the work item belongs to the current project
+          const workItemProject = item.fields['System.TeamProject']?.toLowerCase() || '';
+          if (workItemProject !== currentProject) {
+            // Skip work items from other projects
+            return;
+          }
+          
           if (item.fields['System.WorkItemType']) {
             typesSet.add(item.fields['System.WorkItemType']);
           }

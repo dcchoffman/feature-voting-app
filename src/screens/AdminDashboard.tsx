@@ -643,13 +643,30 @@ function FilterForm({
   const [isFetchingCount, setIsFetchingCount] = useState(false);
   const [isLoadingAreaPaths, setIsLoadingAreaPaths] = useState(false);
   const [isLoadingTags, setIsLoadingTags] = useState(false);
+  const [fetchTrigger, setFetchTrigger] = useState(0);
   const countTimeoutRef = useRef<number | null>(null);
   const prevShowPreviewModalRef = useRef(false);
+  const needsFetchAfterTagCycle = useRef(false);
+  const tagCycleStartTime = useRef<number | null>(null);
+  const configRef = useRef(config);
+  const fetchFeatureCountRef = useRef<(() => Promise<void>) | null>(null);
   
   // Flags to prevent cascading updates
   const isUpdatingFromAreaPath = useRef(false);
   const isUpdatingFromTags = useRef(false);
   const isUpdatingFromStates = useRef(false);
+  const tagUpdateTimeoutRef = useRef<number | null>(null);
+  const isInTagUpdateCycle = useRef(false);
+  const isClearingFilters = useRef(false);
+  const prevWorkItemTypesRef = useRef<string[]>([]);
+  const prevStatesRef = useRef<string[]>([]);
+  const prevAreaPathsRef = useRef<string[]>([]);
+  const manualFilterChangeTimeoutRef = useRef<number | null>(null);
+  const lastManualRemovalTimeRef = useRef<number | null>(null);
+  // Track what tags populated so we can detect manual removals
+  const tagPopulatedTypesRef = useRef<string[]>([]);
+  const tagPopulatedStatesRef = useRef<string[]>([]);
+  const tagPopulatedAreaPathsRef = useRef<string[]>([]);
   
   const defaultFilters = {
     workItemTypes: [],
@@ -672,11 +689,36 @@ function FilterForm({
   });
   
   const clearFilters = useCallback(() => {
+    // Set flag to prevent tag auto-populate from running
+    isClearingFilters.current = true;
+    
     reset({ ...defaultFilters });
     setShowAdvanced(false);
     isUpdatingFromAreaPath.current = false;
     isUpdatingFromTags.current = false;
     isUpdatingFromStates.current = false;
+    // Clear tag cycle flags
+    isInTagUpdateCycle.current = false;
+    needsFetchAfterTagCycle.current = false;
+    tagCycleStartTime.current = null;
+    if (tagUpdateTimeoutRef.current !== null) {
+      clearTimeout(tagUpdateTimeoutRef.current);
+      tagUpdateTimeoutRef.current = null;
+    }
+    if (manualFilterChangeTimeoutRef.current !== null) {
+      clearTimeout(manualFilterChangeTimeoutRef.current);
+      manualFilterChangeTimeoutRef.current = null;
+    }
+    lastManualRemovalTimeRef.current = null;
+    // Clear tag-populated tracking
+    tagPopulatedTypesRef.current = [];
+    tagPopulatedStatesRef.current = [];
+    tagPopulatedAreaPathsRef.current = [];
+    
+    // Clear the flag after a delay to allow the reset to complete
+    setTimeout(() => {
+      isClearingFilters.current = false;
+    }, 500);
   }, [reset]);
 
   useEffect(() => {
@@ -687,6 +729,92 @@ function FilterForm({
   const selectedStates = watch('states');
   const selectedAreaPaths = watch('areaPaths');
   const selectedTags = watch('tags');
+
+  // Detect manual filter removal and update filters based on remaining selections
+  useEffect(() => {
+    // Only process if not updating from tags/area paths/states and not clearing all filters
+    if (isUpdatingFromTags.current || isInTagUpdateCycle.current || isUpdatingFromAreaPath.current || isUpdatingFromStates.current || isClearingFilters.current) {
+      // Update previous values but don't process changes
+      prevWorkItemTypesRef.current = selectedWorkItemTypes || [];
+      prevStatesRef.current = selectedStates || [];
+      prevAreaPathsRef.current = selectedAreaPaths || [];
+      return;
+    }
+
+    const workItemTypesReduced = selectedWorkItemTypes.length < prevWorkItemTypesRef.current.length;
+    const statesReduced = selectedStates.length < prevStatesRef.current.length;
+    const areaPathsReduced = selectedAreaPaths.length < prevAreaPathsRef.current.length;
+    
+    // If any filter was manually reduced, prevent tag auto-populate and update based on remaining filters
+    if (workItemTypesReduced || statesReduced || areaPathsReduced) {
+      // Record the time of manual removal
+      lastManualRemovalTimeRef.current = Date.now();
+      
+      // Immediately update previous values to reflect the reduction (before tag effect can run)
+      prevWorkItemTypesRef.current = selectedWorkItemTypes || [];
+      prevStatesRef.current = selectedStates || [];
+      prevAreaPathsRef.current = selectedAreaPaths || [];
+      
+      // Immediately prevent tag auto-populate from running
+      isClearingFilters.current = true;
+      
+      if (manualFilterChangeTimeoutRef.current !== null) {
+        clearTimeout(manualFilterChangeTimeoutRef.current);
+      }
+      
+      // Update filters based on remaining selections (most recent change takes priority)
+      const updateBasedOnRemainingFilters = async () => {
+        // Clear tag-populated refs since we're updating from other sources
+        if (workItemTypesReduced) tagPopulatedTypesRef.current = [];
+        if (statesReduced) tagPopulatedStatesRef.current = [];
+        if (areaPathsReduced) tagPopulatedAreaPathsRef.current = [];
+        
+        // If work item types are selected, update states, area paths, and tags
+        if (selectedWorkItemTypes && selectedWorkItemTypes.length > 0) {
+          if (onFetchStatesForType) {
+            await onFetchStatesForType(selectedWorkItemTypes[0]);
+          }
+          if (onFetchAreaPathsForTypeAndState) {
+            await onFetchAreaPathsForTypeAndState(selectedWorkItemTypes[0], selectedStates || []);
+          }
+          if (onFetchTagsForTypeStateAndAreaPath) {
+            await onFetchTagsForTypeStateAndAreaPath(selectedWorkItemTypes[0], selectedStates || [], selectedAreaPaths || []);
+          }
+        }
+        // If states are selected but no work item types, update based on states
+        else if (selectedStates && selectedStates.length > 0 && onFetchTypesAndAreaPathsForStates) {
+          await onFetchTypesAndAreaPathsForStates(selectedStates);
+        }
+        // If area paths are selected but no work item types or states, update based on area paths
+        else if (selectedAreaPaths && selectedAreaPaths.length > 0 && onFetchTypesAndStatesForAreaPath) {
+          await onFetchTypesAndStatesForAreaPath(selectedAreaPaths);
+        }
+        
+        // Clear the flag and timestamp after updates complete
+        setTimeout(() => {
+          manualFilterChangeTimeoutRef.current = null;
+          // Keep the flag and timestamp longer to prevent tag re-population
+          setTimeout(() => {
+            isClearingFilters.current = false;
+            // Keep timestamp even longer to ensure tag effect doesn't run
+            setTimeout(() => {
+              lastManualRemovalTimeRef.current = null;
+            }, 2000);
+          }, 1000);
+        }, 500);
+      };
+      
+      // Delay to allow the form to update first, but set flag immediately above
+      manualFilterChangeTimeoutRef.current = window.setTimeout(() => {
+        updateBasedOnRemainingFilters();
+      }, 100);
+    } else {
+      // No reduction detected, update previous values normally
+      prevWorkItemTypesRef.current = selectedWorkItemTypes || [];
+      prevStatesRef.current = selectedStates || [];
+      prevAreaPathsRef.current = selectedAreaPaths || [];
+    }
+  }, [selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, onFetchStatesForType, onFetchAreaPathsForTypeAndState, onFetchTagsForTypeStateAndAreaPath, onFetchTypesAndAreaPathsForStates, onFetchTypesAndStatesForAreaPath]);
   const advancedQuery = watch('query');
 
   // Build query from filters
@@ -741,7 +869,10 @@ function FilterForm({
 
   // Fetch states when work item type changes
   useEffect(() => {
-    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current || isUpdatingFromStates.current) {
+    // Don't fetch states if we're updating from area paths, tags, states, or in a tag update cycle
+    // Also check cooldown timeout to prevent overwriting states set by tags
+    // This prevents flickering when tags are selected first
+    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current || isUpdatingFromStates.current || isInTagUpdateCycle.current || tagUpdateTimeoutRef.current !== null) {
       return;
     }
 
@@ -757,7 +888,8 @@ function FilterForm({
 
   // Fetch area paths when work item type or states change
   useEffect(() => {
-    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current) {
+    // Don't fetch if we're updating from area paths, tags, or in a tag update cycle
+    if (isUpdatingFromAreaPath.current || isUpdatingFromTags.current || isInTagUpdateCycle.current) {
       return;
     }
 
@@ -780,7 +912,20 @@ function FilterForm({
 
   // Fetch tags when filters change
   useEffect(() => {
-    if (isUpdatingFromTags.current) {
+    // Don't fetch tags if we're currently updating from tags, area paths, or states
+    // This prevents infinite loops when tags are selected first
+    if (isUpdatingFromTags.current || isUpdatingFromAreaPath.current || isUpdatingFromStates.current) {
+      return;
+    }
+
+    // Don't fetch tags if we're still in the cooldown period after a tag-initiated update
+    if (tagUpdateTimeoutRef.current !== null) {
+      return;
+    }
+
+    // Don't fetch tags if we're in a tag-initiated update cycle
+    // This prevents the fetch from running when tags populate other fields
+    if (isInTagUpdateCycle.current) {
       return;
     }
 
@@ -850,30 +995,141 @@ function FilterForm({
   // Auto-populate from Tags
   useEffect(() => {
     if (!onFetchTypesAndStatesForTags) return;
-    if (isUpdatingFromAreaPath.current || isUpdatingFromStates.current) return;
+    // Don't run if we're clearing filters, manually removing filters, or updating from other sources
+    if (isClearingFilters.current || manualFilterChangeTimeoutRef.current !== null || isUpdatingFromAreaPath.current || isUpdatingFromStates.current) return;
+    
+    // Check if a manual removal happened recently (within last 5 seconds)
+    if (lastManualRemovalTimeRef.current !== null) {
+      const timeSinceRemoval = Date.now() - lastManualRemovalTimeRef.current;
+      if (timeSinceRemoval < 5000) {
+        // Manual removal happened recently, don't re-populate from tags
+        return;
+      }
+      // Clear the timestamp if it's old
+      lastManualRemovalTimeRef.current = null;
+    }
+    
+    // Also check if filters were just manually reduced (prevent re-population from tags)
+    // Compare current lengths with previous lengths - if reduced, it was manually removed
+    const workItemTypesReduced = (selectedWorkItemTypes?.length || 0) < (prevWorkItemTypesRef.current?.length || 0);
+    const statesReduced = (selectedStates?.length || 0) < (prevStatesRef.current?.length || 0);
+    const areaPathsReduced = (selectedAreaPaths?.length || 0) < (prevAreaPathsRef.current?.length || 0);
+    
+    // Also check if current values are a subset of tag-populated values (more reliable detection)
+    const currentTypes = selectedWorkItemTypes || [];
+    const currentStates = selectedStates || [];
+    const currentAreaPaths = selectedAreaPaths || [];
+    const tagTypes = tagPopulatedTypesRef.current || [];
+    const tagStates = tagPopulatedStatesRef.current || [];
+    const tagAreaPaths = tagPopulatedAreaPathsRef.current || [];
+    
+    const isSubsetOfTagTypes = tagTypes.length > 0 && currentTypes.length < tagTypes.length && 
+      currentTypes.every(type => tagTypes.includes(type));
+    const isSubsetOfTagStates = tagStates.length > 0 && currentStates.length < tagStates.length && 
+      currentStates.every(state => tagStates.includes(state));
+    const isSubsetOfTagAreaPaths = tagAreaPaths.length > 0 && currentAreaPaths.length < tagAreaPaths.length && 
+      currentAreaPaths.every(path => tagAreaPaths.includes(path));
+    
+    if (workItemTypesReduced || statesReduced || areaPathsReduced || 
+        isSubsetOfTagTypes || isSubsetOfTagStates || isSubsetOfTagAreaPaths) {
+      // Filters were manually reduced, don't re-populate from tags
+      // Update previous values immediately to prevent re-check
+      prevWorkItemTypesRef.current = selectedWorkItemTypes || [];
+      prevStatesRef.current = selectedStates || [];
+      prevAreaPathsRef.current = selectedAreaPaths || [];
+      lastManualRemovalTimeRef.current = Date.now();
+      return;
+    }
 
     if (!selectedTags || selectedTags.length === 0) {
+      // Clear timeout ref and cycle flag when tags are cleared
+      if (tagUpdateTimeoutRef.current !== null) {
+        clearTimeout(tagUpdateTimeoutRef.current);
+        tagUpdateTimeoutRef.current = null;
+      }
+      isInTagUpdateCycle.current = false;
+      tagCycleStartTime.current = null;
+      needsFetchAfterTagCycle.current = false;
+      lastManualRemovalTimeRef.current = null;
+      // Clear tag-populated tracking
+      tagPopulatedTypesRef.current = [];
+      tagPopulatedStatesRef.current = [];
+      tagPopulatedAreaPathsRef.current = [];
       return;
     }
 
     isUpdatingFromTags.current = true;
+    isInTagUpdateCycle.current = true;
+    tagCycleStartTime.current = Date.now();
+
+    // Set a longer cooldown period to prevent tag fetch from running immediately after tag-initiated updates
+    if (tagUpdateTimeoutRef.current !== null) {
+      clearTimeout(tagUpdateTimeoutRef.current);
+    }
+    tagUpdateTimeoutRef.current = window.setTimeout(() => {
+      tagUpdateTimeoutRef.current = null;
+      // Keep the cycle flag for a bit longer to prevent re-triggering
+      setTimeout(() => {
+        isInTagUpdateCycle.current = false;
+        tagCycleStartTime.current = null;
+        // Mark that we need to fetch after cycle completes and trigger effect re-run
+        needsFetchAfterTagCycle.current = true;
+        setFetchTrigger(prev => prev + 1);
+      }, 500);
+    }, 1500);
 
     onFetchTypesAndStatesForTags(selectedTags)
       .then(({ types, states, areaPaths }) => {
+        // Update previous values to reflect what tags populated
+        const newWorkItemTypes = types.length > 0 ? types : (selectedWorkItemTypes || []);
+        const newStates = states.length > 0 ? states : (selectedStates || []);
+        const newAreaPaths = areaPaths.length > 0 ? areaPaths : (selectedAreaPaths || []);
+        
         if (types.length > 0) {
           setValue('workItemTypes', types, { shouldDirty: false });
+          prevWorkItemTypesRef.current = types;
+          tagPopulatedTypesRef.current = types; // Track what tags populated
         }
         if (states.length > 0) {
           setValue('states', states, { shouldDirty: false });
+          prevStatesRef.current = states;
+          tagPopulatedStatesRef.current = states; // Track what tags populated
         }
         if (areaPaths.length > 0) {
           setValue('areaPaths', areaPaths, { shouldDirty: false });
+          prevAreaPathsRef.current = areaPaths;
+          tagPopulatedAreaPathsRef.current = areaPaths; // Track what tags populated
+        }
+        // After populating filters from tags, ensure feature count is fetched
+        // Set the flag and trigger the effect after cycle completes
+        if (types.length > 0) {
+          needsFetchAfterTagCycle.current = true;
+          // Wait for the cycle to complete, then trigger fetch
+          setTimeout(() => {
+            const currentConfig = configRef.current;
+            const currentFetch = fetchFeatureCountRef.current;
+            // Check if cycle is complete and we have work item types
+            const cycleComplete = !isInTagUpdateCycle.current && !isUpdatingFromTags.current && tagUpdateTimeoutRef.current === null;
+            if (cycleComplete && currentConfig.enabled && currentConfig.accessToken && currentFetch) {
+              // Clear any existing timeout
+              if (countTimeoutRef.current !== null) {
+                window.clearTimeout(countTimeoutRef.current);
+                countTimeoutRef.current = null;
+              }
+              // Directly trigger the fetch
+              currentFetch();
+              needsFetchAfterTagCycle.current = false;
+            } else {
+              // If cycle isn't complete yet, trigger the effect to check again
+              setFetchTrigger(prev => prev + 1);
+            }
+          }, 2100); // Wait for cycle to complete (1500ms + 500ms + 100ms buffer)
         }
       })
       .finally(() => {
         setTimeout(() => {
           isUpdatingFromTags.current = false;
-        }, 300);
+        }, 500);
       });
   }, [selectedTags, onFetchTypesAndStatesForTags, setValue]);
 
@@ -990,26 +1246,76 @@ function FilterForm({
     }
   }, [config, selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, advancedQuery, showAdvanced, buildQueryFromFilters]);
 
+  // Keep refs up to date
+  useEffect(() => {
+    configRef.current = config;
+    fetchFeatureCountRef.current = fetchFeatureCount;
+  }, [config, fetchFeatureCount]);
+
   // Debounced feature count fetch
   useEffect(() => {
+    // Clear any existing timeout
     if (countTimeoutRef.current !== null) {
       window.clearTimeout(countTimeoutRef.current);
+      countTimeoutRef.current = null;
     }
     
-    setFeatureCount(null);
+    // Only clear count if we don't have work item types selected
+    if (!selectedWorkItemTypes || selectedWorkItemTypes.length === 0) {
+      setFeatureCount(null);
+      return;
+    }
     
-    if (selectedWorkItemTypes && selectedWorkItemTypes.length > 0 && config.enabled && config.accessToken) {
+    // Check if we need to fetch after tag cycle completed
+    // This takes priority - if the cycle just completed, fetch immediately
+    if (needsFetchAfterTagCycle.current && selectedWorkItemTypes && selectedWorkItemTypes.length > 0) {
+      // Check if cycle is complete (not still in progress)
+      const cycleComplete = !isInTagUpdateCycle.current && !isUpdatingFromTags.current && tagUpdateTimeoutRef.current === null;
+      // Also check if enough time has passed (2100ms) as a fallback
+      const enoughTimePassed = tagCycleStartTime.current === null || (Date.now() - tagCycleStartTime.current) >= 2100;
+      
+      if (cycleComplete || enoughTimePassed) {
+        needsFetchAfterTagCycle.current = false;
+        // Fetch immediately after tag cycle completes
+        const currentConfig = configRef.current;
+        const currentFetch = fetchFeatureCountRef.current;
+        if (currentConfig.enabled && currentConfig.accessToken && currentFetch) {
+          currentFetch();
+        }
+        return;
+      }
+      // If cycle is still active but flag is set, keep the flag and return
+      // The fetch will happen when the cycle completes
+      return;
+    }
+    
+    // Don't fetch feature count if we're in a tag-initiated update cycle or cooldown period
+    // This prevents flashing when tags are selected first
+    if (isInTagUpdateCycle.current || isUpdatingFromTags.current || tagUpdateTimeoutRef.current !== null) {
+      // Don't clear the count during tag updates - preserve existing value
+      // Mark that we need to fetch after the cycle completes
+      needsFetchAfterTagCycle.current = true;
+      return;
+    }
+    
+    // Fetch the count if we have the required config
+    if (config.enabled && config.accessToken) {
+      // Always fetch when filters change (debounced for non-tag updates)
       countTimeoutRef.current = window.setTimeout(() => {
         fetchFeatureCount();
       }, 300);
+    } else {
+      // If config is not ready, clear the count
+      setFeatureCount(null);
     }
     
     return () => {
       if (countTimeoutRef.current !== null) {
         window.clearTimeout(countTimeoutRef.current);
+        countTimeoutRef.current = null;
       }
     };
-  }, [selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, advancedQuery, showAdvanced, config.enabled, config.accessToken, fetchFeatureCount]);
+  }, [selectedWorkItemTypes, selectedStates, selectedAreaPaths, selectedTags, advancedQuery, showAdvanced, config.enabled, config.accessToken, fetchFeatureCount, fetchTrigger]);
 
   // Sync with preview features
   useEffect(() => {
@@ -1020,11 +1326,15 @@ function FilterForm({
     prevShowPreviewModalRef.current = showPreviewModal || false;
   }, [showPreviewModal, previewFeatures]);
 
+  // Set feature count from preview features (manual preview result)
   useEffect(() => {
-    if (previewFeatures && previewFeatures.length > 0 && !isFetchingCount) {
+    if (previewFeatures && previewFeatures.length > 0) {
       setFeatureCount(previewFeatures.length);
+    } else if (previewFeatures && previewFeatures.length === 0) {
+      // Explicitly set to 0 if preview returned empty array
+      setFeatureCount(0);
     }
-  }, [previewFeatures, isFetchingCount]);
+  }, [previewFeatures]);
 
   // Update config
   useEffect(() => {
@@ -1233,11 +1543,14 @@ function FilterForm({
           className="flex items-center"
         >
           {isFetching && <RefreshCw className="animate-spin h-4 w-4 mr-2" />}
-          {isFetching ? 'Loading...' : (
-            featureCount !== null && !isFetchingCount 
-              ? `Preview ${featureCount} Feature${featureCount !== 1 ? 's' : ''}`
-              : 'Preview Features'
-          )}
+          {isFetching ? 'Loading...' : (() => {
+            // Use featureCount if available, otherwise use previewFeatures length
+            const count = featureCount !== null ? featureCount : (previewFeatures?.length ?? null);
+            // Show count if available (even while fetching, to show previous count)
+            return count !== null
+              ? `Preview ${count} Feature${count !== 1 ? 's' : ''}`
+              : 'Preview Features';
+          })()}
         </Button>
       </div>
     </form>
@@ -1943,19 +2256,19 @@ export function AdminDashboard({
   const navigate = useNavigate();
   const { currentUser, currentSession, setCurrentSession } = useSession();
   
-  const [selectedProject, setSelectedProject] = useState(() => {
-    if (azureDevOpsConfig.project) return azureDevOpsConfig.project;
-    return projectOptions[0] ?? '';
+  const [selectedProjects, setSelectedProjects] = useState<string[]>(() => {
+    if (azureDevOpsConfig.project) return [azureDevOpsConfig.project];
+    return projectOptions[0] ? [projectOptions[0]] : [];
   });
   const [filtersResetToken, setFiltersResetToken] = useState(0);
   
   useEffect(() => {
     if (azureDevOpsConfig.project) {
-      setSelectedProject(azureDevOpsConfig.project);
+      setSelectedProjects([azureDevOpsConfig.project]);
     } else if (projectOptions.length > 0) {
-      setSelectedProject(projectOptions[0]);
+      setSelectedProjects([projectOptions[0]]);
     } else {
-      setSelectedProject('');
+      setSelectedProjects([]);
     }
   }, [azureDevOpsConfig.project, projectOptions]);
   
@@ -2175,17 +2488,14 @@ export function AdminDashboard({
     }
   }, [productToDelete]);
   
-  const handleProjectChange = useCallback((project: string) => {
-    const normalizedProject = project?.trim();
-    if (!normalizedProject) {
-      return;
-    }
-
-    setSelectedProject(normalizedProject);
-    if (normalizedProject !== (azureDevOpsConfig.project || '')) {
+  const handleProjectChange = useCallback((projects: string[]) => {
+    const normalizedProjects = projects.filter(p => p?.trim()).map(p => p.trim());
+    setSelectedProjects(normalizedProjects);
+    // Use the first project for the config (for backward compatibility)
+    if (normalizedProjects.length > 0 && normalizedProjects[0] !== (azureDevOpsConfig.project || '')) {
       const updatedConfig: AzureDevOpsConfig = {
         ...azureDevOpsConfig,
-        project: normalizedProject
+        project: normalizedProjects[0]
       };
       onUpdateAzureDevOpsConfig(updatedConfig);
     }
@@ -3053,89 +3363,93 @@ export function AdminDashboard({
             </div>
           </div>
         </div>
-        {votingSession.goal && votingSession.goal.trim() && (
-          <div className="pt-3 border-t border-gray-200">
-            <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
-              <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
-              <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
-              <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
-              <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
+        {(votingSession.goal && votingSession.goal.trim()) || statusNotesDisplay.length > 0 ? (
+          <div className="pt-3">
+            <div className="flex flex-col md:flex-row md:items-start gap-4">
+              {votingSession.goal && votingSession.goal.trim() && (
+                <div className="flex-[2] relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
+                  <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
+                  <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />
+                  <span className="pointer-events-none absolute top-6 right-10 text-[#F4B400] text-xl animate-ping">✶</span>
+                  <span className="pointer-events-none absolute bottom-8 left-10 text-[#C89212] text-lg animate-pulse">✦</span>
 
-              <div className="relative flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-                <div className="flex items-start gap-5 md:pr-8 lg:pr-12">
-                  <div className="relative">
-                    <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
-                      <Trophy className="h-8 w-8 md:h-10 md:w-10" />
+                  <div className="relative flex items-start gap-5">
+                    <div className="relative">
+                      <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-white shadow-lg shadow-[#C89212]/30 border border-[#C89212]/40 flex items-center justify-center text-[#C89212]">
+                        <Trophy className="h-8 w-8 md:h-10 md:w-10" />
+                      </div>
+                      <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
+                      <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
                     </div>
-                    <span className="pointer-events-none absolute -top-3 -left-2 text-[#C89212] text-base animate-ping">✧</span>
-                    <span className="pointer-events-none absolute bottom-0 -right-3 text-[#F5D79E] text-xl animate-pulse">✺</span>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
-                    <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
-                      {votingSession.goal}
-                    </h3>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#C89212]/80 mb-1">Session Goal</p>
+                      <h3 className="text-lg md:text-xl font-semibold text-[#2D4660] leading-relaxed">
+                        {votingSession.goal}
+                      </h3>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {statusNotesDisplay.length > 0 && (
-          <div className="pt-3 border-t border-gray-200">
-            <div className="md:w-80 lg:w-96 rounded-xl border border-white/70 bg-white/80 backdrop-blur-sm shadow-inner p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-[#2D4660]">Status Notes</h3>
-                {statusNotesDisplay.length > 2 && (
-                  <span className="inline-flex items-center justify-between text-xs text-[#1E5461] w-[90px]">
-                    <span className="flex items-center justify-center w-4 h-4 border border-current rounded">
-                      {showAllStatusNotes ? (
-                        <Minus className="h-2.5 w-2.5" />
-                      ) : (
-                        <Plus className="h-2.5 w-2.5" />
+              )}
+              
+              {statusNotesDisplay.length > 0 && (
+                <div className="flex-[1] rounded-xl border border-white/70 bg-white/80 backdrop-blur-sm shadow-inner p-4">
+                  {(statusNotesDisplay.length === 1 || statusNotesDisplay.length > 2) && (
+                    <div className="flex items-center justify-between mb-3">
+                      {statusNotesDisplay.length === 1 && (
+                        <h3 className="text-sm font-semibold text-[#2D4660]">Status Notes</h3>
                       )}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowAllStatusNotes((prev) => !prev)}
-                      className="ml-1 hover:text-[#173B65] transition-colors text-left flex-1"
-                    >
-                      {showAllStatusNotes ? 'Show Less' : 'Show More'}
-                    </button>
-                  </span>
-                )}
-              </div>
+                      {statusNotesDisplay.length > 2 && (
+                        <span className="inline-flex items-center justify-between text-xs text-[#1E5461] w-[90px] ml-auto">
+                          <span className="flex items-center justify-center w-4 h-4 border border-current rounded">
+                            {showAllStatusNotes ? (
+                              <Minus className="h-2.5 w-2.5" />
+                            ) : (
+                              <Plus className="h-2.5 w-2.5" />
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowAllStatusNotes((prev) => !prev)}
+                            className="ml-1 hover:text-[#173B65] transition-colors text-left flex-1"
+                          >
+                            {showAllStatusNotes ? 'Show Less' : 'Show More'}
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  )}
 
-              <div className="space-y-3">
-                {statusNotesDisplay
-                  .slice(0, showAllStatusNotes ? statusNotesDisplay.length : 2)
-                  .map((note) => {
-                    const IconComponent = note.type === 'reopen' ? RefreshCw : AlertCircle;
-                    return (
-                      <div
-                        key={note.id}
-                        className={`flex items-start gap-3 text-sm ${note.textColorClass}`}
-                      >
-                        <div
-                          className={`mt-0.5 flex items-center justify-center w-8 h-8 ${note.iconBgClass} ${note.iconBorderClass} border rounded-lg`}
-                        >
-                          <IconComponent className={`h-3.5 w-3.5 ${note.iconColorClass}`} />
-                        </div>
-                        <div>
-                          <p className="font-semibold text-gray-800">{note.title}</p>
-                          <p className="text-xs text-gray-600 leading-relaxed">{note.description}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-              {statusNotesDisplay.length > 2 && !showAllStatusNotes && (
-                <p className="text-xs text-gray-500 mt-3">Showing newest notes. Select "Show More" to view all updates.</p>
+                  <div className="space-y-3">
+                    {statusNotesDisplay
+                      .slice(0, showAllStatusNotes ? statusNotesDisplay.length : 2)
+                      .map((note) => {
+                        const IconComponent = note.type === 'reopen' ? RefreshCw : AlertCircle;
+                        return (
+                          <div
+                            key={note.id}
+                            className={`flex items-start gap-3 text-sm ${note.textColorClass}`}
+                          >
+                            <div
+                              className={`mt-0.5 flex items-center justify-center w-8 h-8 ${note.iconBgClass} ${note.iconBorderClass} border rounded-lg`}
+                            >
+                              <IconComponent className={`h-3.5 w-3.5 ${note.iconColorClass}`} />
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-800">{note.title}</p>
+                              <p className="text-xs text-gray-600 leading-relaxed">{note.description}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                  {statusNotesDisplay.length > 2 && !showAllStatusNotes && (
+                    <p className="text-xs text-gray-500 mt-3">Showing newest notes. Select "Show More" to view all updates.</p>
+                  )}
+                </div>
               )}
             </div>
           </div>
-        )}
+        ) : null}
         </div>
       </div>
 
@@ -3165,7 +3479,7 @@ export function AdminDashboard({
             </p>
             <Button 
               variant="primary"
-              onClick={() => handleConnect('newmill', selectedProject || projectOptions[0] || 'Product')}
+              onClick={() => handleConnect('newmill', selectedProjects[0] || projectOptions[0] || 'Product')}
               className="inline-flex items-center"
               disabled={isFetchingAzureDevOps}
             >
@@ -3204,11 +3518,11 @@ export function AdminDashboard({
                       <div className="flex items-center gap-2">
                         <span className="font-medium">Project:</span>
                         <div className="min-w-[150px]">
-                          <SingleSelectDropdown
+                          <MultiSelectDropdown
                             options={projectOptions}
-                            value={selectedProject}
+                            value={selectedProjects}
                             onChange={handleProjectChange}
-                            variant="green"
+                            placeholder="Select projects..."
                           />
                         </div>
                       </div>

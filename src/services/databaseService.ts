@@ -126,7 +126,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
     
     const result = await queryWithTimeout as any;
     const { data, error } = result;
-    
+  
   if (error) {
       if (error.code === 'PGRST116') {
         return null; // Not found

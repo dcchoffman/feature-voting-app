@@ -961,16 +961,42 @@ function FilterForm({
   // Auto-populate from Area Path
   useEffect(() => {
     if (!onFetchTypesAndStatesForAreaPath) return;
-    if (isUpdatingFromTags.current || isUpdatingFromStates.current) return;
+    // Don't run if we're clearing filters, manually removing filters, updating from tags, or in tag cycle
+    if (isClearingFilters.current || manualFilterChangeTimeoutRef.current !== null || isUpdatingFromTags.current || isInTagUpdateCycle.current) return;
 
     if (!selectedAreaPaths || selectedAreaPaths.length === 0) {
       return;
     }
 
+    // Check if a manual removal happened recently (within last 5 seconds)
+    if (lastManualRemovalTimeRef.current !== null) {
+      const timeSinceRemoval = Date.now() - lastManualRemovalTimeRef.current;
+      if (timeSinceRemoval < 5000) {
+        // Manual removal happened recently, don't re-populate from area path
+        return;
+      }
+      // Clear the timestamp if it's old
+      lastManualRemovalTimeRef.current = null;
+    }
+
     const hasManualType = selectedWorkItemTypes && selectedWorkItemTypes.length > 0;
     const hasManualState = selectedStates && selectedStates.length > 0;
 
+    // If both are manually set, don't auto-populate
     if (hasManualType && hasManualState) {
+      return;
+    }
+
+    // Check if filters were just manually reduced (prevent re-population)
+    const workItemTypesReduced = (selectedWorkItemTypes?.length || 0) < (prevWorkItemTypesRef.current?.length || 0);
+    const statesReduced = (selectedStates?.length || 0) < (prevStatesRef.current?.length || 0);
+    
+    if (workItemTypesReduced || statesReduced) {
+      // Filters were manually reduced, don't re-populate from area path
+      // Update previous values immediately to prevent re-check
+      prevWorkItemTypesRef.current = selectedWorkItemTypes || [];
+      prevStatesRef.current = selectedStates || [];
+      lastManualRemovalTimeRef.current = Date.now();
       return;
     }
 
@@ -980,9 +1006,11 @@ function FilterForm({
       .then(({ types, states }) => {
         if (types.length > 0 && !hasManualType) {
           setValue('workItemTypes', types, { shouldDirty: false });
+          prevWorkItemTypesRef.current = types;
         }
         if (states.length > 0 && !hasManualState) {
           setValue('states', states, { shouldDirty: false });
+          prevStatesRef.current = states;
         }
       })
       .finally(() => {

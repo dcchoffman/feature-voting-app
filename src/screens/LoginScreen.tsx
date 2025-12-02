@@ -29,7 +29,7 @@ export default function LoginScreen() {
   const { currentUser, setCurrentUser, setCurrentSession } = useSession();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -402,7 +402,7 @@ This is an automated message from the Feature Voting System.
           setError(err.message || 'Failed to grant access. Please try again.');
           navigate('/login', { replace: true });
         } finally {
-          setIsLoading(false);
+      setIsLoading(false);
         }
       };
 
@@ -473,74 +473,74 @@ This is an automated message from the Feature Voting System.
           <div className="px-4 sm:px-10 pb-8">
             <div className="text-center mb-6">
               <h2 className="text-3xl font-bold text-[#2d4660]">
-                Feature Voting System
-              </h2>
+          Feature Voting System
+        </h2>
               <p className="mt-2 text-sm text-gray-600">
-                Sign in to access your voting sessions
-              </p>
-            </div>
-            
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div>
+          Sign in to access your voting sessions
+        </p>
+      </div>
+
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div>
                 <label htmlFor="login-name" className="block text-sm font-medium text-gray-700">
-                  Full Name
-                </label>
-                <div className="mt-1">
-                  <input
+                Full Name
+              </label>
+              <div className="mt-1">
+                <input
                     id="login-name"
-                    name="name"
-                    type="text"
-                    autoComplete="name"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
-                    placeholder="John Doe"
-                  />
-                </div>
+                  name="name"
+                  type="text"
+                  autoComplete="name"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+                  placeholder="John Doe"
+                />
               </div>
-              
-              <div>
+            </div>
+
+            <div>
                 <label htmlFor="login-email" className="block text-sm font-medium text-gray-700">
-                  Email Address
-                </label>
-                <div className="mt-1">
-                  <input
+                Email Address
+              </label>
+              <div className="mt-1">
+                <input
                     id="login-email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
-                    placeholder="your.email@company.com"
-                  />
-                </div>
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#2d4660] focus:border-[#2d4660]"
+                  placeholder="your.email@company.com"
+                />
               </div>
-              
-              <div>
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#2d4660] hover:bg-[#1d3a53] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2d4660] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isLoading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Signing in...
-                    </>
-                  ) : (
-                    <>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#2d4660] hover:bg-[#1d3a53] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2d4660] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Signing in...
+                  </>
+                ) : (
+                  <>
                       <svg className="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
                       </svg>
-                      Sign In
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+                    Sign In
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
             
             {error && (
               <div className="rounded-md bg-red-50 p-4 mt-6">

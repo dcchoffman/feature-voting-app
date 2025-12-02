@@ -27,6 +27,7 @@ export interface AzureDevOpsWorkItem {
     'System.AreaPath'?: string;
     'System.IterationPath'?: string;
     'Epic'?: string;
+    'EpicId'?: string;
   };
   url: string;
 }
@@ -38,6 +39,7 @@ export interface Feature {
   votes: number;
   voters: VoterInfo[];
   epic?: string;
+  epicId?: string;
   state?: string; 
   areaPath?: string;  
   tags?: string[];

@@ -39,7 +39,14 @@ import {
   Square,
   Crown,
   CheckCircle,
-  Paperclip
+  Paperclip,
+  ArrowRightLeft,
+  Bug,
+  BookOpen,
+  FlaskConical,
+  CircleAlert,
+  Database,
+  Tag
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -77,6 +84,8 @@ interface PreviewFeaturesModalProps {
   previewFeatures: Feature[] | null;
   onConfirmSync: (selectedFeatures: Feature[]) => Promise<void>;
   onReplaceAll?: () => Promise<void>;
+  isFetching?: boolean;
+  config: AzureDevOpsConfig;
 }
 
 interface AdminDashboardProps {
@@ -228,6 +237,34 @@ interface MultiSelectDropdownProps {
   disabled?: boolean;
 }
 
+// Helper function to get Azure DevOps work item type icon and color
+function getWorkItemTypeIcon(workItemType: string | undefined): { icon: React.ComponentType<any>; color: string } | null {
+  if (!workItemType) return null;
+  
+  const type = workItemType.toLowerCase();
+  
+  // Azure DevOps standard icons and colors
+  if (type === 'epic') {
+    return { icon: Crown, color: 'rgb(51, 153, 71)' }; // Green
+  } else if (type === 'feature') {
+    return { icon: Trophy, color: '#773b93' }; // Purple (rgb(119, 59, 147))
+  } else if (type === 'user story' || type === 'story') {
+    return { icon: BookOpen, color: '#007acc' }; // Blue
+  } else if (type === 'bug') {
+    return { icon: Bug, color: '#cc293d' }; // Red
+  } else if (type === 'task') {
+    return { icon: CheckSquare, color: '#007acc' }; // Blue
+  } else if (type === 'change request') {
+    return { icon: ArrowRightLeft, color: '#ff8c00' }; // Orange
+  } else if (type === 'test case' || type === 'test') {
+    return { icon: FlaskConical, color: '#007acc' }; // Blue
+  } else if (type === 'issue') {
+    return { icon: CircleAlert, color: '#cc293d' }; // Red
+  }
+  
+  return null;
+}
+
 function MultiSelectDropdown({ options, value, onChange, placeholder = "Select...", label, searchable = false, disabled = false }: MultiSelectDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -368,13 +405,21 @@ function MultiSelectDropdown({ options, value, onChange, placeholder = "Select..
 // PREVIEW FEATURES MODAL
 // ============================================
 
-function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync, onReplaceAll }: PreviewFeaturesModalProps) {
+function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync, onReplaceAll, isFetching = false, config }: PreviewFeaturesModalProps) {
   const [selectedFeatures, setSelectedFeatures] = useState<Set<string>>(new Set());
 
   // Select all by default when modal opens
   useEffect(() => {
     if (isOpen && previewFeatures && previewFeatures.length > 0) {
-      setSelectedFeatures(new Set(previewFeatures.map(f => f.id)));
+      const featureIds = previewFeatures.map(f => f.id).filter(id => id); // Filter out any undefined/null IDs
+      console.log('PreviewFeaturesModal: Selecting all features by default', featureIds.length, 'features');
+      console.log('PreviewFeaturesModal: Feature IDs:', featureIds);
+      if (featureIds.length > 0) {
+        setSelectedFeatures(new Set(featureIds));
+      }
+    } else if (!isOpen) {
+      // Clear selection when modal closes
+      setSelectedFeatures(new Set());
     }
   }, [isOpen, previewFeatures]);
 
@@ -400,10 +445,66 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
   };
 
   const handleAddSelected = async () => {
-    if (!previewFeatures) return;
-    const featuresToAdd = previewFeatures.filter(f => selectedFeatures.has(f.id));
-    await onConfirmSync(featuresToAdd);
-    onClose();
+    if (!previewFeatures || previewFeatures.length === 0) {
+      console.warn('handleAddSelected: No preview features available');
+      return;
+    }
+    
+    // If no features are selected, select all by default
+    if (selectedFeatures.size === 0) {
+      console.log('handleAddSelected: No features selected, selecting all by default');
+      const allIds = previewFeatures.map(f => f.id).filter(id => id);
+      setSelectedFeatures(new Set(allIds));
+      // Wait a moment for state to update, then retry
+      setTimeout(() => {
+        handleAddSelected();
+      }, 100);
+      return;
+    }
+    
+    console.log('handleAddSelected: Preview features count:', previewFeatures.length);
+    console.log('handleAddSelected: Selected features count:', selectedFeatures.size);
+    console.log('handleAddSelected: Selected feature IDs:', Array.from(selectedFeatures));
+    console.log('handleAddSelected: Preview feature IDs:', previewFeatures.map(f => f.id));
+    
+    const featuresToAdd = previewFeatures.filter(f => {
+      const hasId = f.id && selectedFeatures.has(f.id);
+      if (!hasId) {
+        console.warn('handleAddSelected: Feature not selected:', f.id, f.title);
+      }
+      return hasId;
+    });
+    
+    if (featuresToAdd.length === 0) {
+      console.warn('handleAddSelected: No features selected after filtering');
+      console.warn('handleAddSelected: Preview features:', previewFeatures);
+      console.warn('handleAddSelected: Selected set:', selectedFeatures);
+      // Try selecting all as fallback
+      const allIds = previewFeatures.map(f => f.id).filter(id => id);
+      if (allIds.length > 0) {
+        console.log('handleAddSelected: Fallback - selecting all features');
+        const allFeatures = previewFeatures.filter(f => f.id);
+        if (allFeatures.length > 0) {
+          try {
+            await onConfirmSync(allFeatures);
+            console.log('handleAddSelected: Sync completed with all features, closing modal');
+            onClose();
+          } catch (error) {
+            console.error('handleAddSelected: Error during sync', error);
+          }
+        }
+      }
+      return;
+    }
+    console.log('handleAddSelected: Adding', featuresToAdd.length, 'features');
+    try {
+      await onConfirmSync(featuresToAdd);
+      console.log('handleAddSelected: Sync completed, closing modal');
+      onClose();
+    } catch (error) {
+      console.error('handleAddSelected: Error during sync', error);
+      // Don't close modal on error so user can see what happened
+    }
   };
 
   const handleReplaceAll = async () => {
@@ -461,6 +562,7 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                   <tbody className="bg-white divide-y divide-gray-200">
                     {previewFeatures.map((feature) => {
                       const isSelected = selectedFeatures.has(feature.id);
+                      console.log(`[PreviewModal] Rendering feature ${feature.id} "${feature.title}": epic="${feature.epic}", epicId="${feature.epicId}"`);
                       return (
                         <tr
                           key={feature.id}
@@ -508,22 +610,77 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                                   </div>
                                 )}
                               </div>
-                              {feature.azureDevOpsId && (
-                                <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                              )}
                             </div>
                           </td>
                           <td className="px-4 py-3 align-middle">
-                            <div className="flex items-center">
-                              {feature.workItemType === 'Epic' ? (
-                                <Crown className="w-5 h-5 text-green-600" />
-                              ) : feature.workItemType === 'Feature' ? (
-                                <Trophy className="w-5 h-5 text-purple-600" />
-                              ) : feature.workItemType ? (
-                                <span className="px-2 py-1 text-xs font-medium bg-[#492434]/10 text-[#492434] rounded">
-                                  {feature.workItemType}
-                                </span>
-                              ) : null}
+                            <div className="flex items-center gap-2">
+                              {(() => {
+                                const typeInfo = getWorkItemTypeIcon(feature.workItemType);
+                                if (typeInfo && feature.azureDevOpsId) {
+                                  const IconComponent = typeInfo.icon;
+                                  // Convert hex color to RGB for opacity
+                                  const hexToRgb = (hex: string) => {
+                                    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                                    return result ? {
+                                      r: parseInt(result[1], 16),
+                                      g: parseInt(result[2], 16),
+                                      b: parseInt(result[3], 16)
+                                    } : null;
+                                  };
+                                  const rgb = hexToRgb(typeInfo.color);
+                                  const bgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)` : `${typeInfo.color}20`;
+                                  const hoverBgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)` : `${typeInfo.color}40`;
+                                  
+                                  return (
+                                    <a
+                                      href={feature.azureDevOpsUrl || ''}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium cursor-pointer border"
+                                      style={{
+                                        backgroundColor: bgColor,
+                                        color: typeInfo.color,
+                                        borderColor: typeInfo.color
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.backgroundColor = hoverBgColor;
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.backgroundColor = bgColor;
+                                      }}
+                                      title="View in Azure DevOps"
+                                    >
+                                      <IconComponent className="h-3 w-3 mr-1" style={{ color: typeInfo.color }} />
+                                      {feature.azureDevOpsId.replace(/^ado-/, '#')}
+                                    </a>
+                                  );
+                                } else if (feature.workItemType && feature.azureDevOpsId) {
+                                  return (
+                                    <a
+                                      href={feature.azureDevOpsUrl || ''}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#492434]/10 text-[#492434] hover:bg-[#492434]/20 cursor-pointer border border-[#492434]/30"
+                                      title="View in Azure DevOps"
+                                    >
+                                      <span className="mr-1 text-xs">{feature.workItemType}</span>
+                                      {feature.azureDevOpsId.replace(/^ado-/, '#')}
+                                    </a>
+                                  );
+                                } else if (typeInfo) {
+                                  const IconComponent = typeInfo.icon;
+                                  return <IconComponent className="w-5 h-5" style={{ color: typeInfo.color }} />;
+                                } else if (feature.workItemType) {
+                                  return (
+                                    <span className="px-2 py-1 text-xs font-medium bg-[#492434]/10 text-[#492434] rounded">
+                                      {feature.workItemType}
+                                    </span>
+                                  );
+                                }
+                                return null;
+                              })()}
                             </div>
                           </td>
                           <td className="px-4 py-3 align-middle">
@@ -533,11 +690,33 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 align-middle">
-                            {feature.workItemType !== 'Epic' && feature.epic ? (
-                              <EpicTag name={feature.epic} />
+                          <td className={`px-4 py-3 align-middle ${feature.epic || (feature.workItemType && feature.workItemType.toLowerCase() === 'epic') ? 'w-64' : 'w-32'}`}>
+                            {feature.workItemType && feature.workItemType.toLowerCase() === 'epic' ? (
+                              <span className="text-xs text-gray-600 italic">This Work Item is an Epic</span>
+                            ) : feature.epic ? (
+                              feature.epicId ? (
+                                <a
+                                  href={`https://dev.azure.com/${config.organization}/${config.project}/_workitems/edit/${feature.epicId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-block w-full"
+                                >
+                                  <EpicTag 
+                                    name={feature.epic} 
+                                    epicId={feature.epicId}
+                                    description={feature.description}
+                                    className="hover:opacity-80" 
+                                  />
+                                </a>
+                              ) : (
+                                <EpicTag 
+                                  name={feature.epic} 
+                                  description={feature.description}
+                                />
+                              )
                             ) : (
-                              <span className="text-xs text-gray-400">—</span>
+                              <span className="text-xs text-gray-400 italic">no Epic assigned</span>
                             )}
                           </td>
                           <td className="px-4 py-3 align-middle">
@@ -565,11 +744,20 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                 <Button 
                   variant="primary"
                   onClick={handleAddSelected}
-                  disabled={selectedCount === 0}
+                  disabled={selectedCount === 0 || isFetching}
                   className="flex items-center"
                 >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add {selectedCount} Feature{selectedCount !== 1 ? 's' : ''}
+                  {isFetching ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add {selectedCount} Feature{selectedCount !== 1 ? 's' : ''}
+                    </>
+                  )}
                 </Button>
                 {onReplaceAll && (
                   <Button 
@@ -2705,24 +2893,18 @@ export function AdminDashboard({
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    const productId = votingSession.product_id || (votingSession as any).productId || '';
-    const url = productId 
-      ? `/users?filter=session-admin&product=${productId}`
-      : '/users?filter=session-admin';
-    navigate(url);
-  }, [currentSession, setCurrentSession, navigate, votingSession]);
+    // Navigate to manage-admins screen for Session Admins
+    navigate('/manage-admins');
+  }, [currentSession, setCurrentSession, navigate]);
 
   const handleManageStakeholders = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    const productId = votingSession.product_id || (votingSession as any).productId || '';
-    const url = productId 
-      ? `/users?filter=stakeholder&product=${productId}`
-      : '/users?filter=stakeholder';
-    navigate(url);
-  }, [currentSession, setCurrentSession, navigate, votingSession]);
+    // Navigate to manage-stakeholders screen for Session Admins
+    navigate('/manage-stakeholders');
+  }, [currentSession, setCurrentSession, navigate]);
 
   const logStatusNote = useCallback(async (note: {
     type: 'reopen' | 'ended-early';
@@ -3070,15 +3252,15 @@ export function AdminDashboard({
           </button>
           )}
           <button 
-            onClick={() => navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder')} 
+            onClick={() => navigate(adminPerspective === 'system' || isSessionAdmin ? '/users' : '/users?filter=stakeholder')} 
             className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
           >
-            {adminPerspective === 'system' ? (
+            {adminPerspective === 'system' || isSessionAdmin ? (
               <Shield className="mr-2 h-4 w-4" />
             ) : (
               <Users className="mr-2 h-4 w-4" />
             )}
-              {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
+              {adminPerspective === 'system' || isSessionAdmin ? 'User Management' : 'Stakeholders'}
           </button>
           <button 
             onClick={() => navigate('/sessions')} 
@@ -3121,15 +3303,15 @@ export function AdminDashboard({
                 </button>
                 )}
                 <button
-                  onClick={() => { setMobileMenuOpen(false); navigate(adminPerspective === 'system' ? '/users' : '/users?filter=stakeholder'); }}
+                  onClick={() => { setMobileMenuOpen(false); navigate(adminPerspective === 'system' || isSessionAdmin ? '/users' : '/users?filter=stakeholder'); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                 >
-                  {adminPerspective === 'system' ? (
+                  {adminPerspective === 'system' || isSessionAdmin ? (
                     <Shield className="h-4 w-4 mr-2 text-gray-700" />
                   ) : (
                     <Users className="h-4 w-4 mr-2 text-gray-700" />
                   )}
-                  {adminPerspective === 'system' ? 'User Management' : 'Stakeholders'}
+                  {adminPerspective === 'system' || isSessionAdmin ? 'User Management' : 'Stakeholders'}
                 </button>
                 <button
                   onClick={() => { setMobileMenuOpen(false); navigate('/sessions'); }}
@@ -3832,77 +4014,176 @@ export function AdminDashboard({
           </Button>
         </div>
 
-        <div className="w-full overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 table-fixed">
+        <div className="w-full overflow-x-auto max-h-[600px] overflow-y-auto">
+          <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th scope="col" className="w-[20%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th scope="col" className="hidden lg:table-cell w-[25%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                <th scope="col" className="hidden md:table-cell w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
-                <th scope="col" className="hidden md:table-cell w-[8%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
-                <th scope="col" className="hidden lg:table-cell w-[12%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Area Path</th>
-                <th scope="col" className="hidden xl:table-cell w-[10%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tags</th>
-                <th scope="col" className="w-[8%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
-                <th scope="col" className="w-[7%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th scope="col" className="sticky left-0 top-0 bg-gray-50 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-30">Title</th>
+                <th scope="col" className="sticky top-0 bg-gray-50 hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-20">Type</th>
+                <th scope="col" className="sticky top-0 bg-gray-50 hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-20">Epic</th>
+                <th scope="col" className="sticky top-0 bg-gray-50 hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-20">State</th>
+                <th scope="col" className="sticky top-0 bg-gray-50 hidden lg:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-20">Area Path</th>
+                <th scope="col" className="sticky top-0 bg-gray-50 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-20">Votes</th>
+                <th scope="col" className="sticky top-0 bg-gray-50 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider z-20">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {features.map((feature) => (
-                <tr key={feature.id} className="align-top group">
-                  <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium text-left">
-                    <div className="max-w-xs overflow-hidden text-left">
-                      {feature.title}
-                      {feature.azureDevOpsId && (
-                        <div className="mt-1">
-                          <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                        </div>
-                      )}
+                <tr key={feature.id} className="align-top group hover:bg-gray-50 bg-white">
+                  <td className="sticky left-0 bg-white group-hover:bg-gray-50 px-4 py-3 z-10">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900">{feature.title}</div>
+                        {feature.description && feature.description.trim() && (
+                          <div className="text-xs text-gray-500 mt-1 line-clamp-2">
+                            {feature.description.replace(/<[^>]*>/g, '').substring(0, 100)}
+                            {feature.description.replace(/<[^>]*>/g, '').length > 100 ? '...' : ''}
+                          </div>
+                        )}
+                        {feature.tags && feature.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1 items-center">
+                            {feature.tags.slice(0, 3).map((tag, idx) => (
+                              <span key={idx} className="inline-flex items-center px-1.5 py-0.5 text-xs bg-[#C89212]/10 text-[#C89212] rounded border border-[#C89212]/30">
+                                <Tag className="h-3 w-3 mr-1" />
+                                {tag}
+                              </span>
+                            ))}
+                            {feature.tags.length > 3 && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 text-xs bg-[#C89212]/10 text-[#C89212] rounded border border-[#C89212]/30">
+                                <Tag className="h-3 w-3 mr-1" />
+                                +{feature.tags.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
-                  <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-500 text-left">
-                    <div className="max-w-md overflow-hidden break-words text-left">
-                      {feature.description || <span className="italic text-gray-400">No description provided</span>}
-                    </div>
+                  <td className="hidden md:table-cell px-4 py-3 align-middle">
+                    {(() => {
+                      const workItemType = feature.workItemType || (feature as any).work_item_type;
+                      const typeInfo = getWorkItemTypeIcon(workItemType);
+                      
+                      if (typeInfo && feature.azureDevOpsId) {
+                        const IconComponent = typeInfo.icon;
+                        // Convert hex color to RGB for opacity
+                        const hexToRgb = (hex: string) => {
+                          const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                          return result ? {
+                            r: parseInt(result[1], 16),
+                            g: parseInt(result[2], 16),
+                            b: parseInt(result[3], 16)
+                          } : null;
+                        };
+                        const rgb = hexToRgb(typeInfo.color);
+                        const bgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)` : `${typeInfo.color}20`;
+                        const hoverBgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)` : `${typeInfo.color}40`;
+                        
+                        return (
+                          <a
+                            href={feature.azureDevOpsUrl || ''}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium cursor-pointer border"
+                            style={{
+                              backgroundColor: bgColor,
+                              color: typeInfo.color,
+                              borderColor: typeInfo.color
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = hoverBgColor;
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = bgColor;
+                            }}
+                            title="View in Azure DevOps"
+                          >
+                            <IconComponent className="h-3 w-3 mr-1" style={{ color: typeInfo.color }} />
+                            {feature.azureDevOpsId.replace(/^ado-/, '#')}
+                          </a>
+                        );
+                      } else if (workItemType && feature.azureDevOpsId) {
+                        return (
+                          <a
+                            href={feature.azureDevOpsUrl || ''}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#492434]/10 text-[#492434] hover:bg-[#492434]/20 cursor-pointer border border-[#492434]/30"
+                            title="View in Azure DevOps"
+                          >
+                            <span className="mr-1 text-xs">{workItemType}</span>
+                            {feature.azureDevOpsId.replace(/^ado-/, '#')}
+                          </a>
+                        );
+                      } else if (typeInfo) {
+                        const IconComponent = typeInfo.icon;
+                        return (
+                          <div className="flex items-center gap-1">
+                            <IconComponent className="w-4 h-4" style={{ color: typeInfo.color }} />
+                            {feature.azureDevOpsId && (
+                              <span className="text-xs text-gray-600">{feature.azureDevOpsId.replace(/^ado-/, '#')}</span>
+                            )}
+                          </div>
+                        );
+                      } else if (workItemType) {
+                        return (
+                          <span className="px-2 py-1 text-xs font-medium bg-[#492434]/10 text-[#492434] rounded">
+                            {workItemType}
+                          </span>
+                        );
+                      }
+                      return <span className="text-gray-400 text-xs">-</span>;
+                    })()}
                   </td>
-                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
-                    {feature.epic && <EpicTag name={feature.epic} />}
+                  <td className={`hidden md:table-cell px-4 py-3 align-middle ${feature.epic || (feature.workItemType && feature.workItemType.toLowerCase() === 'epic') ? 'w-64' : 'w-32'}`} onMouseEnter={(e) => e.stopPropagation()} onMouseLeave={(e) => e.stopPropagation()}>
+                    {feature.workItemType && feature.workItemType.toLowerCase() === 'epic' ? (
+                      <span className="text-xs text-gray-600 italic">This Work Item is an Epic</span>
+                    ) : feature.epic ? (
+                      feature.epicId ? (
+                        <a
+                          href={`https://dev.azure.com/${azureDevOpsConfig.organization}/${azureDevOpsConfig.project}/_workitems/edit/${feature.epicId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-block w-full"
+                        >
+                          <EpicTag 
+                            name={feature.epic} 
+                            epicId={String(feature.epicId)}
+                            description={feature.description}
+                            className="hover:opacity-80" 
+                          />
+                        </a>
+                      ) : (
+                        <EpicTag 
+                          name={feature.epic} 
+                          description={feature.description}
+                        />
+                      )
+                    ) : (
+                      <span className="text-xs text-gray-400 italic">no Epic assigned</span>
+                    )}
                   </td>
-                  <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
+                  <td className="hidden md:table-cell px-4 py-3 align-middle">
                     {feature.state && (
                       <span className="px-2 py-1 text-xs font-medium bg-[#1E5461]/10 text-[#1E5461] rounded">
                         {feature.state}
                       </span>
                     )}
                   </td>
-                  <td className="hidden lg:table-cell px-4 py-4 text-sm">
+                  <td className="hidden lg:table-cell px-4 py-3 text-sm">
                     <div className="text-gray-600">
                       {feature.areaPath && typeof feature.areaPath === 'string' && feature.areaPath.trim() !== '' ? (
-                        <div className="max-w-xs break-words">{feature.areaPath}</div>
+                        <div className="max-w-xs break-words text-xs">{feature.areaPath}</div>
                       ) : (
-                        <span className="text-gray-400">-</span>
+                        <span className="text-gray-400 text-xs">-</span>
                       )}
                     </div>
                   </td>
-                  <td className="hidden xl:table-cell px-4 py-4 text-sm">
-                    {feature.tags && feature.tags.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {feature.tags.slice(0, 3).map((tag, idx) => (
-                          <span key={idx} className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
-                            {tag}
-                          </span>
-                        ))}
-                        {feature.tags.length > 3 && (
-                          <span className="px-2 py-0.5 text-xs text-gray-500">
-                            +{feature.tags.length - 3}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm">{feature.votes}</td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">{feature.votes}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button 
                       onClick={() => setEditingFeature(feature)}
                       className="text-[#2D4660] hover:text-[#C89212] inline-block cursor-pointer"
@@ -4308,6 +4589,8 @@ export function AdminDashboard({
         previewFeatures={previewFeatures}
         onConfirmSync={onConfirmSync}
         onReplaceAll={onReplaceAll}
+        isFetching={isFetchingAzureDevOps}
+        config={azureDevOpsConfig}
       />
 
       {/* Reopen Session Modal */}

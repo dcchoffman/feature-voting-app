@@ -1108,6 +1108,7 @@ export async function fetchAzureDevOpsWorkItems(
     const workItemToParentMap = new Map<number, number>();
     const epicTitlesMap = new Map<number, string>();
     const parentTitlesMap = new Map<number, string>();
+    const parentTypesMap = new Map<number, string>(); // Store parent types for debugging
     
     // Fetch relations in batches of 10
     const batchSize = 10;
@@ -1127,16 +1128,54 @@ export async function fetchAzureDevOpsWorkItems(
           if (relationsResponse.ok) {
             const relationsData = await relationsResponse.json();
             
-            // Find parent relationship (Hierarchy-Forward)
+            // Find parent relationship
+            // Hierarchy-Forward: current work item is a CHILD, target is the PARENT
+            // Hierarchy-Reverse: current work item is a PARENT, target is a CHILD
+            // We want to find the parent, so we look for Hierarchy-Forward relations
+            // But we also need to check the work item type - Epics shouldn't have parents
+            const workItemType = item.fields['System.WorkItemType'] || '';
+            const isEpic = workItemType && workItemType.toLowerCase() === 'epic';
+            
             if (relationsData.relations) {
               for (const relation of relationsData.relations) {
+                // Hierarchy-Forward: current item is a CHILD, target is the PARENT
+                // Hierarchy-Reverse: current item is a PARENT, target is a CHILD
+                // We want to find parents, so we look for Hierarchy-Forward relations
                 if (relation.rel === 'System.LinkTypes.Hierarchy-Forward') {
-                  // Extract parent ID from URL (e.g., .../workitems/12345)
+                  // Extract target ID from URL (e.g., .../workitems/12345)
                   const match = relation.url.match(/\/work[iI]tems\/(\d+)(?:\?|$|\/)/i);
                   if (match) {
-                    const parentId = parseInt(match[1], 10);
-                    workItemToParentMap.set(item.id, parentId);
-                    // Debug: console.log(`Work item ${item.id} has parent ${parentId}`);
+                    const targetId = parseInt(match[1], 10);
+                    
+                    // If current item is an Epic, Hierarchy-Forward means the target is a CHILD
+                    // So we need to store: targetId's parent is current item (item.id)
+                    if (isEpic) {
+                      // Epic -> Feature: Feature's parent is Epic
+                      if (!workItemToParentMap.has(targetId)) {
+                        workItemToParentMap.set(targetId, item.id);
+                        console.log(`[Epic Detection] Epic ${item.id} "${item.fields['System.Title']}" has child ${targetId}, storing as parent of ${targetId}`);
+                      }
+                    } else {
+                      // Non-Epic -> Parent: current item's parent is target
+                      if (!workItemToParentMap.has(item.id)) {
+                        workItemToParentMap.set(item.id, targetId);
+                        console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" (type: ${workItemType}) has parent ${targetId}`);
+                      } else {
+                        console.log(`[Epic Detection] Work item ${item.id} already has parent ${workItemToParentMap.get(item.id)}, ignoring additional parent ${targetId}`);
+                      }
+                    }
+                  }
+                } else if (relation.rel === 'System.LinkTypes.Hierarchy-Reverse') {
+                  // Hierarchy-Reverse: current item is a PARENT, target is a CHILD
+                  // Extract target ID from URL
+                  const match = relation.url.match(/\/work[iI]tems\/(\d+)(?:\?|$|\/)/i);
+                  if (match) {
+                    const childId = parseInt(match[1], 10);
+                    // Store: childId's parent is current item (item.id)
+                    if (!workItemToParentMap.has(childId)) {
+                      workItemToParentMap.set(childId, item.id);
+                      console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" (type: ${workItemType}) has child ${childId}, storing as parent of ${childId}`);
+                    }
                   }
                 }
               }
@@ -1151,46 +1190,263 @@ export async function fetchAzureDevOpsWorkItems(
     // Step 4: Fetch parent work items to check if they are Epics
     const parentIds = Array.from(new Set(workItemToParentMap.values()));
     if (parentIds.length > 0) {
-      const parentIdsString = parentIds.slice(0, 200).join(',');
-      const parentFields = ['System.Id', 'System.Title', 'System.WorkItemType'].join(',');
-      const parentUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${parentIdsString}&fields=${parentFields}&api-version=7.0`;
-      
-      try {
-        const parentResponse = await fetch(parentUrl, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`
-          }
-        });
+      // Fetch parents in batches of 200 (Azure DevOps limit)
+      const batchSize = 200;
+      for (let i = 0; i < parentIds.length; i += batchSize) {
+        const batch = parentIds.slice(i, i + batchSize);
+        const parentIdsString = batch.join(',');
+        const parentFields = ['System.Id', 'System.Title', 'System.WorkItemType'].join(',');
+        const parentUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${parentIdsString}&fields=${parentFields}&api-version=7.0`;
         
-        if (parentResponse.ok) {
-          const parentData = await parentResponse.json();
-          for (const parent of parentData.value) {
-            parentTitlesMap.set(parent.id, parent.fields['System.Title'] || '');
-            if (parent.fields['System.WorkItemType'] === 'Epic') {
-              epicTitlesMap.set(parent.id, parent.fields['System.Title'] || '');
-              // Debug: console.log(`Found Epic ${parent.id}: ${parent.fields['System.Title']}`);
+        try {
+          const parentResponse = await fetch(parentUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+          
+          if (parentResponse.ok) {
+            const parentData = await parentResponse.json();
+            const parentsToCheckForGrandparents: number[] = [];
+            
+            for (const parent of parentData.value) {
+              const parentTitle = parent.fields['System.Title'] || '';
+              const parentType = parent.fields['System.WorkItemType'] || '';
+              parentTitlesMap.set(parent.id, parentTitle);
+              parentTypesMap.set(parent.id, parentType);
+              console.log(`[Epic Detection] Fetched parent ${parent.id}: type="${parentType}", title="${parentTitle}"`);
+              
+              // Check for Epic type (case-insensitive)
+              if (parentType && parentType.toLowerCase() === 'epic') {
+                epicTitlesMap.set(parent.id, parentTitle);
+                console.log(`[Epic Detection] ✓ Found Epic ${parent.id}: "${parentTitle}"`);
+              } else {
+                console.log(`[Epic Detection] Parent ${parent.id} is type "${parentType}", not an Epic - will check for grandparent`);
+                // If not an Epic, we need to check if it has a parent (grandparent) that might be an Epic
+                parentsToCheckForGrandparents.push(parent.id);
+              }
+            }
+            
+            // Fetch relations for non-Epic parents to find their parents (grandparents)
+            if (parentsToCheckForGrandparents.length > 0) {
+              await Promise.all(parentsToCheckForGrandparents.map(async (parentId) => {
+                try {
+                  const relationsUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/${parentId}?$expand=relations&api-version=7.0`;
+                  const relationsResponse = await fetch(relationsUrl, {
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`
+                    }
+                  });
+                  
+                  if (relationsResponse.ok) {
+                    const relationsData = await relationsResponse.json();
+                    if (relationsData.relations) {
+                      for (const relation of relationsData.relations) {
+                        if (relation.rel === 'System.LinkTypes.Hierarchy-Forward') {
+                          const match = relation.url.match(/\/work[iI]tems\/(\d+)(?:\?|$|\/)/i);
+                          if (match) {
+                            const grandParentId = parseInt(match[1], 10);
+                            // Store grandparent relationship
+                            if (!workItemToParentMap.has(parentId)) {
+                              workItemToParentMap.set(parentId, grandParentId);
+                              console.log(`[Epic Detection] Parent ${parentId} has grandparent ${grandParentId}`);
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error(`Error fetching relations for parent ${parentId}:`, error);
+                }
+              }));
             }
           }
+        } catch (error) {
+          console.error('Error fetching parent work items:', error);
         }
-      } catch (error) {
-        console.error('Error fetching parent work items:', error);
       }
     }
     
-    // Step 5: Transform the response and add Epic information
+    // Step 5: Recursively fetch grandparents (parents of parents) to find Epic ancestors
+    // Keep fetching up the hierarchy until we find Epics or run out of parents
+    let grandparentsToFetch = Array.from(new Set(workItemToParentMap.values()))
+      .filter(id => !parentTitlesMap.has(id));
+    let allFetchedIds = new Set<number>();
+    let maxDepth = 5; // Prevent infinite loops
+    let currentDepth = 0;
+    
+    // Mark already fetched parents
+    parentTitlesMap.forEach((_, id) => allFetchedIds.add(id));
+    
+    while (grandparentsToFetch.length > 0 && currentDepth < maxDepth) {
+      currentDepth++;
+      console.log(`[Epic Detection] Fetching ancestor level ${currentDepth}, ${grandparentsToFetch.length} ancestors to fetch`);
+      
+      const batchSize = 200;
+      for (let i = 0; i < grandparentsToFetch.length; i += batchSize) {
+        const batch = grandparentsToFetch.slice(i, i + batchSize);
+        const parentIdsString = batch.join(',');
+        const parentFields = ['System.Id', 'System.Title', 'System.WorkItemType'].join(',');
+        const parentUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${parentIdsString}&fields=${parentFields}&api-version=7.0`;
+        
+        try {
+          const parentResponse = await fetch(parentUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+          
+          if (parentResponse.ok) {
+            const parentData = await parentResponse.json();
+            const nextLevelAncestors: number[] = [];
+            
+            // First, fetch the work items
+            for (const parent of parentData.value) {
+              if (allFetchedIds.has(parent.id)) continue;
+              allFetchedIds.add(parent.id);
+              
+              const parentTitle = parent.fields['System.Title'] || '';
+              const parentType = parent.fields['System.WorkItemType'] || '';
+              parentTitlesMap.set(parent.id, parentTitle);
+              parentTypesMap.set(parent.id, parentType);
+              console.log(`[Epic Detection] Fetched ancestor ${parent.id}: type="${parentType}", title="${parentTitle}"`);
+              
+              // Check for Epic type (case-insensitive)
+              if (parentType && parentType.toLowerCase() === 'epic') {
+                epicTitlesMap.set(parent.id, parentTitle);
+                console.log(`[Epic Detection] ✓ Found Epic ancestor ${parent.id}: "${parentTitle}"`);
+              } else {
+                console.log(`[Epic Detection] Ancestor ${parent.id} is type "${parentType}", checking for its parent...`);
+              }
+            }
+            
+            // Then fetch relations for non-Epic ancestors to find their parents
+            await Promise.all(parentData.value.map(async (parent: any) => {
+              if (allFetchedIds.has(parent.id)) return;
+              const parentType = parent.fields['System.WorkItemType'] || '';
+              
+              // Only check for grandparents if this ancestor is not an Epic
+              if (parentType && parentType.toLowerCase() !== 'epic') {
+                try {
+                  const relationsUrl = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/${parent.id}?$expand=relations&api-version=7.0`;
+                  const relationsResponse = await fetch(relationsUrl, {
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`
+                    }
+                  });
+                  
+                  if (relationsResponse.ok) {
+                    const relationsData = await relationsResponse.json();
+                    if (relationsData.relations) {
+                      for (const relation of relationsData.relations) {
+                        if (relation.rel === 'System.LinkTypes.Hierarchy-Forward') {
+                          const match = relation.url.match(/\/work[iI]tems\/(\d+)(?:\?|$|\/)/i);
+                          if (match) {
+                            const greatGrandParentId = parseInt(match[1], 10);
+                            if (!allFetchedIds.has(greatGrandParentId)) {
+                              workItemToParentMap.set(parent.id, greatGrandParentId);
+                              nextLevelAncestors.push(greatGrandParentId);
+                              console.log(`[Epic Detection] Ancestor ${parent.id} has parent ${greatGrandParentId}`);
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error(`Error fetching relations for ancestor ${parent.id}:`, error);
+                }
+              }
+            }));
+            
+            grandparentsToFetch = nextLevelAncestors;
+          }
+        } catch (error) {
+          console.error('Error fetching ancestor work items:', error);
+        }
+      }
+    }
+    
+    // Step 6: Transform the response and add Epic information
     return allWorkItems.map((item: any) => {
       // Find Epic for this work item
       let epicTitle: string | null = null;
+      let epicId: number | null = null;
       
-      // Strategy 1: Check parent Epic relationship
-      const parentId = workItemToParentMap.get(item.id);
-      if (parentId) {
-        epicTitle = epicTitlesMap.get(parentId) || null;
-        if (epicTitle) {
-          // Debug: console.log(`Work item ${item.id} has Epic from parent ${parentId}: ${epicTitle}`);
+      // Strategy 1: Check parent Epic relationship - traverse up hierarchy to find Epic
+      // The hierarchy is: EPIC > FEATURE > everything else
+      // So we need to traverse up until we find an Epic
+      const workItemType = item.fields['System.WorkItemType'] || '';
+      const isEpic = workItemType && workItemType.toLowerCase() === 'epic';
+      
+      // Only look for Epic parent if this work item is not itself an Epic
+      // Also skip if this Epic incorrectly has a parent stored (shouldn't happen, but safety check)
+      if (!isEpic) {
+        let currentParentId = workItemToParentMap.get(item.id);
+        let traversedParents: number[] = []; // Track to avoid infinite loops
+        while (currentParentId && !traversedParents.includes(currentParentId)) {
+          traversedParents.push(currentParentId);
+          console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" (type: ${workItemType}) checking parent ${currentParentId}`);
+          
+          // First check if this parent is already known to be an Epic
+          epicTitle = epicTitlesMap.get(currentParentId) || null;
+          if (epicTitle) {
+            epicId = currentParentId; // Store the Epic ID
+            console.log(`[Epic Detection] ✓ Work item ${item.id} "${item.fields['System.Title']}" has Epic parent ${currentParentId}: "${epicTitle}"`);
+            break;
+          }
+          
+          // Check if parent was fetched and check its type
+          const parentTitle = parentTitlesMap.get(currentParentId);
+          const parentType = parentTypesMap.get(currentParentId);
+          
+          if (parentType) {
+            // Parent was fetched - check if it's an Epic
+            if (parentType.toLowerCase() === 'epic') {
+              epicTitle = parentTitle || null;
+              epicId = currentParentId;
+              // Also add to epicTitlesMap for future reference
+              if (epicTitle) {
+                epicTitlesMap.set(currentParentId, epicTitle);
+              }
+              console.log(`[Epic Detection] ✓ Work item ${item.id} "${item.fields['System.Title']}" has Epic parent ${currentParentId}: "${epicTitle}"`);
+              break;
+            } else {
+              console.log(`[Epic Detection] Parent ${currentParentId} "${parentTitle}" is type "${parentType}", traversing up to find Epic...`);
+              // Traverse up to grandparent to find Epic
+              currentParentId = workItemToParentMap.get(currentParentId);
+            }
+          } else {
+            // Parent wasn't fetched - might be in a different project or error occurred
+            console.warn(`[Epic Detection] ⚠ Work item ${item.id} "${item.fields['System.Title']}" has parent ${currentParentId} but parent wasn't fetched`);
+            break;
+          }
+        }
+      } else {
+        // This work item is an Epic - it shouldn't have a parent
+        const directParentId = workItemToParentMap.get(item.id);
+        if (directParentId) {
+          console.warn(`[Epic Detection] ⚠ Work item ${item.id} "${item.fields['System.Title']}" is an Epic but has a parent ${directParentId} stored. This is likely incorrect - Epics are at the top of the hierarchy.`);
+          // Clear the incorrect parent relationship
+          workItemToParentMap.delete(item.id);
+        }
+        console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" is itself an Epic (type: ${workItemType}), skipping Epic parent lookup`);
+      }
+      
+      // If we didn't find an Epic but have a direct parent, log it (only for non-Epics)
+      if (!epicTitle && !isEpic) {
+        const directParentId = workItemToParentMap.get(item.id);
+        if (directParentId) {
+          const parentTitle = parentTitlesMap.get(directParentId);
+          const parentType = parentTypesMap.get(directParentId) || 'Unknown';
+          if (parentTitle) {
+            console.log(`[Epic Detection] ⚠ Work item ${item.id} "${item.fields['System.Title']}" has parent ${directParentId} "${parentTitle}" (type: "${parentType}") but no Epic found in hierarchy`);
+          } else {
+            console.warn(`[Epic Detection] ⚠ Work item ${item.id} "${item.fields['System.Title']}" has parent ${directParentId} but parent wasn't fetched`);
+          }
         } else {
-          const parentTitle = parentTitlesMap.get(parentId);
-          // Debug: console.log(`Work item ${item.id} has parent ${parentId} (${parentTitle}) but it's not an Epic type`);
+          console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" has no parent`);
         }
       }
       
@@ -1211,11 +1467,12 @@ export async function fetchAzureDevOpsWorkItems(
           const epicFieldValue = item.fields[fieldName];
           if (epicFieldValue !== undefined && epicFieldValue !== null) {
             if (typeof epicFieldValue === 'string' && epicFieldValue.trim() !== '') {
-              const epicId = parseInt(epicFieldValue.trim());
-              if (!isNaN(epicId) && epicId > 0) {
-                epicTitle = epicTitlesMap.get(epicId) || null;
+              const parsedEpicId = parseInt(epicFieldValue.trim());
+              if (!isNaN(parsedEpicId) && parsedEpicId > 0) {
+                epicTitle = epicTitlesMap.get(parsedEpicId) || null;
                 if (epicTitle) {
-                  // Debug: console.log(`Work item ${item.id} has Epic ID ${epicId} from field ${fieldName}: ${epicTitle}`);
+                  epicId = parsedEpicId; // Store the Epic ID
+                  // Debug: console.log(`Work item ${item.id} has Epic ID ${parsedEpicId} from field ${fieldName}: ${epicTitle}`);
                   break;
                 }
               } else {
@@ -1226,6 +1483,7 @@ export async function fetchAzureDevOpsWorkItems(
             } else if (typeof epicFieldValue === 'number') {
               epicTitle = epicTitlesMap.get(epicFieldValue) || null;
               if (epicTitle) {
+                epicId = epicFieldValue; // Store the Epic ID
                 // Debug: console.log(`Work item ${item.id} has Epic ID ${epicFieldValue} from field ${fieldName}: ${epicTitle}`);
                 break;
               }
@@ -1235,10 +1493,15 @@ export async function fetchAzureDevOpsWorkItems(
       }
       
       if (!epicTitle) {
-        // Debug: console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic found`);
+        const parentId = workItemToParentMap.get(item.id);
+        if (parentId) {
+          console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" has parent ${parentId} but no Epic title found`);
+        } else {
+          console.log(`[Epic Detection] Work item ${item.id} "${item.fields['System.Title']}" has no Epic found (no parent)`);
+        }
       }
       
-      return {
+      const workItem: AzureDevOpsWorkItem = {
       id: item.id,
       fields: {
         'System.Title': item.fields['System.Title'],
@@ -1249,10 +1512,15 @@ export async function fetchAzureDevOpsWorkItems(
         'Microsoft.VSTS.Common.Priority': item.fields['Microsoft.VSTS.Common.Priority'],
         'System.AreaPath': item.fields['System.AreaPath'],
           'System.IterationPath': item.fields['System.IterationPath'],
-          'Epic': epicTitle || undefined
+          'Epic': epicTitle || undefined,
+          'EpicId': epicId ? epicId.toString() : undefined
       },
       url: `https://dev.azure.com/${organization}/${project}/_workitems/edit/${item.id}`
       };
+      
+      console.log(`[Map] Work item ${item.id} "${item.fields['System.Title']}" mapped with Epic: "${epicTitle || 'none'}", EpicId: "${epicId || 'none'}"`);
+      
+      return workItem;
     });
     
   } catch (error) {
@@ -1268,8 +1536,12 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
   return workItems.map(item => {
     // Use Epic from fields if available (fetched from relations)
     let epic: string | undefined = undefined;
+    let epicId: string | undefined = undefined;
     const epicField = item.fields['Epic'];
+    const epicIdField = item.fields['EpicId'];
     const workItemType = item.fields['System.WorkItemType'];
+    
+    console.log(`[Convert] Work item ${item.id} "${item.fields['System.Title']}": epicField="${epicField}", epicIdField="${epicIdField}", workItemType="${workItemType}"`);
     
     // Only use epic if it's actually set and not the same as the work item type
     if (epicField && typeof epicField === 'string' && epicField.trim() !== '') {
@@ -1277,15 +1549,21 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
       // Make sure it's not the work item type or just "Epic"
       if (trimmedEpic !== workItemType && trimmedEpic !== 'Epic' && trimmedEpic.toLowerCase() !== 'epic') {
         epic = trimmedEpic;
-        // Debug: console.log(`Work item ${item.id} converted - Epic: "${epic}"`);
+        console.log(`[Convert] Work item ${item.id} converted - Epic: "${epic}"`);
       } else {
-        console.warn(`Work item ${item.id} has epic field "${trimmedEpic}" which matches work item type "${workItemType}" - ignoring`);
+        console.warn(`[Convert] Work item ${item.id} has epic field "${trimmedEpic}" which matches work item type "${workItemType}" - ignoring`);
       }
+    }
+    
+    // Extract Epic ID if available
+    if (epicIdField && typeof epicIdField === 'string' && epicIdField.trim() !== '') {
+      epicId = epicIdField.trim();
+      console.log(`[Convert] Work item ${item.id} - Epic ID: "${epicId}"`);
     }
     
     // Debug log if epic is missing
     if (!epic && workItemType !== 'Epic') {
-      // Debug: console.log(`Work item ${item.id} (${item.fields['System.Title']}) has no Epic assigned`);
+      console.log(`[Convert] Work item ${item.id} "${item.fields['System.Title']}" has no Epic assigned`);
     }
     
     // Clean description - strip HTML tags
@@ -1308,6 +1586,7 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
       votes: 0,
       voters: [] as any[],
       epic: epic || undefined,
+      epicId: epicId || undefined,
       state: item.fields['System.State'] || undefined,
       areaPath: item.fields['System.AreaPath'] || undefined,
       tags: item.fields['System.Tags']

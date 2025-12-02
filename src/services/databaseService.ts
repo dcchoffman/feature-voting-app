@@ -988,7 +988,17 @@ export async function getFeatures(sessionId: string) {
     const isSuggestionState = feature.state === FEATURE_SUGGESTION_STATE;
     const hasSuggestionTag = Array.isArray(feature.tags) && feature.tags.includes(FEATURE_SUGGESTION_TAG);
     return !isSuggestionState && !hasSuggestionTag;
-  });
+  }).map((feature: any) => ({
+    ...feature,
+    workItemType: feature.work_item_type || feature.workItemType || null,
+    epic: feature.epic || null,
+    epicId: feature.epic_id || feature.epicId || null,
+    areaPath: feature.area_path || feature.areaPath || null,
+    azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
+    azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+    // Keep original snake_case fields for backward compatibility
+    azure_devops_id: feature.azure_devops_id || feature.azureDevOpsId || null
+  }));
 }
 
 export async function createFeature(feature: {
@@ -996,11 +1006,13 @@ export async function createFeature(feature: {
   title: string;
   description: string;
   epic: string | null;
+  epicId?: string | null;
   state?: string | null;
   areaPath?: string | null;
   tags?: string[] | null;
   azure_devops_id?: string | null;
   azure_devops_url?: string | null;
+  workItemType?: string | null;
 }) {
   const { data, error } = await supabase
     .from('features')
@@ -1009,39 +1021,57 @@ export async function createFeature(feature: {
       title: feature.title,
       description: feature.description,
       epic: feature.epic,
+      epic_id: feature.epicId,
       state: feature.state,
       area_path: feature.areaPath,
       tags: feature.tags,
       azure_devops_id: feature.azure_devops_id,
-      azure_devops_url: feature.azure_devops_url
+      azure_devops_url: feature.azure_devops_url,
+      work_item_type: feature.workItemType
     }])
     .select()
     .single();
   
   if (error) throw error;
-  return data;
+  
+  // Map snake_case to camelCase for consistency
+  return {
+    ...data,
+    workItemType: data.work_item_type || data.workItemType || null,
+    epic: data.epic || null,
+    epicId: data.epic_id || data.epicId || null,
+    areaPath: data.area_path || data.areaPath || null,
+    azureDevOpsId: data.azure_devops_id || data.azureDevOpsId || null,
+    azureDevOpsUrl: data.azure_devops_url || data.azureDevOpsUrl || null,
+    // Keep original snake_case fields for backward compatibility
+    azure_devops_id: data.azure_devops_id || data.azureDevOpsId || null
+  };
 }
 
 export async function updateFeature(id: string, updates: {
   title?: string;
   description?: string;
   epic?: string | null;
+  epicId?: string | null;
   state?: string | null;
   areaPath?: string | null;
   tags?: string[] | null;
   azure_devops_id?: string | null;
   azure_devops_url?: string | null;
+  workItemType?: string | null;
 }) {
   const dbUpdates: any = {};
   
   if (updates.title !== undefined) dbUpdates.title = updates.title;
   if (updates.description !== undefined) dbUpdates.description = updates.description;
   if (updates.epic !== undefined) dbUpdates.epic = updates.epic;
+  if (updates.epicId !== undefined) dbUpdates.epic_id = updates.epicId;
   if (updates.state !== undefined) dbUpdates.state = updates.state;
   if (updates.areaPath !== undefined) dbUpdates.area_path = updates.areaPath;
   if (updates.tags !== undefined) dbUpdates.tags = updates.tags;
   if (updates.azure_devops_id !== undefined) dbUpdates.azure_devops_id = updates.azure_devops_id;
   if (updates.azure_devops_url !== undefined) dbUpdates.azure_devops_url = updates.azure_devops_url;
+  if (updates.workItemType !== undefined) dbUpdates.work_item_type = updates.workItemType;
   
   const { data, error } = await supabase
     .from('features')
@@ -1051,7 +1081,19 @@ export async function updateFeature(id: string, updates: {
     .single();
   
   if (error) throw error;
-  return data;
+  
+  // Map snake_case to camelCase for consistency
+  return {
+    ...data,
+    workItemType: data.work_item_type || data.workItemType || null,
+    epic: data.epic || null,
+    epicId: data.epic_id || data.epicId || null,
+    areaPath: data.area_path || data.areaPath || null,
+    azureDevOpsId: data.azure_devops_id || data.azureDevOpsId || null,
+    azureDevOpsUrl: data.azure_devops_url || data.azureDevOpsUrl || null,
+    // Keep original snake_case fields for backward compatibility
+    azure_devops_id: data.azure_devops_id || data.azureDevOpsId || null
+  };
 }
 
 export async function deleteFeature(id: string) {

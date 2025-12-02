@@ -4,7 +4,7 @@
 // Location: src/screens/FeatureVoting.tsx
 // ============================================
 
-import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 import { supabase } from '../supabaseClient';
@@ -365,85 +365,124 @@ interface ModalProps {
   hideHeader?: boolean;
 }
 
-class Modal extends Component<ModalProps> {
-  render() {
-    const { isOpen, onClose, title, children, maxWidth = "max-w-2xl", hideCloseButton = false, hideHeader = false } = this.props;
-    
-    if (!isOpen) return null;
-    
-    return (
-      <div className="fixed inset-0 z-50 overflow-y-auto">
-        <div className="flex items-start justify-center min-h-screen p-4 text-center pt-8 sm:pt-16">
-          {/* Always show backdrop for lightbox effect */}
-          <div 
-            className="fixed inset-0 transition-opacity bg-black/50"
-            onClick={hideCloseButton ? undefined : onClose}
-            aria-hidden="true"
-          ></div>
-          
-          <div className={`inline-block w-full ${maxWidth} ${hideHeader ? 'p-6' : 'p-6'} mb-8 overflow-visible text-left align-middle transition-all transform bg-white shadow-xl rounded-lg relative z-10`}>
-            {!hideHeader ? (
-              <div className="flex items-start justify-between mb-5">
-                <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
-                  <div className="flex items-center justify-center h-10 w-10 rounded-full bg-[#C89212]/15 text-[#C89212]">
-                    <Lightbulb className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-[#2d4660] tracking-tight">{title}</h3>
-                    <p className="text-xs text-[#8A6D3B] font-medium mt-1 uppercase tracking-widest">
-                      Spark the roadmap with your ideas
-                    </p>
-                  </div>
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidth = "max-w-2xl", hideCloseButton = false, hideHeader = false }) => {
+  // Prevent body scrolling when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      // Save the current scroll position
+      const scrollY = window.scrollY;
+      // Prevent scrolling
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      document.body.style.overflow = 'hidden';
+      
+      return () => {
+        // Restore scrolling when modal closes
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        document.body.style.overflow = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isOpen]);
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex items-start justify-center min-h-screen p-4 text-center pt-8 sm:pt-16">
+        {/* Always show backdrop for lightbox effect */}
+        <div 
+          className="fixed inset-0 transition-opacity bg-black/50"
+          onClick={hideCloseButton ? undefined : onClose}
+          aria-hidden="true"
+        ></div>
+        
+        <div className={`inline-block w-full ${maxWidth} ${hideHeader ? 'p-6' : 'p-6'} mb-8 overflow-visible text-left align-middle transition-all transform bg-white shadow-xl rounded-lg relative z-10`}>
+          {!hideHeader ? (
+            <div className="flex items-start justify-between mb-5">
+              <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
+                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-[#C89212]/15 text-[#C89212]">
+                  <Lightbulb className="h-6 w-6" />
                 </div>
-                {!hideCloseButton && (
-                  <button
-                    onClick={onClose}
-                    className="ml-3 text-gray-400 hover:text-gray-500 focus:outline-none"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                )}
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2d4660] tracking-tight">{title}</h3>
+                  <p className="text-xs text-[#8A6D3B] font-medium mt-1 uppercase tracking-widest">
+                    Spark the roadmap with your ideas
+                  </p>
+                </div>
               </div>
-            ) : (
-              // Show only close button when header is hidden (unless hideCloseButton is true)
-              !hideCloseButton && (
-                <div className="flex justify-end -mt-2 -mr-2">
-                  <button
-                    onClick={onClose}
-                    className="text-gray-400 hover:text-gray-500 focus:outline-none"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              )
-            )}
-            
-            <div className={hideHeader ? "-mt-4" : "mt-2 overflow-visible"}>
-              {children}
+              {!hideCloseButton && (
+                <button
+                  onClick={onClose}
+                  className="ml-3 text-gray-400 hover:text-gray-500 focus:outline-none"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
             </div>
+          ) : (
+            // Show only close button when header is hidden (unless hideCloseButton is true)
+            !hideCloseButton && (
+              <div className="flex justify-end -mt-2 -mr-2">
+                <button
+                  onClick={onClose}
+                  className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            )
+          )}
+          
+          <div className={hideHeader ? "-mt-4" : "mt-2 overflow-visible"}>
+            {children}
           </div>
         </div>
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
 interface EpicTagProps {
   name: string;
+  epicId?: string | number | null;
+  description?: string | null;
   truncateAt?: number | null;
   className?: string;
 }
 
-const EpicTag = React.memo(function EpicTag({ name, truncateAt = 30, className }: EpicTagProps) {
+const EpicTag = React.memo(function EpicTag({ name, epicId, description, truncateAt = null, className }: EpicTagProps) {
   if (!name) return null;
   
   const displayName = truncateAt === null ? name : truncateText(name, truncateAt);
-  const combinedClassName = ['flex items-center text-xs text-[#2d4660]', className].filter(Boolean).join(' ');
+  const combinedClassName = ['flex flex-col text-xs text-[#2d4660]', className].filter(Boolean).join(' ');
+  const hasTooltip = description; // Only show tooltip if there's a description
 
   return (
-    <div className={combinedClassName}>
-      <Tag className="h-3 w-3 mr-1 text-[#2d4660]" />
-      <span className="font-medium leading-tight break-words">{displayName}</span>
+    <div className={`${combinedClassName} relative group/epic`}>
+      <div className="flex flex-col min-w-0">
+        {epicId && (
+          <div className="flex items-center gap-1 mb-1">
+            <Crown className="h-4 w-4" style={{ color: 'rgb(51, 153, 71)' }} />
+            <span className="text-xs font-medium text-gray-600">#{epicId}</span>
+          </div>
+        )}
+        <span className="font-medium leading-tight break-words min-w-0">{displayName}</span>
+      </div>
+      {hasTooltip && (
+        <div className="absolute left-0 bottom-full mb-2 opacity-0 group-hover/epic:opacity-100 transition-opacity z-50 w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg pointer-events-none">
+          <div className="font-semibold mb-1">{name}</div>
+          {description && (
+            <div className="text-gray-300 mt-2 line-clamp-4">
+              {description.replace(/<[^>]*>/g, '').trim()}
+            </div>
+          )}
+          <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+        </div>
+      )}
     </div>
   );
 });
@@ -785,6 +824,26 @@ interface VotersListModalProps {
 }
 
 function VotersListModal({ feature, onClose }: VotersListModalProps) {
+  // Prevent body scrolling when modal is open
+  useEffect(() => {
+    // Save the current scroll position
+    const scrollY = window.scrollY;
+    // Prevent scrolling
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+    document.body.style.overflow = 'hidden';
+    
+    return () => {
+      // Restore scrolling when modal closes
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      document.body.style.overflow = '';
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+  
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="relative z-10 bg-white rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
@@ -1060,7 +1119,7 @@ function ResultsScreen({
               <tr>
                 <th scope="col" className="w-12 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
                 <th scope="col" className="w-1/2 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th scope="col" className="hidden sm:table-cell w-1/4 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
+                <th scope="col" className="hidden sm:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Epic</th>
                 <th scope="col" className="w-14 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
                 <th scope="col" className="hidden md:table-cell w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Voters</th>
                 <th scope="col" className="w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -1072,14 +1131,17 @@ function ResultsScreen({
                   <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">{index + 1}</td>
                   <td className="px-4 py-4 whitespace-normal break-words text-sm font-medium">
                     {feature.title}
-                    {feature.azureDevOpsId && (
-                      <div className="mt-1">
-                        <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-                      </div>
-                    )}
                   </td>
-                  <td className="hidden sm:table-cell px-4 py-4 whitespace-nowrap text-sm">
-                    {feature.epic && <EpicTag name={feature.epic} />}
+                  <td className={`hidden sm:table-cell px-4 py-4 text-sm ${feature.epic || (feature.workItemType && feature.workItemType.toLowerCase() === 'epic') ? 'w-64' : 'w-32'}`}>
+                    {feature.workItemType && feature.workItemType.toLowerCase() === 'epic' ? (
+                      <span className="text-xs text-gray-600 italic">This Work Item is an Epic</span>
+                    ) : feature.epic ? (
+                      <EpicTag 
+                        name={feature.epic} 
+                        epicId={feature.epicId}
+                        description={feature.description}
+                      />
+                    ) : null}
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap text-sm">{feature.votes}</td>
                   <td className="hidden md:table-cell px-4 py-4 whitespace-nowrap text-sm">
@@ -3187,11 +3249,13 @@ useEffect(() => {
         title: feature.title,
         description: feature.description,
         epic: feature.epic,
+        epicId: feature.epic_id || feature.epicId,
         state: feature.state,
         areaPath: feature.area_path,
         tags: feature.tags || [],
         azureDevOpsId: feature.azure_devops_id,
         azureDevOpsUrl: feature.azure_devops_url,
+        workItemType: feature.workItemType || feature.work_item_type,
         votes: totalVotes,
         voters
       };
@@ -3319,11 +3383,13 @@ useEffect(() => {
             title: feature.title,
             description: feature.description,
             epic: feature.epic,
+            epicId: feature.epic_id || feature.epicId,
             state: feature.state,
-            areaPath: feature.area_path,
+            areaPath: feature.area_path || feature.areaPath,
             tags: feature.tags || [],
-            azureDevOpsId: feature.azure_devops_id,
-            azureDevOpsUrl: feature.azure_devops_url,
+            azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
+            azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
+            workItemType: feature.workItemType || feature.work_item_type,
             votes: totalVotes,
             voters
           };
@@ -3666,11 +3732,13 @@ useEffect(() => {
             title: feature.title,
             description: truncatedDescription,
             epic: feature.epic || null,
+            epicId: feature.epicId || null,
             state: feature.state,
             areaPath: feature.areaPath,
             tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
+            azure_devops_url: feature.azureDevOpsUrl,
+            workItemType: feature.workItemType || null
           });
         } else {
           await db.createFeature({
@@ -3678,11 +3746,13 @@ useEffect(() => {
             title: feature.title,
             description: truncatedDescription,
             epic: feature.epic || null,
+            epicId: feature.epicId || null,
             state: feature.state,
             areaPath: feature.areaPath,
             tags: feature.tags,
             azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
+            azure_devops_url: feature.azureDevOpsUrl,
+            workItemType: feature.workItemType || null
           });
         }
       }
@@ -3705,11 +3775,13 @@ useEffect(() => {
           title: feature.title,
           description: feature.description,
           epic: feature.epic,
+          epicId: feature.epic_id || feature.epicId,
           state: feature.state,
-          areaPath: feature.area_path,
+          areaPath: feature.area_path || feature.areaPath,
           tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
+          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
+          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
+          workItemType: feature.workItemType || feature.work_item_type,
           votes: totalVotes,
           voters
         };
@@ -3759,11 +3831,15 @@ useEffect(() => {
       const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
       const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
       
-      const featuresWithTruncatedDescriptions = newFeatures.map(feature => ({
-        ...feature,
-        description: truncateText(stripHtmlTags(feature.description), 300)
-      }));
+      const featuresWithTruncatedDescriptions = newFeatures.map(feature => {
+        console.log(`[Preview] Feature ${feature.id} "${feature.title}": epic="${feature.epic}", epicId="${feature.epicId}"`);
+        return {
+          ...feature,
+          description: truncateText(stripHtmlTags(feature.description), 300)
+        };
+      });
       
+      console.log(`[Preview] Setting ${featuresWithTruncatedDescriptions.length} preview features`);
       setPreviewFeatures(featuresWithTruncatedDescriptions);
       setShowPreviewModal(true);
       
@@ -3829,11 +3905,13 @@ useEffect(() => {
           title: feature.title,
           description: feature.description,
           epic: feature.epic,
+          epicId: feature.epic_id || feature.epicId,
           state: feature.state,
-          areaPath: feature.area_path,
+          areaPath: feature.area_path || feature.areaPath,
           tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
+          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
+          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
+          workItemType: feature.workItemType || feature.work_item_type,
           votes: totalVotes,
           voters
         };
@@ -3858,46 +3936,161 @@ useEffect(() => {
     }
   }, [previewFeatures, currentSession, azureDevOpsConfig]);
 
+  // Conflict resolution state
+  const [conflictModal, setConflictModal] = useState<{
+    isOpen: boolean;
+    feature: Feature | null;
+    existingFeature: any | null;
+    onResolve: (action: 'replace' | 'skip' | 'cancel' | 'replace-all') => void;
+  }>({
+    isOpen: false,
+    feature: null,
+    existingFeature: null,
+    onResolve: () => {}
+  });
+
   const handleConfirmSync = useCallback(async (selectedFeatures: Feature[]) => {
-    if (!selectedFeatures || selectedFeatures.length === 0 || !currentSession) return;
+    if (!selectedFeatures || selectedFeatures.length === 0 || !currentSession) {
+      console.error('handleConfirmSync: Invalid input', { selectedFeatures, currentSession });
+      return;
+    }
     
     try {
       setIsFetchingAzureDevOps(true);
+      console.log('handleConfirmSync: Starting sync for', selectedFeatures.length, 'features');
       
-      for (const feature of selectedFeatures) {
-        const existingFeatures = await db.getFeatures(currentSession.id);
-        const existing = existingFeatures.find(f => f.azure_devops_id === feature.azureDevOpsId);
+      // Get all existing features once at the start
+      const existingFeatures = await db.getFeatures(currentSession.id);
+      
+      const processedFeatures: Feature[] = [];
+      let cancelled = false;
+      let replaceAll = false;
+      
+      for (let i = 0; i < selectedFeatures.length; i++) {
+        const feature = selectedFeatures[i];
         
-        const plainTextDescription = stripHtmlTags(feature.description);
-        const truncatedDescription = truncateText(plainTextDescription, 300);
-        
-        if (existing) {
-          await db.updateFeature(existing.id, {
-            title: feature.title,
-            description: truncatedDescription,
-            epic: feature.epic || null,
-            state: feature.state,
-            areaPath: feature.areaPath,
-            tags: feature.tags,
-            azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
+        try {
+          // Compare using both camelCase and snake_case fields
+          const existing = existingFeatures.find(f => {
+            const fId = f.azureDevOpsId || f.azure_devops_id;
+            const featureId = feature.azureDevOpsId;
+            return fId && featureId && (fId.toString() === featureId.toString());
           });
-        } else {
-          await db.createFeature({
-            session_id: currentSession.id,
-            title: feature.title,
-            description: truncatedDescription,
-            epic: feature.epic || null,
-            state: feature.state,
-            areaPath: feature.areaPath,
-            tags: feature.tags,
-            azure_devops_id: feature.azureDevOpsId,
-            azure_devops_url: feature.azureDevOpsUrl
-          });
+          
+          const plainTextDescription = stripHtmlTags(feature.description);
+          const truncatedDescription = truncateText(plainTextDescription, 300);
+          
+          if (existing) {
+            // If replaceAll is true, skip the modal and replace automatically
+            if (replaceAll) {
+              console.log('handleConfirmSync: Auto-replacing existing feature (replace-all)', existing.id, feature.title);
+              await db.updateFeature(existing.id, {
+                title: feature.title,
+                description: truncatedDescription,
+                epic: feature.epic || null,
+                epicId: feature.epicId || null,
+                state: feature.state,
+                areaPath: feature.areaPath,
+                tags: feature.tags,
+                azure_devops_id: feature.azureDevOpsId,
+                azure_devops_url: feature.azureDevOpsUrl,
+                workItemType: feature.workItemType || null
+              });
+              processedFeatures.push(feature);
+              continue;
+            }
+            
+            // Show conflict resolution modal
+            const userAction = await new Promise<'replace' | 'skip' | 'cancel' | 'replace-all'>((resolve) => {
+              setConflictModal({
+                isOpen: true,
+                feature: feature,
+                existingFeature: existing,
+                onResolve: (action) => {
+                  setConflictModal({
+                    isOpen: false,
+                    feature: null,
+                    existingFeature: null,
+                    onResolve: () => {}
+                  });
+                  resolve(action);
+                }
+              });
+            });
+            
+            if (userAction === 'cancel') {
+              cancelled = true;
+              break;
+            } else if (userAction === 'skip') {
+              console.log('handleConfirmSync: Skipping existing feature', existing.id, feature.title);
+              continue;
+            } else if (userAction === 'replace-all') {
+              replaceAll = true;
+              console.log('handleConfirmSync: Replace-all selected, replacing current and all future conflicts');
+              await db.updateFeature(existing.id, {
+                title: feature.title,
+                description: truncatedDescription,
+                epic: feature.epic || null,
+                epicId: feature.epicId || null,
+                state: feature.state,
+                areaPath: feature.areaPath,
+                tags: feature.tags,
+                azure_devops_id: feature.azureDevOpsId,
+                azure_devops_url: feature.azureDevOpsUrl,
+                workItemType: feature.workItemType || null
+              });
+              processedFeatures.push(feature);
+            } else if (userAction === 'replace') {
+              console.log('handleConfirmSync: Replacing existing feature', existing.id, feature.title);
+              await db.updateFeature(existing.id, {
+                title: feature.title,
+                description: truncatedDescription,
+                epic: feature.epic || null,
+                epicId: feature.epicId || null,
+                state: feature.state,
+                areaPath: feature.areaPath,
+                tags: feature.tags,
+                azure_devops_id: feature.azureDevOpsId,
+                azure_devops_url: feature.azureDevOpsUrl,
+                workItemType: feature.workItemType || null
+              });
+              processedFeatures.push(feature);
+            }
+          } else {
+            console.log('handleConfirmSync: Creating new feature', feature.title, feature.azureDevOpsId);
+            const created = await db.createFeature({
+              session_id: currentSession.id,
+              title: feature.title,
+              description: truncatedDescription,
+              epic: feature.epic || null,
+              epicId: feature.epicId || null,
+              state: feature.state,
+              areaPath: feature.areaPath,
+              tags: feature.tags,
+              azure_devops_id: feature.azureDevOpsId,
+              azure_devops_url: feature.azureDevOpsUrl,
+              workItemType: feature.workItemType || null
+            });
+            console.log('handleConfirmSync: Created feature', created);
+            processedFeatures.push(feature);
+          }
+        } catch (featureError) {
+          console.error('handleConfirmSync: Error processing feature', feature.title, featureError);
+          throw featureError;
         }
       }
       
+      if (cancelled) {
+        console.log('handleConfirmSync: Sync cancelled by user');
+        return;
+      }
+      
+      console.log('handleConfirmSync: Fetching all features after sync');
+      // Add a small delay to ensure database writes are committed
+      await new Promise(resolve => setTimeout(resolve, 200));
       const allFeatures = await db.getFeatures(currentSession.id);
+      console.log('handleConfirmSync: Retrieved', allFeatures.length, 'features from database');
+      console.log('handleConfirmSync: Feature IDs:', allFeatures.map(f => ({ id: f.id, title: f.title, azureId: f.azure_devops_id || f.azureDevOpsId })));
       const votesData = await db.getVotes(currentSession.id);
       
       const featuresWithVotes = allFeatures.map(feature => {
@@ -3915,17 +4108,24 @@ useEffect(() => {
           title: feature.title,
           description: feature.description,
           epic: feature.epic,
+          epicId: feature.epic_id || feature.epicId,
           state: feature.state,
-          areaPath: feature.area_path,
+          areaPath: feature.area_path || feature.areaPath,
           tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id,
-          azureDevOpsUrl: feature.azure_devops_url,
+          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
+          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
+          workItemType: feature.workItemType || feature.work_item_type,
           votes: totalVotes,
           voters
         };
       });
       
-      setFeatures(featuresWithVotes);
+      console.log('handleConfirmSync: Setting features with votes', featuresWithVotes.length);
+      // Use functional update to ensure we're working with latest state
+      setFeatures(() => featuresWithVotes);
+      
+      // Force a small delay to ensure state update propagates and React re-renders
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       const updatedConfig = {
         ...azureDevOpsConfig,
@@ -3935,14 +4135,17 @@ useEffect(() => {
       await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
       setAzureDevOpsConfig(updatedConfig);
       
+      console.log('handleConfirmSync: Sync completed successfully');
+      
     } catch (error) {
       console.error('Azure DevOps sync error:', error);
       setAzureFetchError("Failed to sync features from Azure DevOps.");
+      throw error; // Re-throw so modal can handle it
     } finally {
       setIsFetchingAzureDevOps(false);
       setPreviewFeatures(null);
     }
-  }, [previewFeatures, currentSession, azureDevOpsConfig]);
+  }, [currentSession, azureDevOpsConfig]);
 
   const handleDisconnectAzureDevOps = useCallback(async () => {
     if (!currentSession) return;
@@ -4059,7 +4262,8 @@ useEffect(() => {
       await db.updateFeature(updatedFeature.id, {
         title: updatedFeature.title,
         description: updatedFeature.description,
-        epic: updatedFeature.epic
+        epic: updatedFeature.epic,
+        epicId: updatedFeature.epicId || null
       });
       
       setFeatures(prev => prev.map(f => f.id === updatedFeature.id ? updatedFeature : f));
@@ -4600,15 +4804,140 @@ const handleDeleteSession = useCallback(async () => {
     availableProjects, handleShowResultsPage
   ]);
 
+  // Conflict Resolution Modal Component
+  const ConflictResolutionModal = () => {
+    const { feature, existingFeature } = conflictModal;
+    
+    // Prevent body scrolling when modal is open
+    useEffect(() => {
+      if (conflictModal.isOpen) {
+        // Save the current scroll position
+        const scrollY = window.scrollY;
+        // Prevent scrolling
+        document.body.style.position = 'fixed';
+        document.body.style.top = `-${scrollY}px`;
+        document.body.style.width = '100%';
+        document.body.style.overflow = 'hidden';
+        
+        return () => {
+          // Restore scrolling when modal closes
+          document.body.style.position = '';
+          document.body.style.top = '';
+          document.body.style.width = '';
+          document.body.style.overflow = '';
+          window.scrollTo(0, scrollY);
+        };
+      }
+    }, [conflictModal.isOpen]);
+    
+    if (!conflictModal.isOpen || !feature || !existingFeature) {
+      return null;
+    }
+
+    return (
+      <div className="fixed inset-0 z-[60] overflow-y-auto">
+        <div className="flex items-start justify-center min-h-screen p-4 text-center pt-8 sm:pt-16">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 transition-opacity bg-black/50"
+            onClick={() => conflictModal.onResolve('cancel')}
+            aria-hidden="true"
+          ></div>
+          
+          <div className="inline-block w-full max-w-2xl mb-8 overflow-visible text-left align-middle transition-all transform bg-white shadow-xl rounded-lg relative z-10">
+            <div className="flex items-start justify-between mb-5 p-6 pb-0">
+              <div className="flex items-center gap-3 bg-[#FFF7E2] border border-[#C89212]/40 rounded-xl px-6 py-3 shadow-sm w-full mr-4">
+                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-[#C89212]/15 text-[#C89212]">
+                  <Lightbulb className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-[#2d4660] tracking-tight">Work Item Already Exists</h3>
+                  <p className="text-xs text-[#8A6D3B] font-medium mt-1 uppercase tracking-widest">
+                    Spark the roadmap with your ideas
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => conflictModal.onResolve('cancel')}
+                className="ml-3 text-gray-400 hover:text-gray-500 focus:outline-none"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="space-y-4">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <p className="text-sm text-yellow-800 mb-2">
+                    This work item already exists in your voting session. What would you like to do?
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-2">Existing Work Item:</h4>
+                    <p className="text-sm text-gray-700">{existingFeature.title}</p>
+                    {existingFeature.azureDevOpsId && (
+                      <p className="text-xs text-gray-500 mt-1">Azure DevOps ID: {existingFeature.azureDevOpsId}</p>
+                    )}
+                  </div>
+
+                  <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                    <h4 className="font-semibold text-blue-900 mb-2">New Work Item:</h4>
+                    <p className="text-sm text-blue-700">{feature.title}</p>
+                    {feature.azureDevOpsId && (
+                      <p className="text-xs text-blue-600 mt-1">Azure DevOps ID: {feature.azureDevOpsId}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-4 border-t">
+                  <Button
+                    variant="primary"
+                    onClick={() => conflictModal.onResolve('replace-all')}
+                  >
+                    Replace All Selected
+                  </Button>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="secondary"
+                      onClick={() => conflictModal.onResolve('cancel')}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => conflictModal.onResolve('skip')}
+                    >
+                      Skip
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => conflictModal.onResolve('replace')}
+                    >
+                      Replace
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // IMPORTANT: Return loading check AFTER all hooks
   if (!currentSession) {
     return (
-      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading session...</p>
+      <>
+        <ConflictResolutionModal />
+        <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading session...</p>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -4635,12 +4964,14 @@ const handleDeleteSession = useCallback(async () => {
   }
 
   return (
-    <div className="w-full bg-gray-50 text-gray-900 font-sans min-h-screen flex flex-col">
-      <div className="flex-grow">
-        {renderContent}
-      </div>
-      
-      <Footer 
+    <>
+      <ConflictResolutionModal />
+      <div className="w-full bg-gray-50 text-gray-900 font-sans min-h-screen flex flex-col">
+        <div className="flex-grow">
+          {renderContent}
+        </div>
+        
+        <Footer 
         currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
         onSelectStakeholder={handleShowVoting}
         onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
@@ -4677,9 +5008,10 @@ const handleDeleteSession = useCallback(async () => {
         confirmText={isDeletingSession ? 'Deleting…' : 'Delete Session'}
         type="delete"
       />
-     </div>
-   );
- }
+      </div>
+    </>
+  );
+}
 
 export default FeatureVotingSystem;
 

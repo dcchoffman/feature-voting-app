@@ -329,10 +329,10 @@ export default function SystemAdminsScreen() {
             </button>
             <button
               onClick={handleLogout}
-              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              className="flex items-center justify-center p-2 w-10 h-10 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              title="Logout"
             >
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
+              <LogOut className="h-4 w-4" />
             </button>
           </div>
 
@@ -367,10 +367,10 @@ export default function SystemAdminsScreen() {
                 </button>
                 <button
                   onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  className="w-full px-3 py-2 flex items-center justify-center hover:bg-gray-50"
+                  title="Logout"
                 >
-                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
-                  Logout
+                  <LogOut className="h-4 w-4 text-gray-700" />
                 </button>
               </div>
             </div>

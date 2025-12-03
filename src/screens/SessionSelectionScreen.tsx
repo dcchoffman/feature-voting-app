@@ -32,7 +32,11 @@ export default function SessionSelectionScreen() {
   const [adminCounts, setAdminCounts] = useState<Record<string, number>>({});
   const [stakeholderCounts, setStakeholderCounts] = useState<Record<string, number>>({});
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
-  const [viewMode, setViewMode] = useState<'admin' | 'stakeholder' | 'system-admin'>('admin');
+  const [viewMode, setViewMode] = useState<'admin' | 'stakeholder' | 'system-admin'>(() => {
+    // Initialize from sessionStorage if available
+    const saved = sessionStorage.getItem('viewMode') as 'admin' | 'stakeholder' | 'system-admin' | null;
+    return saved || 'admin';
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [productLookup, setProductLookup] = useState<Record<string, string>>({});
@@ -851,8 +855,10 @@ export default function SessionSelectionScreen() {
       resetCreateSessionForm();
       
       // Small delay to ensure state is updated before navigation
+      // Convert viewMode to adminPerspective for navigation
+      const perspective = viewMode === 'system-admin' ? 'system' : 'session';
       setTimeout(() => {
-        navigate('/admin');
+        navigate(`/admin?perspective=${perspective}`);
       }, 100);
     } catch (error) {
       console.error('Error creating session from modal:', error);
@@ -1087,6 +1093,9 @@ export default function SessionSelectionScreen() {
     setCurrentSession(session);
     const role = sessionRoles[session.id];
     
+    // Convert viewMode to adminPerspective for navigation
+    const perspective = viewMode === 'system-admin' ? 'system' : 'session';
+    
     // If in stakeholder view mode, always go to voting
     if (viewMode === 'stakeholder') {
       navigate('/vote');
@@ -1094,7 +1103,7 @@ export default function SessionSelectionScreen() {
     // If user is admin and in admin view, go to admin dashboard
     // Otherwise, go to voting screen
     else if (role?.isAdmin) {
-      navigate('/admin');
+      navigate(`/admin?perspective=${perspective}`);
     } else {
       navigate('/vote');
     }
@@ -1352,7 +1361,9 @@ export default function SessionSelectionScreen() {
   const handleViewResults = (e: React.MouseEvent, session: any) => {
     e.stopPropagation();
     setCurrentSession(session);
-    navigate('/results');
+    // Convert viewMode to adminPerspective for navigation
+    const perspective = viewMode === 'system-admin' ? 'system' : 'session';
+    navigate(`/results?perspective=${perspective}`);
   };
 
   const closeStakeholderInviteModal = () => {
@@ -1878,7 +1889,7 @@ export default function SessionSelectionScreen() {
                     </div>
                   )}
                 </div>
-                {status.text !== 'Upcoming' && status.text !== 'Draft' && (
+                {status.text !== 'Upcoming' && status.text !== 'Draft' && viewMode !== 'stakeholder' && (
                 <button
                   onClick={(e) => handleViewResults(e, session)}
                     className="ml-4 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#C89212] text-white hover:bg-[#E0A814] transition-colors cursor-pointer flex-shrink-0"
@@ -1918,36 +1929,38 @@ export default function SessionSelectionScreen() {
             )}
           </div>
 
-          {/* Email Invite */}
-          <div className="pt-4 border-t border-gray-200">
-            {(() => {
-              const isDraft = isDraftSession(session);
-              const shouldDisable = isClosed || isDraft;
-              return (
-                <div className={`relative inline-block w-full ${shouldDisable ? 'group' : ''}`}>
+          {/* Email Invite - Only show for admins */}
+          {viewMode !== 'stakeholder' && (
+            <div className="pt-4 border-t border-gray-200">
+              {(() => {
+                const isDraft = isDraftSession(session);
+                const shouldDisable = isClosed || isDraft;
+                return (
+                  <div className={`relative inline-block w-full ${shouldDisable ? 'group' : ''}`}>
               <button
                 onClick={(e) => handleEmailInvite(e, session)}
-                    disabled={shouldDisable}
+                      disabled={shouldDisable}
                 className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors ${
-                      shouldDisable
+                        shouldDisable
                     ? 'bg-gray-200 text-gray-500'
                     : 'bg-blue-50 hover:bg-blue-100'
                 }`}
-                    style={shouldDisable ? { cursor: 'not-allowed' } : {}}
+                      style={shouldDisable ? { cursor: 'not-allowed' } : {}}
               >
-                    <Mail className={`h-4 w-4 mr-2 ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`} />
-                    <span className={`text-sm font-medium ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
+                      <Mail className={`h-4 w-4 mr-2 ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`} />
+                      <span className={`text-sm font-medium ${shouldDisable ? 'text-gray-500' : 'text-blue-600'}`}>Email Invite to Stakeholders</span>
               </button>
-                  {shouldDisable && (
+                    {shouldDisable && (
                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded shadow-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-10 pointer-events-none">
-                      {isDraft ? 'Draft Session' : 'Session Closed'}
+                        {isDraft ? 'Draft Session' : 'Session Closed'}
                   <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-100 rotate-45 transform"></div>
                 </div>
               )}
-                </div>
-              );
-            })()}
             </div>
+                );
+              })()}
+            </div>
+          )}
           </div>
         </div>
       </>
@@ -1994,24 +2007,67 @@ export default function SessionSelectionScreen() {
             <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">My Voting Sessions</h1>
             <p className="text-sm text-gray-600">
               Welcome, {currentUser?.name}
-              {isSystemAdmin && (
-                <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
-                  <Crown className="h-3.5 w-3.5 mr-1" />
-                  System Admin
+              {(() => {
+                // Determine primary role
+                const primaryRole = isSystemAdmin ? 'system-admin' : adminSessions.length > 0 ? 'session-admin' : 'stakeholder';
+                const primaryBadge = primaryRole === 'system-admin' ? (
+                  <span className="inline-flex items-baseline text-[#C89212]">
+                    <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
+                    <span className="ml-1 text-sm">System Admin</span>
                 </span>
-              )}
-              {!isSystemAdmin && adminSessions.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
-                  <Shield className="h-3.5 w-3.5 mr-1" />
-                  Session Admin
+                ) : primaryRole === 'session-admin' ? (
+                  <span className="inline-flex items-baseline text-[#576C71]">
+                    <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
+                    <span className="ml-1 text-sm">Session Admin</span>
                 </span>
-              )}
-              {!isSystemAdmin && adminSessions.length === 0 && stakeholderOnlySessions.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#8B5A4A] text-white">
-                  <UserIcon className="h-3.5 w-3.5 mr-1" />
-                  Stakeholder
+                ) : (
+                  <span className="inline-flex items-baseline text-[#8B5A4A]">
+                    <span className="inline-flex items-center"><UserIcon className="h-3.5 w-3.5" /></span>
+                    <span className="ml-1 text-sm">Stakeholder</span>
                 </span>
-              )}
+                );
+                
+                // Determine current view role
+                const currentViewRole = isSystemAdmin && viewMode === 'system-admin' ? 'system-admin' : viewMode === 'admin' ? 'session-admin' : 'stakeholder';
+                
+                // If view mode matches primary role, just show primary role
+                if (currentViewRole === primaryRole) {
+                  return (
+                    <span className="text-sm text-gray-600">
+                      , {primaryBadge}
+                    </span>
+                  );
+                }
+                
+                // Otherwise show primary role + "viewing this page as" + view role
+                const viewingAsBadge = currentViewRole === 'system-admin' ? (
+                  <span className="inline-flex items-baseline text-[#C89212]">
+                    <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
+                    <span className="ml-1 text-sm">System Admin</span>
+                  </span>
+                ) : currentViewRole === 'session-admin' ? (
+                  <span className="inline-flex items-baseline text-[#576C71]">
+                    <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
+                    <span className="ml-1 text-sm">Session Admin</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-baseline text-[#8B5A4A]">
+                    <span className="inline-flex items-center"><UserIcon className="h-3.5 w-3.5" /></span>
+                    <span className="ml-1 text-sm">Stakeholder</span>
+                  </span>
+                );
+                
+                return (
+                  <span className="text-sm text-gray-600">
+                    , {primaryBadge}
+                    <span className="md:inline hidden">, </span>
+                    <span className="whitespace-nowrap md:inline inline-block">
+                      <span className="md:hidden">, </span>
+                      viewing this page as a {viewingAsBadge}
+                    </span>
+                  </span>
+                );
+              })()}
             </p>
           </div>
         </div>
@@ -2050,10 +2106,13 @@ export default function SessionSelectionScreen() {
             )}
             <button
               onClick={handleLogout}
-              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              className={`flex items-center justify-center bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors ${
+                viewMode === 'stakeholder' ? 'px-4 py-2' : 'p-2 w-10 h-10'
+              }`}
+              title="Logout"
             >
-              <LogOut className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Logout</span>
+              <LogOut className="h-4 w-4" />
+              {viewMode === 'stakeholder' && <span className="ml-2">Logout</span>}
             </button>
           </div>
 
@@ -2101,10 +2160,13 @@ export default function SessionSelectionScreen() {
                 )}
                 <button
                   onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  className={`w-full px-3 py-2 flex items-center hover:bg-gray-50 ${
+                    viewMode === 'stakeholder' ? 'text-left' : 'justify-center'
+                  }`}
+                  title="Logout"
                 >
-                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
-                  Logout
+                  <LogOut className="h-4 w-4 text-gray-700" />
+                  {viewMode === 'stakeholder' && <span className="ml-2 text-base text-gray-700">Logout</span>}
                 </button>
               </div>
             </div>
@@ -4161,10 +4223,25 @@ export default function SessionSelectionScreen() {
       {/* Footer with role toggle (uses Footer component from FeatureVoting) */}
       <Footer
         currentRole={isSystemAdmin && viewMode === 'system-admin' ? 'system-admin' : viewMode === 'admin' ? 'session-admin' : 'stakeholder'}
-        onSelectStakeholder={() => setViewMode('stakeholder')}
-        onSelectSessionAdmin={() => setViewMode('admin')}
-        onSelectSystemAdmin={isSystemAdmin ? () => setViewMode('system-admin') : undefined}
-        showRoleToggle={hasAdminAccess || isSystemAdmin}
+        onSelectStakeholder={() => {
+          setViewMode('stakeholder');
+          sessionStorage.setItem('viewMode', 'stakeholder');
+          // Also update adminPerspective for consistency
+          sessionStorage.setItem('adminPerspective', 'session');
+        }}
+        onSelectSessionAdmin={() => {
+          setViewMode('admin');
+          sessionStorage.setItem('viewMode', 'admin');
+          // Also update adminPerspective for consistency
+          sessionStorage.setItem('adminPerspective', 'session');
+        }}
+        onSelectSystemAdmin={isSystemAdmin ? () => {
+          setViewMode('system-admin');
+          sessionStorage.setItem('viewMode', 'system-admin');
+          // Also update adminPerspective for consistency
+          sessionStorage.setItem('adminPerspective', 'system');
+        } : undefined}
+        showRoleToggle={hasAdminAccess}
       />
 
       <Modal

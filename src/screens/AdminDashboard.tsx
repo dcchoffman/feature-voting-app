@@ -46,7 +46,8 @@ import {
   FlaskConical,
   CircleAlert,
   Database,
-  Tag
+  Tag,
+  User as UserIcon
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -2497,6 +2498,11 @@ export function AdminDashboard({
   const [sessionActionsMenuOpen, setSessionActionsMenuOpen] = useState(false);
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isSessionAdmin, setIsSessionAdmin] = useState(false);
+  
+  // Compute effective role based on adminPerspective
+  // When adminPerspective is 'session', treat as Session Admin even if user is System Admin
+  const effectiveIsSystemAdmin = adminPerspective === 'system' && isSystemAdmin;
+  const effectiveIsSessionAdmin = adminPerspective === 'session' || (adminPerspective === 'system' && !isSystemAdmin && isSessionAdmin);
   const [adminCount, setAdminCount] = useState<number>(0);
   const [stakeholderCount, setStakeholderCount] = useState<number>(0);
   const sessionActionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2893,18 +2899,18 @@ export function AdminDashboard({
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    // Navigate to manage-admins screen for Session Admins
-    navigate('/manage-admins');
-  }, [currentSession, setCurrentSession, navigate]);
+    // Navigate to users screen with session-admin filter and perspective
+    navigate(`/users?filter=session-admin&perspective=${adminPerspective}`);
+  }, [currentSession, setCurrentSession, navigate, adminPerspective]);
 
   const handleManageStakeholders = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    // Navigate to manage-stakeholders screen for Session Admins
-    navigate('/manage-stakeholders');
-  }, [currentSession, setCurrentSession, navigate]);
+    // Navigate to users screen with stakeholder filter and perspective
+    navigate(`/users?filter=stakeholder&perspective=${adminPerspective}`);
+  }, [currentSession, setCurrentSession, navigate, adminPerspective]);
 
   const logStatusNote = useCallback(async (note: {
     type: 'reopen' | 'ended-early';
@@ -3221,19 +3227,68 @@ export function AdminDashboard({
             <h1 className="text-2xl font-bold text-[#2D4660] md:text-3xl">Admin Dashboard</h1>
             {currentUser && (
               <p className="text-sm text-gray-600 mt-1">
-                {currentUser.name}
-                {isSystemAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
-                    <Crown className="h-3.5 w-3.5 mr-1" />
-                    System Admin
-                  </span>
-                )}
-                {!isSystemAdmin && isSessionAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
-                    <Shield className="h-3.5 w-3.5 mr-1" />
-                    Session Admin
-                  </span>
-                )}
+                Welcome, {currentUser.name}
+                {(() => {
+                  // Determine primary role based on actual roles
+                  const primaryRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder';
+                  const primaryBadge = primaryRole === 'system-admin' ? (
+                    <span className="inline-flex items-baseline text-[#C89212]">
+                      <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
+                      <span className="ml-1 text-sm">System Admin</span>
+                    </span>
+                  ) : primaryRole === 'session-admin' ? (
+                    <span className="inline-flex items-baseline text-[#576C71]">
+                      <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
+                      <span className="ml-1 text-sm">Session Admin</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-baseline text-[#8B5A4A]">
+                      <span className="inline-flex items-center"><UserIcon className="h-3.5 w-3.5" /></span>
+                      <span className="ml-1 text-sm">Stakeholder</span>
+                    </span>
+                  );
+                  
+                  // Determine current view role based on adminPerspective
+                  const currentViewRole = effectiveIsSystemAdmin ? 'system-admin' : effectiveIsSessionAdmin ? 'session-admin' : 'stakeholder';
+                  
+                  // If view mode matches primary role, just show primary role
+                  if (currentViewRole === primaryRole) {
+                    return (
+                      <span className="text-sm text-gray-600">
+                        , {primaryBadge}
+                      </span>
+                    );
+                  }
+                  
+                  // Otherwise show primary role + "viewing this page as" + view role
+                  const viewingAsBadge = currentViewRole === 'system-admin' ? (
+                    <span className="inline-flex items-baseline text-[#C89212]">
+                      <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
+                      <span className="ml-1 text-sm">System Admin</span>
+                    </span>
+                  ) : currentViewRole === 'session-admin' ? (
+                    <span className="inline-flex items-baseline text-[#576C71]">
+                      <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
+                      <span className="ml-1 text-sm">Session Admin</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-baseline text-[#8B5A4A]">
+                      <span className="inline-flex items-center"><UserIcon className="h-3.5 w-3.5" /></span>
+                      <span className="ml-1 text-sm">Stakeholder</span>
+                    </span>
+                  );
+                  
+                  return (
+                    <span className="text-sm text-gray-600">
+                      , {primaryBadge}
+                      <span className="md:inline hidden">, </span>
+                      <span className="whitespace-nowrap md:inline inline-block">
+                        <span className="md:hidden">, </span>
+                        viewing this page as a {viewingAsBadge}
+                      </span>
+                    </span>
+                  );
+                })()}
               </p>
             )}
           </div>
@@ -3252,15 +3307,15 @@ export function AdminDashboard({
           </button>
           )}
           <button 
-            onClick={() => navigate(adminPerspective === 'system' || isSessionAdmin ? '/users' : '/users?filter=stakeholder')} 
+            onClick={() => navigate(effectiveIsSystemAdmin || effectiveIsSessionAdmin ? `/users?perspective=${adminPerspective}` : '/users?filter=stakeholder')} 
             className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
           >
-            {adminPerspective === 'system' || isSessionAdmin ? (
+            {effectiveIsSystemAdmin || effectiveIsSessionAdmin ? (
               <Shield className="mr-2 h-4 w-4" />
             ) : (
               <Users className="mr-2 h-4 w-4" />
             )}
-              {adminPerspective === 'system' || isSessionAdmin ? 'User Management' : 'Stakeholders'}
+              {effectiveIsSystemAdmin || effectiveIsSessionAdmin ? 'User Management' : 'Stakeholders'}
           </button>
           <button 
             onClick={() => navigate('/sessions')} 
@@ -3271,10 +3326,10 @@ export function AdminDashboard({
           </button>
           <button 
             onClick={onLogout} 
-            className="flex items-center px-4 py-2 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
+            className="flex items-center justify-center p-2 w-10 h-10 bg-[#576C71] text-white rounded-lg hover:bg-[#1E5461] transition-colors"
+            title="Logout"
           >
-            <LogOut className="mr-2 h-4 w-4" />
-              Logout
+            <LogOut className="h-4 w-4" />
           </button>
           </div>
 
@@ -3303,15 +3358,15 @@ export function AdminDashboard({
                 </button>
                 )}
                 <button
-                  onClick={() => { setMobileMenuOpen(false); navigate(adminPerspective === 'system' || isSessionAdmin ? '/users' : '/users?filter=stakeholder'); }}
+                  onClick={() => { setMobileMenuOpen(false); navigate(effectiveIsSystemAdmin || effectiveIsSessionAdmin ? `/users?perspective=${adminPerspective}` : '/users?filter=stakeholder'); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                 >
-                  {adminPerspective === 'system' || isSessionAdmin ? (
+                  {effectiveIsSystemAdmin || effectiveIsSessionAdmin ? (
                     <Shield className="h-4 w-4 mr-2 text-gray-700" />
                   ) : (
                     <Users className="h-4 w-4 mr-2 text-gray-700" />
                   )}
-                  {adminPerspective === 'system' || isSessionAdmin ? 'User Management' : 'Stakeholders'}
+                  {effectiveIsSystemAdmin || effectiveIsSessionAdmin ? 'User Management' : 'Stakeholders'}
                 </button>
                 <button
                   onClick={() => { setMobileMenuOpen(false); navigate('/sessions'); }}
@@ -3338,10 +3393,10 @@ export function AdminDashboard({
                 </button>
                 <button
                   onClick={() => { setMobileMenuOpen(false); onLogout(); }}
-                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  className="w-full px-3 py-2 flex items-center justify-center hover:bg-gray-50"
+                  title="Logout"
                 >
-                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
-                  Logout
+                  <LogOut className="h-4 w-4 text-gray-700" />
                 </button>
               </div>
             </div>

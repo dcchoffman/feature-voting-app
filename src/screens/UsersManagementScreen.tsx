@@ -21,6 +21,127 @@ import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-squar
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 import { searchAzureAdUsers, type AzureAdUser } from '../services/azureAdUserService';
 
+// Helper functions for role badge display
+interface RoleBadgeInfo {
+  label: string;
+  className: string;
+  icon: React.ReactNode;
+}
+
+const getRoleBadgeInfo = (
+  isSystemAdmin: boolean,
+  isSessionAdmin: boolean,
+  isStakeholder: boolean
+): RoleBadgeInfo | null => {
+  if (isSystemAdmin) {
+    return { 
+      label: 'System Admin', 
+      className: 'text-[#C89212]',
+      icon: <Crown className="h-3.5 w-3.5" />
+    };
+  }
+  if (isSessionAdmin) {
+    return { 
+      label: 'Session Admin', 
+      className: 'text-[#576C71]',
+      icon: <Shield className="h-3.5 w-3.5" />
+    };
+  }
+  if (isStakeholder) {
+    return { 
+      label: 'Stakeholder', 
+      className: 'text-[#8B5A4A]',
+      icon: <UserIcon className="h-3.5 w-3.5" />
+    };
+  }
+  return null;
+};
+
+const getRoleBadgeInfoFromCurrentRole = (
+  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+): RoleBadgeInfo | null => {
+  switch (currentRole) {
+    case 'system-admin':
+      return { 
+        label: 'System Admin', 
+        className: 'text-[#C89212]',
+        icon: <Crown className="h-3.5 w-3.5" />
+      };
+    case 'session-admin':
+      return { 
+        label: 'Session Admin', 
+        className: 'text-[#576C71]',
+        icon: <Shield className="h-3.5 w-3.5" />
+      };
+    case 'stakeholder':
+      return { 
+        label: 'Stakeholder', 
+        className: 'text-[#8B5A4A]',
+        icon: <UserIcon className="h-3.5 w-3.5" />
+      };
+    default:
+      return null;
+  }
+};
+
+const getPrimaryRole = (
+  isSystemAdmin: boolean,
+  isSessionAdmin: boolean,
+  isStakeholder: boolean
+): 'stakeholder' | 'session-admin' | 'system-admin' => {
+  if (isSystemAdmin) return 'system-admin';
+  if (isSessionAdmin) return 'session-admin';
+  return 'stakeholder';
+};
+
+const getRoleBadgeDisplay = (
+  isSystemAdmin: boolean,
+  isSessionAdmin: boolean,
+  isStakeholder: boolean,
+  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+): React.ReactNode => {
+  const primaryRole = getPrimaryRole(isSystemAdmin, isSessionAdmin, isStakeholder);
+  const primaryBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
+  
+  if (!primaryBadge) return null;
+  
+  // If current role matches primary role, just show primary role
+  if (currentRole === primaryRole) {
+    return (
+      <span className="text-sm text-gray-600">
+        ,{' '}
+        <span className={`inline-flex items-baseline ${primaryBadge.className}`}>
+          <span className="inline-flex items-center">{primaryBadge.icon}</span>
+          <span className="ml-1 text-sm">{primaryBadge.label}</span>
+        </span>
+      </span>
+    );
+  }
+  
+  // If current role is different, show primary role + "viewing this page as" + view role
+  const viewingAsBadge = getRoleBadgeInfoFromCurrentRole(currentRole);
+  if (!viewingAsBadge) return null;
+  
+  return (
+    <span className="text-sm text-gray-600">
+      ,{' '}
+      <span className={`inline-flex items-baseline ${primaryBadge.className}`}>
+        <span className="inline-flex items-center">{primaryBadge.icon}</span>
+        <span className="ml-1 text-sm">{primaryBadge.label}</span>
+      </span>
+      <span className="md:inline hidden">, </span>
+      <span className="whitespace-nowrap md:inline inline-block">
+        <span className="md:hidden">, </span>
+        viewing this page as a{' '}
+        <span className={`inline-flex items-baseline ${viewingAsBadge.className}`}>
+          <span className="inline-flex items-center">{viewingAsBadge.icon}</span>
+          <span className="ml-1 text-sm">{viewingAsBadge.label}</span>
+        </span>
+      </span>
+    </span>
+  );
+};
+
 interface SessionWithAssignment extends VotingSession {
   assignedAt?: string;
   assignedBy?: string;
@@ -486,6 +607,16 @@ export default function UsersManagementScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
+  // Get adminPerspective from URL or sessionStorage
+  const adminPerspective = (searchParams.get('perspective') || sessionStorage.getItem('adminPerspective') || 'system') as 'session' | 'system';
+  
+  // Save to sessionStorage for persistence
+  useEffect(() => {
+    if (adminPerspective) {
+      sessionStorage.setItem('adminPerspective', adminPerspective);
+    }
+  }, [adminPerspective]);
+  
   // All hooks must be called before any conditional logic
   const [users, setUsers] = useState<UserWithRoles[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserWithRoles[]>([]);
@@ -535,7 +666,13 @@ export default function UsersManagementScreen() {
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isSessionAdmin, setIsSessionAdmin] = useState(false);
   const [userAdminSessions, setUserAdminSessions] = useState<string[]>([]); // Session IDs the current user admins
-  const [viewMode, setViewMode] = useState<'system-admin' | 'session-admin'>('system-admin');
+  // Initialize viewMode based on adminPerspective
+  const [viewMode, setViewMode] = useState<'system-admin' | 'session-admin'>(adminPerspective === 'system' ? 'system-admin' : 'session-admin');
+  
+  // Update viewMode when adminPerspective changes
+  useEffect(() => {
+    setViewMode(adminPerspective === 'system' ? 'system-admin' : 'session-admin');
+  }, [adminPerspective]);
   const [checkingAccess, setCheckingAccess] = useState(true);
   
   // Modal state
@@ -2227,19 +2364,14 @@ export default function UsersManagementScreen() {
             <div className="flex-1 min-w-0">
             <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
               <p className="text-sm text-gray-600 mt-1">
-                {currentUser?.name}
-                {isSystemAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
-                    <Crown className="h-3.5 w-3.5 mr-1" />
-                    System Admin
-                  </span>
-                )}
-                {!isSystemAdmin && isSessionAdmin && (
-                  <span className="ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
-                    <Shield className="h-3.5 w-3.5 mr-1" />
-                    Session Admin
-                  </span>
-                )}
+                Welcome, {currentUser?.name}
+                {(() => {
+                  // Determine current role based on viewMode
+                  const currentRole = viewMode === 'system-admin' ? 'system-admin' : 'session-admin';
+                  // Determine if user is a stakeholder (they shouldn't be on this page, but handle it)
+                  const isStakeholder = !isSystemAdmin && !isSessionAdmin;
+                  return getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, isStakeholder, currentRole);
+                })()}
               </p>
             </div>
           </div>
@@ -2278,10 +2410,10 @@ export default function UsersManagementScreen() {
                   e.stopPropagation();
                   handleLogout(e);
                 }}
-                className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                className="flex items-center justify-center p-2 w-10 h-10 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                title="Logout"
               >
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
+                <LogOut className="h-4 w-4" />
               </button>
             </div>
 
@@ -2332,10 +2464,10 @@ export default function UsersManagementScreen() {
                       setMobileMenuOpen(false);
                       handleLogout(e);
                     }}
-                    className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
+                    className="w-full px-4 py-3 flex items-center justify-center hover:bg-gray-50"
+                    title="Logout"
                   >
-                    <LogOut className="h-5 w-5 mr-3 text-gray-700" />
-                    <span className="text-base">Logout</span>
+                    <LogOut className="h-5 w-5 text-gray-700" />
                   </button>
                 </div>
               </div>

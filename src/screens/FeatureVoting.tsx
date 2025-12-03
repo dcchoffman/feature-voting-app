@@ -6,14 +6,14 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from '../supabaseClient';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { 
   Plus, Edit, Trash2, X, ChevronLeft, BarChart2, Settings, 
   Vote, LogOut, Users, ChevronUp, ChevronDown, Calendar, Clock, 
   Shuffle, CheckCircle, AlertTriangle, AlertCircle, Tag, RefreshCw, 
-  Cloud, Database, Search, Shield, List, Lightbulb, Crown, Image, Paperclip, Trophy, User as UserIcon
+  Cloud, Database, Search, Shield, List, Lightbulb, Crown, Image, Paperclip, Trophy, User as UserIcon, Minus, ArrowRightLeft, Bug, BookOpen, FlaskConical, CircleAlert, CheckSquare
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -155,25 +155,113 @@ const getRoleBadgeInfo = (
   if (isSystemAdmin) {
     return { 
       label: 'System Admin', 
-      className: 'bg-[#C89212] text-white',
-      icon: <Crown className="h-3.5 w-3.5 mr-1" />
+      className: 'text-[#C89212]',
+      icon: <Crown className="h-3.5 w-3.5" />
     };
   }
   if (isSessionAdmin) {
     return { 
       label: 'Session Admin', 
-      className: 'bg-[#576C71] text-white',
-      icon: <Shield className="h-3.5 w-3.5 mr-1" />
+      className: 'text-[#576C71]',
+      icon: <Shield className="h-3.5 w-3.5" />
     };
   }
   if (isStakeholder) {
     return { 
       label: 'Stakeholder', 
-      className: 'bg-[#8B5A4A] text-white',
-      icon: <UserIcon className="h-3.5 w-3.5 mr-1" />
+      className: 'text-[#8B5A4A]',
+      icon: <UserIcon className="h-3.5 w-3.5" />
     };
   }
   return null;
+};
+
+// Helper function to get badge info from currentRole (view mode)
+const getRoleBadgeInfoFromCurrentRole = (
+  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+): RoleBadgeInfo | null => {
+  switch (currentRole) {
+    case 'system-admin':
+      return { 
+        label: 'System Admin', 
+        className: 'text-[#C89212]',
+        icon: <Crown className="h-3.5 w-3.5" />
+      };
+    case 'session-admin':
+      return { 
+        label: 'Session Admin', 
+        className: 'text-[#576C71]',
+        icon: <Shield className="h-3.5 w-3.5" />
+      };
+    case 'stakeholder':
+      return { 
+        label: 'Stakeholder', 
+        className: 'text-[#8B5A4A]',
+        icon: <UserIcon className="h-3.5 w-3.5" />
+      };
+    default:
+      return null;
+  }
+};
+
+// Helper function to get primary role based on actual user roles
+const getPrimaryRole = (
+  isSystemAdmin: boolean,
+  isSessionAdmin: boolean,
+  isStakeholder: boolean
+): 'stakeholder' | 'session-admin' | 'system-admin' => {
+  if (isSystemAdmin) return 'system-admin';
+  if (isSessionAdmin) return 'session-admin';
+  return 'stakeholder';
+};
+
+// Helper function to get role badge display with primary role and "viewing as" if different
+const getRoleBadgeDisplay = (
+  isSystemAdmin: boolean,
+  isSessionAdmin: boolean,
+  isStakeholder: boolean,
+  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+): React.ReactNode => {
+  const primaryRole = getPrimaryRole(isSystemAdmin, isSessionAdmin, isStakeholder);
+  const primaryBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
+  
+  if (!primaryBadge) return null;
+  
+  // If current role matches primary role, just show primary role
+  if (currentRole === primaryRole) {
+    return (
+      <span className="text-sm text-gray-600">
+        ,{' '}
+        <span className={`inline-flex items-baseline ${primaryBadge.className}`}>
+          <span className="inline-flex items-center">{primaryBadge.icon}</span>
+          <span className="ml-1 text-sm">{primaryBadge.label}</span>
+        </span>
+      </span>
+    );
+  }
+  
+  // If current role is different, show primary role + "viewing this page as" + view role
+  const viewingAsBadge = getRoleBadgeInfoFromCurrentRole(currentRole);
+  if (!viewingAsBadge) return null;
+  
+  return (
+    <span className="text-sm text-gray-600">
+      ,{' '}
+      <span className={`inline-flex items-baseline ${primaryBadge.className}`}>
+        <span className="inline-flex items-center">{primaryBadge.icon}</span>
+        <span className="ml-1 text-sm">{primaryBadge.label}</span>
+      </span>
+      <span className="md:inline hidden">, </span>
+      <span className="whitespace-nowrap md:inline inline-block">
+        <span className="md:hidden">, </span>
+        viewing this page as a{' '}
+        <span className={`inline-flex items-baseline ${viewingAsBadge.className}`}>
+          <span className="inline-flex items-center">{viewingAsBadge.icon}</span>
+          <span className="ml-1 text-sm">{viewingAsBadge.label}</span>
+        </span>
+      </span>
+    </span>
+  );
 };
 
 // ============================================
@@ -458,19 +546,17 @@ const EpicTag = React.memo(function EpicTag({ name, epicId, description, truncat
   if (!name) return null;
   
   const displayName = truncateAt === null ? name : truncateText(name, truncateAt);
-  const combinedClassName = ['flex flex-col text-xs text-[#2d4660]', className].filter(Boolean).join(' ');
+  const combinedClassName = ['flex items-center text-xs text-gray-600', className].filter(Boolean).join(' ');
   const hasTooltip = description; // Only show tooltip if there's a description
 
   return (
     <div className={`${combinedClassName} relative group/epic`}>
-      <div className="flex flex-col min-w-0">
-        {epicId && (
-          <div className="flex items-center gap-1 mb-1">
-            <Crown className="h-4 w-4" style={{ color: 'rgb(51, 153, 71)' }} />
-            <span className="text-xs font-medium text-gray-600">#{epicId}</span>
-          </div>
-        )}
-        <span className="font-medium leading-tight break-words min-w-0">{displayName}</span>
+      <div className="flex items-start gap-1.5 min-w-0">
+        <Crown className="h-4 w-4 flex-shrink-0 mt-0.5" style={{ color: 'rgba(51, 153, 71, 0.6)' }} />
+        <span className="font-normal leading-tight break-words min-w-0 text-gray-600">
+          {displayName}
+          {epicId && <span className="text-gray-500 ml-1">#{epicId}</span>}
+        </span>
       </div>
       {hasTooltip && (
         <div className="absolute left-0 bottom-full mb-2 opacity-0 group-hover/epic:opacity-100 transition-opacity z-50 w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg pointer-events-none">
@@ -487,24 +573,95 @@ const EpicTag = React.memo(function EpicTag({ name, epicId, description, truncat
   );
 });
 
+// Helper function to get Azure DevOps work item type icon and color
+function getWorkItemTypeIcon(workItemType: string | undefined): { icon: React.ComponentType<any>; color: string } | null {
+  if (!workItemType) return null;
+  
+  const type = workItemType.toLowerCase();
+  
+  // Azure DevOps standard icons and colors
+  if (type === 'epic') {
+    return { icon: Crown, color: 'rgb(51, 153, 71)' }; // Green
+  } else if (type === 'feature') {
+    return { icon: Trophy, color: 'rgb(119, 59, 147)' }; // Purple
+  } else if (type === 'user story' || type === 'story') {
+    return { icon: BookOpen, color: '#007acc' }; // Blue
+  } else if (type === 'bug') {
+    return { icon: Bug, color: '#cc293d' }; // Red
+  } else if (type === 'task') {
+    return { icon: CheckSquare, color: '#007acc' }; // Blue
+  } else if (type === 'change request') {
+    return { icon: ArrowRightLeft, color: '#ff8c00' }; // Orange
+  } else if (type === 'test case' || type === 'test') {
+    return { icon: FlaskConical, color: '#007acc' }; // Blue
+  } else if (type === 'issue') {
+    return { icon: CircleAlert, color: '#cc293d' }; // Red
+  }
+  
+  return null;
+}
+
 interface AzureDevOpsBadgeProps {
   id: string;
   url: string;
+  workItemType?: string;
 }
 
-const AzureDevOpsBadge = React.memo(function AzureDevOpsBadge({ id, url }: AzureDevOpsBadgeProps) {
+const AzureDevOpsBadge = React.memo(function AzureDevOpsBadge({ id, url, workItemType }: AzureDevOpsBadgeProps) {
   if (!id) return null;
+  
+  const typeInfo = getWorkItemTypeIcon(workItemType);
+  const IconComponent = typeInfo?.icon || Database;
+  const iconColor = typeInfo?.color || '#007acc';
+  
+  // Convert RGB color to RGBA for opacity, or use hex with opacity
+  const getRgbaColor = (color: string, opacity: number): string => {
+    // If it's already in rgb format, convert to rgba
+    if (color.startsWith('rgb(')) {
+      const rgb = color.match(/\d+/g);
+      if (rgb && rgb.length >= 3) {
+        return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${opacity})`;
+      }
+    }
+    // If it's hex, convert to rgba
+    if (color.startsWith('#')) {
+      const hex = color.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    return color;
+  };
+  
+  const bgColor = typeInfo ? getRgbaColor(iconColor, 0.2) : 'rgb(219, 234, 254)';
+  const borderColor = typeInfo ? getRgbaColor(iconColor, 0.6) : 'rgb(147, 197, 254)';
+  const hoverBgColor = typeInfo ? getRgbaColor(iconColor, 0.3) : 'rgb(191, 219, 254)';
+  const hoverBorderColor = typeInfo ? getRgbaColor(iconColor, 0.8) : 'rgb(147, 197, 254)';
   
   return (
     <a 
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer"
+      className={`inline-flex items-center gap-1.5 px-1.5 py-1 rounded-md text-xs font-semibold border-2 shadow-sm hover:shadow-md cursor-pointer transition-all duration-200`}
+      style={{ 
+        backgroundColor: bgColor, 
+        color: iconColor,
+        borderColor: borderColor
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.backgroundColor = hoverBgColor;
+        e.currentTarget.style.borderColor = hoverBorderColor;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = bgColor;
+        e.currentTarget.style.borderColor = borderColor;
+      }}
       title="View in Azure DevOps"
     >
-      <Database className="h-3 w-3 mr-1" />
-      #{id}
+      <IconComponent className="h-3.5 w-3.5 flex-shrink-0" style={typeInfo ? { color: iconColor } : {}} />
+      <span className="font-mono">#{id}</span>
     </a>
   );
 });
@@ -722,11 +879,22 @@ const FeatureCard = React.memo(function FeatureCard({
       <div className="p-6 flex flex-col h-full">
         <h3 className="text-lg font-semibold mb-2 text-[#2d4660]">{feature.title}</h3>
 
-        {feature.azureDevOpsId && (
-          <div className="flex justify-end mb-4">
-            <AzureDevOpsBadge id={feature.azureDevOpsId} url={feature.azureDevOpsUrl || ''} />
-          </div>
-        )}
+        <div className="flex items-center justify-between mb-4">
+          {feature.areaPath && (
+            <span className="text-sm text-gray-600">
+              {feature.areaPath}
+            </span>
+          )}
+          {feature.azureDevOpsId && (
+            <div className="mt-2">
+              <AzureDevOpsBadge 
+                id={feature.azureDevOpsId} 
+                url={feature.azureDevOpsUrl || ''} 
+                workItemType={feature.workItemType}
+              />
+            </div>
+          )}
+        </div>
 
         {feature.description ? (
           <p className="text-gray-600 mb-4 flex-grow">{feature.description}</p>
@@ -758,28 +926,30 @@ const FeatureCard = React.memo(function FeatureCard({
         {onVote && (
           <div className="mt-auto pt-3">
             <div
-              className={`flex items-center mb-3 ${
+              className={`flex items-center mb-3 gap-2 ${
                 feature.epic ? 'justify-between' : 'justify-end'
               }`}
             >
-              {feature.epic && (
+              {feature.epic && feature.epic.trim() && (
                 <EpicTag
                   name={feature.epic}
+                  epicId={feature.epicId}
                   truncateAt={null}
-                  className="text-sm bg-[#1E5461]/10 px-2 py-1 rounded-md"
+                  className="text-sm bg-gray-100 px-2 py-1 rounded-md"
                 />
               )}
               <div className="flex items-center space-x-2">
                 {userVoteCount === 0 ? (
                   <button
                     onClick={() => onVote(feature.id, true)}
-                    className={`px-6 py-2.5 rounded-lg text-base font-semibold cursor-pointer transition-colors ${
+                    className={`px-6 py-2.5 rounded-lg text-base font-semibold cursor-pointer transition-colors flex items-center ${
                       votingIsActive && remainingVotes > 0
                         ? 'bg-[#2d4660] text-white hover:bg-[#C89212]'
                         : 'bg-gray-300 text-gray-600 cursor-not-allowed'
                     }`}
                     disabled={!votingIsActive || remainingVotes <= 0}
                   >
+                    <Vote className="h-6 w-6 mr-2" />
                     Vote
                   </button>
                 ) : (
@@ -790,7 +960,7 @@ const FeatureCard = React.memo(function FeatureCard({
                       aria-label="Remove vote"
                       disabled={!votingIsActive}
                     >
-                      <ChevronDown className="h-6 w-6" />
+                      <Minus className="h-6 w-6" />
                     </button>
                     <span className="px-4 py-2 bg-[#1E5461]/10 text-[#1E5461] rounded-full font-semibold text-base min-w-[3rem] text-center">
                       {userVoteCount}
@@ -805,7 +975,7 @@ const FeatureCard = React.memo(function FeatureCard({
                       disabled={!votingIsActive || remainingVotes <= 0}
                       aria-label="Add vote"
                     >
-                      <ChevronUp className="h-6 w-6" />
+                      <Plus className="h-6 w-6" />
                     </button>
                   </>
                 )}
@@ -893,6 +1063,7 @@ interface ResultsScreenProps {
   isSystemAdmin: boolean;
   isSessionAdmin: boolean;
   isStakeholder: boolean;
+  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
 }
 
 function ResultsScreen({ 
@@ -908,7 +1079,8 @@ function ResultsScreen({
   currentUser,
   isSystemAdmin,
   isSessionAdmin,
-  isStakeholder
+  isStakeholder,
+  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder'
 }: ResultsScreenProps) {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -975,17 +1147,7 @@ function ResultsScreen({
             {currentUser && (
               <p className="text-sm text-gray-600 mt-1">
                 {currentUser.name}
-                {(() => {
-                  const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
-                  return roleBadge && (
-                    <span
-                      className={`ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${roleBadge.className}`}
-                    >
-                      {roleBadge.icon}
-                      {roleBadge.label}
-                    </span>
-                  );
-                })()}
+                {getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, isStakeholder, currentRole)}
               </p>
             )}
           </div>
@@ -1007,14 +1169,16 @@ function ResultsScreen({
             >
               Reset All Votes
             </Button>
-            <Button 
-              variant="gray"
+            <button 
               onClick={onLogout}
-              className="flex items-center"
+              className={`flex items-center justify-center bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors ${
+                currentRole === 'stakeholder' ? 'px-4 py-2' : 'p-2 w-10 h-10'
+              }`}
+              title="Logout"
             >
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </Button>
+              <LogOut className="h-4 w-4" />
+              {currentRole === 'stakeholder' && <span className="ml-2">Logout</span>}
+            </button>
           </div>
 
           {/* Mobile menu trigger */}
@@ -1048,10 +1212,13 @@ function ResultsScreen({
                 </button>
                 <button
                   onClick={() => { setMobileMenuOpen(false); onLogout(); }}
-                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  className={`w-full px-3 py-2 flex items-center hover:bg-gray-50 ${
+                    currentRole === 'stakeholder' ? 'text-left' : 'justify-center'
+                  }`}
+                  title="Logout"
                 >
-                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
-                  Logout
+                  <LogOut className="h-4 w-4 text-gray-700" />
+                  {currentRole === 'stakeholder' && <span className="ml-2 text-base text-gray-700">Logout</span>}
                 </button>
               </div>
             </div>
@@ -1061,9 +1228,11 @@ function ResultsScreen({
 
       <div className="relative z-10 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-[#2D4660]">
-            Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
-          </h2>
+          <div>
+            <h2 className="text-xl font-semibold text-[#2D4660]">
+              Current Session: {votingSession.product_name && <span className="text-[#1E5461]">{votingSession.product_name} - </span>}<span className="text-[#1E5461]">{votingSession.title}</span>
+            </h2>
+          </div>
           {votingSession.isActive && (
             <div className={`${getDeadlineBgColor(daysRemaining)} relative z-10 rounded-md p-3 inline-block border ${daysRemaining <= 2 ? 'border-[#6A4234]/20' : daysRemaining <= 4 ? 'border-[#C89212]/20' : 'border-[#1E5461]/20'}`}>
               <div className="flex items-center justify-between gap-4">
@@ -1747,6 +1916,7 @@ interface AlreadyVotedScreenProps {
   isSystemAdmin: boolean;
   isSessionAdmin: boolean;
   isStakeholder: boolean;
+  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
 }
 
 function AlreadyVotedScreen({
@@ -1760,13 +1930,13 @@ function AlreadyVotedScreen({
   features,
   isSystemAdmin,
   isSessionAdmin,
-  isStakeholder
+  isStakeholder,
+  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder'
 }: AlreadyVotedScreenProps) {
   const [showChangeConfirm, setShowChangeConfirm] = useState(false);
   
   const totalVotes = Object.values(userVotes).reduce((sum, count) => sum + count, 0);
   const votedFeatures = features.filter(f => userVotes[f.id] > 0);
-  const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
   
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
@@ -1795,22 +1965,7 @@ function AlreadyVotedScreen({
             <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
             <p className="text-sm text-gray-600 mt-1">
               Welcome, {currentUser?.name}
-              {currentUser?.email && (
-                <a
-                  href={`mailto:${currentUser.email}`}
-                  className="ml-2 text-[#2D4660] hover:underline"
-                >
-                  ({currentUser.email})
-                </a>
-              )}
-              {roleBadge && (
-                <span
-                  className={`ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${roleBadge.className}`}
-                >
-                  {roleBadge.icon}
-                  {roleBadge.label}
-                </span>
-              )}
+              {getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, isStakeholder, currentRole)}
             </p>
           </div>
         </div>
@@ -1945,10 +2100,11 @@ interface VotingScreenProps {
   isSystemAdmin: boolean;
   isSessionAdmin: boolean;
   isStakeholder: boolean;
+  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
 }
 
 const VotingScreen = React.memo(function VotingScreen({ 
-  features, 
+  features,
   currentUser, 
   pendingVotes,
   pendingUsedVotes,
@@ -1964,7 +2120,8 @@ const VotingScreen = React.memo(function VotingScreen({
   onSuggestionSubmitted,
   isSystemAdmin,
   isSessionAdmin,
-  isStakeholder
+  isStakeholder,
+  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder'
 }: VotingScreenProps) {
   // ALL HOOKS MUST BE AT THE TOP - BEFORE ANY RETURNS
   const [displayFeatures, setDisplayFeatures] = useState([...features]);
@@ -1987,7 +2144,6 @@ const VotingScreen = React.memo(function VotingScreen({
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
-  const roleBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -2081,25 +2237,73 @@ const VotingScreen = React.memo(function VotingScreen({
 
   const handleRequestInfo = useCallback(async (featureId: string) => {
     const feature = features.find(f => f.id === featureId);
-    if (!feature || !currentUser) return;
+    if (!feature || !currentUser || !sessionId) return;
 
     try {
-      // Store the request in the database
-      await db.createInfoRequest({
-        session_id: sessionId,
-        feature_id: featureId,
-        feature_title: feature.title,
-        requester_id: currentUser.id,
-        requester_name: currentUser.name,
-        requester_email: currentUser.email,
-        created_at: new Date().toISOString()
+      // Call the Edge Function to create the info request (bypasses RLS)
+      const supabaseUrl = (supabase as any).supabaseUrl;
+      const anonKey = (supabase as any).supabaseKey; // This is the anon key when used from client
+      const response = await fetch(`${supabaseUrl}/functions/v1/create-info-request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          feature_id: featureId,
+          feature_title: feature.title,
+          requester_id: currentUser.id,
+          requester_name: currentUser.name || '',
+          requester_email: currentUser.email || '',
+          session_name: votingSession.title,
+          feature_description: feature.description
+        }),
       });
-    } catch (error) {
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Info request created successfully:', result);
+
+      // Send emails to session admins from client-side (EmailJS requires browser context)
+      if (result.adminEmails && result.adminEmails.length > 0 && result.emailContent) {
+        // Construct the admin dashboard URL with session and feature IDs
+        const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
+        const adminUrl = `${window.location.origin}${basename}/admin?session=${result.emailContent.sessionId}&feature=${result.emailContent.featureId}`;
+        
+        // Replace the placeholder URL in the email content
+        const emailHtml = result.emailContent.html.replace('{{ADMIN_DASHBOARD_URL}}', adminUrl);
+        const emailText = result.emailContent.text.replace('{{ADMIN_DASHBOARD_URL}}', adminUrl);
+        
+        const emailPromises = result.adminEmails.map((adminEmail: string) => {
+          return sendInvitationEmail({
+            to: adminEmail,
+            subject: result.emailContent.subject,
+            html: emailHtml,
+            text: emailText
+          }).catch((err) => {
+            console.error(`Failed to send email to ${adminEmail}:`, err);
+            // Don't throw - continue sending to other admins
+            return null;
+          });
+        });
+
+        // Wait for all emails to be sent (or fail gracefully)
+        await Promise.all(emailPromises);
+        console.log(`Emails sent to ${result.adminEmails.length} session admin(s)`);
+      }
+    } catch (error: any) {
       console.error('Error submitting info request:', error);
-      alert('Failed to submit request. Please try again.');
+      const errorMessage = error?.message || error?.toString() || 'Unknown error';
+      console.error('Full error details:', error);
+      alert(`Failed to submit request: ${errorMessage}. Please try again.`);
       throw error; // Re-throw so the component knows it failed
     }
-  }, [features, currentUser, sessionId]);
+  }, [features, currentUser, sessionId, votingSession]);
 
   const openSuggestModal = useCallback(() => {
     setSuggestionError(null);
@@ -2458,6 +2662,7 @@ const VotingScreen = React.memo(function VotingScreen({
         isSystemAdmin={isSystemAdmin}
         isSessionAdmin={isSessionAdmin}
         isStakeholder={isStakeholder}
+        currentRole={currentRole}
       />
     );
   }
@@ -2493,22 +2698,7 @@ const VotingScreen = React.memo(function VotingScreen({
             <h1 className="text-2xl font-bold text-[#2d4660] md:text-3xl">Feature Voting</h1>
             <p className="text-sm text-gray-600 mt-1">
               Welcome, {currentUser?.name}
-              {currentUser?.email && (
-                <a
-                  href={`mailto:${currentUser.email}`}
-                  className="ml-2 text-[#2D4660] hover:underline"
-                >
-                  ({currentUser.email})
-                </a>
-              )}
-              {roleBadge && (
-                <span
-                  className={`ml-2 inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${roleBadge.className}`}
-                >
-                  {roleBadge.icon}
-                  {roleBadge.label}
-                </span>
-              )}
+              {getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, isStakeholder, currentRole)}
             </p>
           </div>
         </div>
@@ -2532,14 +2722,16 @@ const VotingScreen = React.memo(function VotingScreen({
             >
               All Sessions
             </Button>
-            <Button 
-              variant="gray"
+            <button 
               onClick={onLogout}
-              className="flex items-center"
+              className={`flex items-center justify-center bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors ${
+                currentRole === 'stakeholder' ? 'px-4 py-2' : 'p-2 w-10 h-10'
+              }`}
+              title="Logout"
             >
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </Button>
+              <LogOut className="h-4 w-4" />
+              {currentRole === 'stakeholder' && <span className="ml-2">Logout</span>}
+            </button>
           </div>
 
           {/* Mobile menu trigger */}
@@ -2574,10 +2766,13 @@ const VotingScreen = React.memo(function VotingScreen({
                 </button>
                 <button
                   onClick={() => { setMobileMenuOpen(false); onLogout(); }}
-                  className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
+                  className={`w-full px-3 py-2 flex items-center hover:bg-gray-50 ${
+                    currentRole === 'stakeholder' ? 'text-left' : 'justify-center'
+                  }`}
+                  title="Logout"
                 >
-                  <LogOut className="h-4 w-4 mr-2 text-gray-700" />
-                  Logout
+                  <LogOut className="h-4 w-4 text-gray-700" />
+                  {currentRole === 'stakeholder' && <span className="ml-2 text-base text-gray-700">Logout</span>}
                 </button>
               </div>
             </div>
@@ -2587,9 +2782,11 @@ const VotingScreen = React.memo(function VotingScreen({
 
       <div className="relative z-10 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-[#2D4660]">
-            Current Session: <span className="text-[#1E5461]">{votingSession.title}</span>
-          </h2>
+          <div>
+            <h2 className="text-xl font-semibold text-[#2D4660]">
+              Current Session: {votingSession.product_name && <span className="text-[#1E5461]">{votingSession.product_name} - </span>}<span className="text-[#1E5461]">{votingSession.title}</span>
+            </h2>
+          </div>
         </div>
         
         {votingSession.goal && votingSession.goal.trim() && (
@@ -2635,11 +2832,11 @@ const VotingScreen = React.memo(function VotingScreen({
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
                 <div className="flex items-center flex-shrink-0">
                   <Calendar className={`h-5 w-5 mr-2 ${deadlineColor}`} />
-                  <div className="leading-tight">
+                  <div className="leading-tight" style={{ marginTop: '10px' }}>
                     <span className={`font-medium ${deadlineColor}`}>
                       Voting ends: {formatDate(votingSession.endDate)}
                     </span>
-                    <div className="text-sm -mt-0.5">
+                    <div className="text-sm -mt-0.5" style={{ marginLeft: '100px', marginTop: '-6px' }}>
                       {daysRemaining <= 0 ? (
                         <span className="text-red-600 font-medium">Voting ends today!</span>
                       ) : (
@@ -2656,7 +2853,7 @@ const VotingScreen = React.memo(function VotingScreen({
                     <div className="flex items-center justify-center md:justify-start">
                       <Vote className={`h-[30px] w-[30px] mr-2 ${deadlineColor}`} />
                       <div className="text-sm -mt-0.5 leading-none">
-                        <div className="flex items-baseline justify-center md:justify-start">
+                        <div className="flex items-baseline justify-center md:justify-start" style={{ marginRight: '60px' }}>
                           <span className={`${deadlineColor} mr-1`} style={{ fontSize: '14px' }}>You have</span>
                           <span className={`${deadlineColor} font-semibold text-2xl`}>
                             {remainingVotes}
@@ -2993,6 +3190,7 @@ function FeatureVotingSystem({
     isStakeholder
   } = useSession();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   
   const handleLogout = async () => {
     try {
@@ -3059,7 +3257,39 @@ function FeatureVotingSystem({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [suggestedFeatures, setSuggestedFeatures] = useState<FeatureSuggestion[]>([]);
   const [futureSessions, setFutureSessions] = useState<Array<{ id: string; title: string; startDate: string }>>([]);
-  const [adminPerspective, setAdminPerspective] = useState<'session' | 'system'>(isSystemAdmin ? 'system' : 'session');
+  // Initialize adminPerspective from URL params, sessionStorage, or default to primary role
+  const getDefaultAdminPerspective = (): 'session' | 'system' => {
+    // Check URL params first
+    const urlPerspective = searchParams.get('perspective') as 'session' | 'system' | null;
+    if (urlPerspective) {
+      sessionStorage.setItem('adminPerspective', urlPerspective);
+      return urlPerspective;
+    }
+    // Then check sessionStorage for adminPerspective
+    const saved = sessionStorage.getItem('adminPerspective') as 'session' | 'system' | null;
+    if (saved) return saved;
+    // Also check viewMode in sessionStorage and convert it
+    const viewMode = sessionStorage.getItem('viewMode') as 'admin' | 'stakeholder' | 'system-admin' | null;
+    if (viewMode === 'system-admin') {
+      sessionStorage.setItem('adminPerspective', 'system');
+      return 'system';
+    } else if (viewMode === 'admin') {
+      sessionStorage.setItem('adminPerspective', 'session');
+      return 'session';
+    }
+    // Finally default to primary role
+    return isSystemAdmin ? 'system' : 'session';
+  };
+  const [adminPerspective, setAdminPerspective] = useState<'session' | 'system'>(getDefaultAdminPerspective());
+  
+  // Update adminPerspective when URL params change
+  useEffect(() => {
+    const urlPerspective = searchParams.get('perspective') as 'session' | 'system' | null;
+    if (urlPerspective && urlPerspective !== adminPerspective) {
+      setAdminPerspective(urlPerspective);
+      sessionStorage.setItem('adminPerspective', urlPerspective);
+    }
+  }, [searchParams, adminPerspective]);
   
   const [pendingVotes, setPendingVotes] = useState<Record<string, number>>({});
   const [pendingUsedVotes, setPendingUsedVotes] = useState(0);
@@ -3248,14 +3478,14 @@ useEffect(() => {
         id: feature.id,
         title: feature.title,
         description: feature.description,
-        epic: feature.epic,
-        epicId: feature.epic_id || feature.epicId,
+        epic: feature.epic || null,
+        epicId: feature.epic_id || feature.epicId || null,
         state: feature.state,
-        areaPath: feature.area_path,
+        areaPath: feature.area_path || feature.areaPath || null,
         tags: feature.tags || [],
-        azureDevOpsId: feature.azure_devops_id,
-        azureDevOpsUrl: feature.azure_devops_url,
-        workItemType: feature.workItemType || feature.work_item_type,
+        azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
+        azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+        workItemType: feature.workItemType || feature.work_item_type || null,
         votes: totalVotes,
         voters
       };
@@ -3382,14 +3612,14 @@ useEffect(() => {
             id: feature.id,
             title: feature.title,
             description: feature.description,
-            epic: feature.epic,
-            epicId: feature.epic_id || feature.epicId,
+            epic: feature.epic || null,
+            epicId: feature.epic_id || feature.epicId || null,
             state: feature.state,
-            areaPath: feature.area_path || feature.areaPath,
+            areaPath: feature.area_path || feature.areaPath || null,
             tags: feature.tags || [],
-            azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
-            azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
-            workItemType: feature.workItemType || feature.work_item_type,
+            azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
+            azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+            workItemType: feature.workItemType || feature.work_item_type || null,
             votes: totalVotes,
             voters
           };
@@ -3774,14 +4004,14 @@ useEffect(() => {
           id: feature.id,
           title: feature.title,
           description: feature.description,
-          epic: feature.epic,
-          epicId: feature.epic_id || feature.epicId,
+          epic: feature.epic || null,
+          epicId: feature.epic_id || feature.epicId || null,
           state: feature.state,
-          areaPath: feature.area_path || feature.areaPath,
+          areaPath: feature.area_path || feature.areaPath || null,
           tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
-          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
-          workItemType: feature.workItemType || feature.work_item_type,
+          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
+          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+          workItemType: feature.workItemType || feature.work_item_type || null,
           votes: totalVotes,
           voters
         };
@@ -3904,14 +4134,14 @@ useEffect(() => {
           id: feature.id,
           title: feature.title,
           description: feature.description,
-          epic: feature.epic,
-          epicId: feature.epic_id || feature.epicId,
+          epic: feature.epic || null,
+          epicId: feature.epic_id || feature.epicId || null,
           state: feature.state,
-          areaPath: feature.area_path || feature.areaPath,
+          areaPath: feature.area_path || feature.areaPath || null,
           tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
-          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
-          workItemType: feature.workItemType || feature.work_item_type,
+          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
+          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+          workItemType: feature.workItemType || feature.work_item_type || null,
           votes: totalVotes,
           voters
         };
@@ -4107,14 +4337,14 @@ useEffect(() => {
           id: feature.id,
           title: feature.title,
           description: feature.description,
-          epic: feature.epic,
-          epicId: feature.epic_id || feature.epicId,
+          epic: feature.epic || null,
+          epicId: feature.epic_id || feature.epicId || null,
           state: feature.state,
-          areaPath: feature.area_path || feature.areaPath,
+          areaPath: feature.area_path || feature.areaPath || null,
           tags: feature.tags || [],
-          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId,
-          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl,
-          workItemType: feature.workItemType || feature.work_item_type,
+          azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
+          azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+          workItemType: feature.workItemType || feature.work_item_type || null,
           votes: totalVotes,
           voters
         };
@@ -4202,13 +4432,21 @@ useEffect(() => {
       return;
     }
     setIsAdmin(false);
-    setAdminPerspective(isSystemAdmin ? 'system' : 'session');
+    // Reset to primary role perspective when switching to voting view
+    const primaryPerspective = isSystemAdmin ? 'system' : 'session';
+    setAdminPerspective(primaryPerspective);
+    sessionStorage.setItem('adminPerspective', primaryPerspective);
+    // Also update viewMode for consistency
+    sessionStorage.setItem('viewMode', 'stakeholder');
     setView('voting');
   }, [isSystemAdmin, adminMode, navigate]);
 
   const handleSelectSessionPerspective = useCallback(() => {
     setIsAdmin(true);
     setAdminPerspective('session');
+    sessionStorage.setItem('adminPerspective', 'session');
+    // Also update viewMode for consistency
+    sessionStorage.setItem('viewMode', 'admin');
     if (adminMode) {
       if (view !== 'admin') {
         setView('admin');
@@ -4222,6 +4460,9 @@ useEffect(() => {
     if (!isSystemAdmin) return;
     setIsAdmin(true);
     setAdminPerspective('system');
+    sessionStorage.setItem('adminPerspective', 'system');
+    // Also update viewMode for consistency
+    sessionStorage.setItem('viewMode', 'system-admin');
     if (adminMode) {
       if (view !== 'admin') {
         setView('admin');
@@ -4736,6 +4977,7 @@ const handleDeleteSession = useCallback(async () => {
             isSystemAdmin={isSystemAdmin}
             isSessionAdmin={sessionAdminRole}
             isStakeholder={isStakeholder}
+            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
           />
         );
       case 'results':
@@ -4754,6 +4996,7 @@ const handleDeleteSession = useCallback(async () => {
             isSystemAdmin={isSystemAdmin}
             isSessionAdmin={sessionAdminRole}
             isStakeholder={isStakeholder}
+            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
           />
         );
       case 'thankyou':
@@ -4784,6 +5027,7 @@ const handleDeleteSession = useCallback(async () => {
             isSystemAdmin={isSystemAdmin}
             isSessionAdmin={sessionAdminRole}
             isStakeholder={isStakeholder}
+            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
           />
         );
     }
@@ -4976,7 +5220,7 @@ const handleDeleteSession = useCallback(async () => {
         onSelectStakeholder={handleShowVoting}
         onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
         onSelectSystemAdmin={isSystemAdmin ? handleSelectSystemPerspective : undefined}
-        showRoleToggle={true}
+        showRoleToggle={isSystemAdmin || sessionAdminRole}
       />
       
       <ConfirmDialog

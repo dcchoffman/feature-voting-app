@@ -137,14 +137,21 @@ export default function SessionSelectionScreen() {
       setIsLoadingProducts(true);
       setProductError(null);
       try {
-        // Get ALL products from the products table for this tenant
-        // This is the single source of truth for products
-        const results = await db.getProductsForTenant(tenantId);
+        let results: Product[];
         
-        // Log for debugging - ensure we're getting all products
+        // Check if user is a system admin
+        const fallbackSystemAdmin = isFallbackSystemAdmin(currentUser.email);
+        const sysAdmin = fallbackSystemAdmin || await db.isUserSystemAdmin(currentUser.id);
         
-        // Use all products from the database - they should all be included in the dropdown
-        // No filtering, no additional logic - just use what's in the products table
+        if (sysAdmin) {
+          // System admins can see all products
+          results = await db.getProductsForTenant(tenantId);
+        } else {
+          // Session admins can only see products from sessions they manage
+          results = await db.getProductsForSessionAdmin(currentUser.id);
+        }
+        
+        // Use filtered products based on user role
         const uniqueProducts = results;
         
         setModalProducts(uniqueProducts);
@@ -1786,8 +1793,8 @@ export default function SessionSelectionScreen() {
 
           <div className="flex flex-col flex-1" style={{ padding: '15px' }}>
           
-          {/* Vote Button */}
-          {(() => {
+          {/* Vote Button - Only show at top for non-stakeholder views */}
+          {viewMode !== 'stakeholder' && (() => {
             const calculateDaysUntilStart = (startDate: string): number => {
               if (!startDate || isPlaceholderDate(startDate)) return 0;
               const start = new Date(startDate);
@@ -1927,6 +1934,63 @@ export default function SessionSelectionScreen() {
                 </button>
               </div>
             )}
+            
+            {/* Vote Button - At bottom for stakeholder view */}
+            {viewMode === 'stakeholder' && (() => {
+              const calculateDaysUntilStart = (startDate: string): number => {
+                if (!startDate || isPlaceholderDate(startDate)) return 0;
+                const start = new Date(startDate);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                start.setHours(0, 0, 0, 0);
+                const diffTime = start.getTime() - today.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return diffDays;
+              };
+
+              let buttonText = 'Cast your Votes';
+              let isDisabled = false;
+              
+              if (status.text === 'Upcoming') {
+                const daysUntil = calculateDaysUntilStart(session.start_date);
+                buttonText = `Cast your Vote in ${daysUntil} ${daysUntil === 1 ? 'day' : 'days'}`;
+                isDisabled = true;
+              } else if (status.text === 'Closed') {
+                buttonText = 'Voting Session Closed';
+                isDisabled = true;
+              } else if (status.text === 'Draft') {
+                buttonText = 'Voting Session Closed';
+                isDisabled = true;
+              } else if (status.text === 'Active') {
+                buttonText = 'Cast your Votes';
+                isDisabled = false;
+              } else {
+                // Other statuses
+                buttonText = 'Voting Session Closed';
+                isDisabled = true;
+              }
+
+              return (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isDisabled) {
+                      handleVoteButton(session);
+                    }
+                  }}
+                  disabled={isDisabled}
+                  className={`w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors mt-4 ${
+                    isDisabled 
+                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed' 
+                      : 'bg-[#1E6154]/10 hover:bg-[#1E6154]/20 text-[#1E6154]'
+                  }`}
+                  style={isDisabled ? { cursor: 'not-allowed' } : {}}
+                >
+                  <Vote className={`h-6 w-6 mr-2 ${isDisabled ? 'text-gray-500' : 'text-[#1E6154]'}`} />
+                  <span className={`text-sm font-medium ${isDisabled ? 'text-gray-500' : 'text-[#1E6154]'}`}>{buttonText}</span>
+                </button>
+              );
+            })()}
           </div>
 
           {/* Email Invite - Only show for admins */}

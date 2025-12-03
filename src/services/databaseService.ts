@@ -306,6 +306,63 @@ export async function getProductsForTenant(tenantId: string): Promise<Product[]>
   return data || [];
 }
 
+/**
+ * Get products that a session admin has access to (products from sessions where they are admin)
+ */
+export async function getProductsForSessionAdmin(userId: string): Promise<Product[]> {
+  // Get all sessions where user is a session admin
+  const { data: adminSessions, error: adminError } = await supabase
+    .from('session_admins')
+    .select('session_id')
+    .eq('user_id', userId);
+  
+  if (adminError) throw adminError;
+  
+  if (!adminSessions || adminSessions.length === 0) {
+    return [];
+  }
+  
+  const sessionIds = adminSessions.map(s => s.session_id);
+  
+  // Get product_ids from those sessions
+  const { data: sessions, error: sessionsError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .in('id', sessionIds)
+    .not('product_id', 'is', null);
+  
+  if (sessionsError) throw sessionsError;
+  
+  if (!sessions || sessions.length === 0) {
+    return [];
+  }
+  
+  // Get unique product IDs
+  const productIds = [...new Set(sessions.map(s => s.product_id).filter(Boolean))];
+  
+  if (productIds.length === 0) {
+    return [];
+  }
+  
+  // Get the products
+  const { data: products, error: productsError } = await supabase
+    .from('products')
+    .select('*')
+    .in('id', productIds)
+    .order('name', { ascending: true });
+  
+  if (productsError) {
+    if ((productsError as any)?.code === 'PGRST205') {
+      const tableMissingError = new Error('Products table is missing');
+      (tableMissingError as any).code = PRODUCTS_TABLE_MISSING_CODE;
+      throw tableMissingError;
+    }
+    throw productsError;
+  }
+  
+  return products || [];
+}
+
 export async function updateProduct(productId: string, updates: { name?: string; color_hex?: string | null }): Promise<Product> {
   if (!productId) {
     throw new Error('Product ID is required');

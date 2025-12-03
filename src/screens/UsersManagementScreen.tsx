@@ -2332,7 +2332,7 @@ export default function UsersManagementScreen() {
     );
   }
 
-  if (!isSystemAdmin) {
+  if (!isSystemAdmin && !isSessionAdmin) {
     return null; // Will redirect in useEffect
   }
 

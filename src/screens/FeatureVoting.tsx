@@ -2790,7 +2790,7 @@ const VotingScreen = React.memo(function VotingScreen({
         </div>
         
         {votingSession.goal && votingSession.goal.trim() && (
-          <div className="pt-3 border-t border-gray-200 mb-4">
+          <div className="pt-3 mb-4">
             <div className="relative overflow-hidden rounded-2xl border border-[#C89212]/30 bg-gradient-to-r from-[#FFF6E3] via-[#FFF9ED] to-white shadow-sm p-5 md:p-6">
               <span className="pointer-events-none absolute -top-10 left-4 h-32 w-32 rounded-full bg-[#C89212]/25 blur-3xl" />
               <span className="pointer-events-none absolute -bottom-16 right-6 h-40 w-40 rounded-full bg-[#F4C66C]/20 blur-3xl" />

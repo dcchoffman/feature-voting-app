@@ -1397,6 +1397,7 @@ interface FooterProps {
   onSelectSessionAdmin?: () => void;
   onSelectSystemAdmin?: () => void;
   showRoleToggle?: boolean;
+  isSessionAdmin?: boolean; // True if user is a session admin (not system admin)
 }
 
 function Footer({
@@ -1404,7 +1405,8 @@ function Footer({
   onSelectStakeholder,
   onSelectSessionAdmin,
   onSelectSystemAdmin,
-  showRoleToggle = true
+  showRoleToggle = true,
+  isSessionAdmin = false
 }: FooterProps) {
   const currentYear = new Date().getFullYear();
   const roleButtons: Array<{
@@ -1414,13 +1416,15 @@ function Footer({
     onClick?: () => void;
   }> = [];
 
-  // Always include Stakeholder View button
-  roleButtons.push({
-    key: 'stakeholder',
-    label: 'Stakeholder View',
-    icon: <Users className="h-4 w-4 inline mr-2" />,
-    onClick: onSelectStakeholder
-  });
+  // Always include Stakeholder View button (only if stakeholder view is available)
+  if (onSelectStakeholder || currentRole === 'stakeholder') {
+    roleButtons.push({
+      key: 'stakeholder',
+      label: 'Stakeholder View',
+      icon: <Users className="h-4 w-4 inline mr-2" />,
+      onClick: onSelectStakeholder
+    });
+  }
 
   if (onSelectSessionAdmin || currentRole === 'session-admin') {
     roleButtons.push({
@@ -1431,7 +1435,8 @@ function Footer({
     });
   }
 
-  if (onSelectSystemAdmin || currentRole === 'system-admin') {
+  // Session admins should never see System Admin option
+  if (!isSessionAdmin && (onSelectSystemAdmin || currentRole === 'system-admin')) {
     roleButtons.push({
       key: 'system-admin',
       label: 'System Admin',
@@ -5221,6 +5226,7 @@ const handleDeleteSession = useCallback(async () => {
         onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
         onSelectSystemAdmin={isSystemAdmin ? handleSelectSystemPerspective : undefined}
         showRoleToggle={isSystemAdmin || sessionAdminRole}
+        isSessionAdmin={sessionAdminRole && !isSystemAdmin}
       />
       
       <ConfirmDialog

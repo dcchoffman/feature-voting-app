@@ -4306,6 +4306,7 @@ export default function SessionSelectionScreen() {
           sessionStorage.setItem('adminPerspective', 'system');
         } : undefined}
         showRoleToggle={hasAdminAccess}
+        isSessionAdmin={hasAdminAccess && !isSystemAdmin}
       />
 
       <Modal

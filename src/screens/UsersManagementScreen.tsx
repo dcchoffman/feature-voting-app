@@ -19,6 +19,7 @@ import { getProductColor } from '../utils/productColors';
 import { supabase } from '../supabaseClient';
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
+import microsoftLogo from '../assets/microsoft.svg';
 import { searchAzureAdUsers, type AzureAdUser } from '../services/azureAdUserService';
 
 // Helper functions for role badge display
@@ -3883,7 +3884,8 @@ export default function UsersManagementScreen() {
         </div>
 
         {/* View Toggle - Session Admin vs System Admin */}
-        {(isSystemAdmin || isSessionAdmin) && (
+        {/* Only show for System Admins - Session Admins don't need this toggle on admin-only pages */}
+        {isSystemAdmin && (
           <div className="mt-8 flex justify-center">
             <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
               <button
@@ -4293,7 +4295,7 @@ export default function UsersManagementScreen() {
                             className="ml-4 flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
                           >
                             <img 
-                              src="/microsoft.svg"
+                              src={microsoftLogo}
                               alt="Microsoft"
                               style={{ width: '21px', height: '21px', marginRight: '8px' }}
                             />

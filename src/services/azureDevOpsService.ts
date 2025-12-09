@@ -1530,6 +1530,98 @@ export async function fetchAzureDevOpsWorkItems(
 }
 
 /**
+ * Extract image URLs from HTML description
+ */
+function extractImageUrls(htmlDescription: string): string[] {
+  if (!htmlDescription) return [];
+  
+  const imgRegex = /<img[^>]+src="([^"]+)"/gi;
+  const urls: string[] = [];
+  let match;
+  
+  while ((match = imgRegex.exec(htmlDescription)) !== null) {
+    urls.push(match[1]);
+  }
+  
+  return urls;
+}
+
+/**
+ * Download and upload Azure DevOps images to Supabase storage
+ */
+export async function uploadAzureDevOpsImagesToSupabase(
+  imageUrls: string[],
+  featureId: string,
+  accessToken: string
+): Promise<string[]> {
+  if (imageUrls.length === 0) return [];
+  
+  const { supabase } = await import('../supabaseClient');
+  const uploadedUrls: string[] = [];
+  
+  for (let i = 0; i < imageUrls.length; i++) {
+    try {
+      const imageUrl = imageUrls[i];
+      
+      // Fetch the image from Azure DevOps with authorization
+      const response = await fetch(imageUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      if (!response.ok) {
+        console.warn(`Failed to fetch image from Azure DevOps: ${imageUrl}`);
+        continue;
+      }
+      
+      const blob = await response.blob();
+      
+      // Determine file extension from blob type or URL
+      let extension = 'png';
+      if (blob.type.includes('jpeg') || blob.type.includes('jpg')) {
+        extension = 'jpg';
+      } else if (blob.type.includes('png')) {
+        extension = 'png';
+      } else if (blob.type.includes('gif')) {
+        extension = 'gif';
+      } else if (blob.type.includes('webp')) {
+        extension = 'webp';
+      }
+      
+      // Generate unique filename
+      const timestamp = Date.now();
+      const fileName = `${timestamp}-${i + 1}.${extension}`;
+      const filePath = `features/${featureId}/${fileName}`;
+      
+      // Upload to Supabase storage
+      const { data, error } = await supabase.storage
+        .from('feature-attachments')
+        .upload(filePath, blob, {
+          contentType: blob.type,
+          upsert: false
+        });
+      
+      if (error) {
+        console.error('Error uploading image to Supabase:', error);
+        continue;
+      }
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('feature-attachments')
+        .getPublicUrl(filePath);
+      
+      uploadedUrls.push(publicUrl);
+    } catch (error) {
+      console.error('Error processing Azure DevOps image:', error);
+    }
+  }
+  
+  return uploadedUrls;
+}
+
+/**
  * Convert Azure DevOps work items to Feature format
  */
 export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Feature[] {
@@ -1566,8 +1658,11 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
       console.log(`[Convert] Work item ${item.id} "${item.fields['System.Title']}" has no Epic assigned`);
     }
     
-    // Clean description - strip HTML tags
+    // Extract image URLs from description before cleaning
     const description = item.fields['System.Description'] || '';
+    const imageUrls = extractImageUrls(description);
+    
+    // Clean description - strip HTML tags
     const cleanDescription = description.replace(/<[^>]*>/g, '').trim();
     
     // IMPORTANT: Always use System.Title for the work item title, NEVER use Epic name
@@ -1594,7 +1689,8 @@ export function convertWorkItemsToFeatures(workItems: AzureDevOpsWorkItem[]): Fe
         : [],
       azureDevOpsId: item.id.toString(),
       azureDevOpsUrl: item.url,
-      workItemType: workItemType || undefined
+      workItemType: workItemType || undefined,
+      azureImageUrls: imageUrls.length > 0 ? imageUrls : undefined
     };
   });
 }

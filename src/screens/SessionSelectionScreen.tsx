@@ -147,7 +147,7 @@ export default function SessionSelectionScreen() {
           // System admins can see all products
           results = await db.getProductsForTenant(tenantId);
         } else {
-          // Session admins can only see products from sessions they manage
+          // Product owners can only see products from sessions they manage
           results = await db.getProductsForSessionAdmin(currentUser.id);
         }
         
@@ -643,11 +643,11 @@ export default function SessionSelectionScreen() {
         product_name: null
       });
 
-      // Add session admin
+      // Add product owner
       try {
         await db.addSessionAdmin(newSession.id, currentUser.id);
       } catch (error) {
-        console.error('Error adding session admin for draft:', error);
+        console.error('Error adding product owner for draft:', error);
       }
 
       await refreshSessions();
@@ -814,17 +814,17 @@ export default function SessionSelectionScreen() {
         product_name: null // Products table is single source of truth - don't store product_name
       });
 
-      // Add session admin - if this fails, log it but don't block session creation
+      // Add product owner - if this fails, log it but don't block session creation
       // The session was created successfully, so we continue
       try {
       await db.addSessionAdmin(newSession.id, currentUser.id);
       } catch (adminError: any) {
-        console.error('Error adding session admin (session was created successfully):', adminError);
+        console.error('Error adding product owner (session was created successfully):', adminError);
         // Log the error but don't throw - the session was created successfully
         // The user can manually add themselves as admin if needed
         if (adminError?.code === '42501') {
-          console.warn('RLS policy violation when adding session admin. The session was created but admin assignment failed.');
-          console.warn('This may require updating RLS policies for the session_admins table.');
+          console.warn('RLS policy violation when adding product owner. The session was created but admin assignment failed.');
+          console.warn('This may require updating RLS policies for the product_owners table.');
         }
       }
       
@@ -1253,7 +1253,7 @@ export default function SessionSelectionScreen() {
       (session.goal ? `Goal: ${session.goal}\n\n` : '') +
       `Voting Period: ${isPlaceholderDate(session.start_date) || isPlaceholderDate(session.end_date) ? 'Dates not set' : `${formatDate(session.start_date)} - ${formatDate(session.end_date)}`}\n\n` +
       `Click the "Go Vote!" button below to sign in and cast your votes.\n\n` +
-      `Need help? Reach out to the session admin team.\n\n` +
+      `Need help? Reach out to the product owner team.\n\n` +
       `Thanks,\n${currentUser?.name || 'Feature Voting System'}`
     );
   };
@@ -1299,7 +1299,7 @@ export default function SessionSelectionScreen() {
               </tr>
             </table>
             
-            <p style="margin: 24px 0 0 0; font-size: 14px; color: #6b7280; line-height: 1.6;">Need help? Reach out to the session admin team.</p>
+            <p style="margin: 24px 0 0 0; font-size: 14px; color: #6b7280; line-height: 1.6;">Need help? Reach out to the product owner team.</p>
             
             <p style="margin: 24px 0 0 0; font-size: 16px; color: #333; line-height: 1.6;">Thanks,<br />${currentUser?.name || 'Feature Voting System'}</p>
           </td>
@@ -1517,8 +1517,8 @@ export default function SessionSelectionScreen() {
     setCurrentSession(session);
     const productId = session.product_id || (session as any).productId || '';
     const url = productId 
-      ? `/users?filter=session-admin&product=${productId}`
-      : '/users?filter=session-admin';
+      ? `/users?filter=product-owner&product=${productId}`
+      : '/users?filter=product-owner';
     navigate(url);
   };
 
@@ -1908,7 +1908,7 @@ export default function SessionSelectionScreen() {
               </div>
             </div>
             
-            {/* Session Admins and Stakeholders Links - Only show in admin/system-admin view */}
+            {/* Product Owners and Stakeholders Links - Only show in admin/system-admin view */}
             {viewMode !== 'stakeholder' && (
               <div className="flex items-center justify-center min-h-[48px] border-t border-gray-200 text-sm text-gray-600">
                 <button
@@ -1919,7 +1919,7 @@ export default function SessionSelectionScreen() {
                   className="flex items-center mr-3 text-[#2D4660] hover:text-[#1D3144] hover:underline cursor-pointer"
                 >
                   <Shield className="h-4 w-4 mr-1.5" />
-                  {adminCounts[session.id] !== undefined ? adminCounts[session.id] : 0} Session Admin{adminCounts[session.id] !== 1 ? 's' : ''}
+                  {adminCounts[session.id] !== undefined ? adminCounts[session.id] : 0} Product Owner{adminCounts[session.id] !== 1 ? 's' : ''}
                 </button>
                 <span className="text-gray-400">•</span>
                 <button
@@ -1932,7 +1932,7 @@ export default function SessionSelectionScreen() {
                   <Users className="h-4 w-4 mr-1.5" />
                   {stakeholderCounts[session.id] !== undefined ? stakeholderCounts[session.id] : 0} Stakeholder{stakeholderCounts[session.id] !== 1 ? 's' : ''}
                 </button>
-              </div>
+          </div>
             )}
             
             {/* Vote Button - At bottom for stakeholder view */}
@@ -2073,16 +2073,16 @@ export default function SessionSelectionScreen() {
               Welcome, {currentUser?.name}
               {(() => {
                 // Determine primary role
-                const primaryRole = isSystemAdmin ? 'system-admin' : adminSessions.length > 0 ? 'session-admin' : 'stakeholder';
+                const primaryRole = isSystemAdmin ? 'system-admin' : adminSessions.length > 0 ? 'product-owner' : 'stakeholder';
                 const primaryBadge = primaryRole === 'system-admin' ? (
                   <span className="inline-flex items-baseline text-[#C89212]">
                     <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
                     <span className="ml-1 text-sm">System Admin</span>
                 </span>
-                ) : primaryRole === 'session-admin' ? (
+                ) : primaryRole === 'product-owner' ? (
                   <span className="inline-flex items-baseline text-[#576C71]">
                     <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
-                    <span className="ml-1 text-sm">Session Admin</span>
+                    <span className="ml-1 text-sm">Product Owner</span>
                 </span>
                 ) : (
                   <span className="inline-flex items-baseline text-[#8B5A4A]">
@@ -2092,7 +2092,7 @@ export default function SessionSelectionScreen() {
                 );
                 
                 // Determine current view role
-                const currentViewRole = isSystemAdmin && viewMode === 'system-admin' ? 'system-admin' : viewMode === 'admin' ? 'session-admin' : 'stakeholder';
+                const currentViewRole = isSystemAdmin && viewMode === 'system-admin' ? 'system-admin' : viewMode === 'admin' ? 'product-owner' : 'stakeholder';
                 
                 // If view mode matches primary role, just show primary role
                 if (currentViewRole === primaryRole) {
@@ -2109,10 +2109,10 @@ export default function SessionSelectionScreen() {
                     <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
                     <span className="ml-1 text-sm">System Admin</span>
                   </span>
-                ) : currentViewRole === 'session-admin' ? (
+                ) : currentViewRole === 'product-owner' ? (
                   <span className="inline-flex items-baseline text-[#576C71]">
                     <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
-                    <span className="ml-1 text-sm">Session Admin</span>
+                    <span className="ml-1 text-sm">Product Owner</span>
                   </span>
                 ) : (
                   <span className="inline-flex items-baseline text-[#8B5A4A]">
@@ -4286,7 +4286,7 @@ export default function SessionSelectionScreen() {
       
       {/* Footer with role toggle (uses Footer component from FeatureVoting) */}
       <Footer
-        currentRole={isSystemAdmin && viewMode === 'system-admin' ? 'system-admin' : viewMode === 'admin' ? 'session-admin' : 'stakeholder'}
+        currentRole={isSystemAdmin && viewMode === 'system-admin' ? 'system-admin' : viewMode === 'admin' ? 'product-owner' : 'stakeholder'}
         onSelectStakeholder={() => {
           setViewMode('stakeholder');
           sessionStorage.setItem('viewMode', 'stakeholder');

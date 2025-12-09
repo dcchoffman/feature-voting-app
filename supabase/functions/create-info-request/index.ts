@@ -75,21 +75,33 @@ serve(async (req) => {
       throw insertError;
     }
 
-    // Get session admins for the current session
+    // Get the session's product_id
+    const { data: session, error: sessionError } = await supabase
+      .from('voting_sessions')
+      .select('product_id')
+      .eq('id', payload.session_id)
+      .single();
+
+    if (sessionError) {
+      console.error('Error fetching session:', sessionError);
+      // Don't fail the request if we can't get session - the request was saved
+    }
+
+    // Get Product Owners for the product (product-level)
     const { data: sessionAdminsData, error: adminsError } = await supabase
-      .from('session_admins')
+      .from('product_product_owners')
       .select(`
         *,
         users (*)
       `)
-      .eq('session_id', payload.session_id);
+      .eq('product_id', session?.product_id || '');
 
     if (adminsError) {
-      console.error('Error fetching session admins:', adminsError);
+      console.error('Error fetching product owners:', adminsError);
       // Don't fail the request if we can't get admins - the request was saved
     }
 
-    console.log(`Found ${sessionAdminsData?.length || 0} session admin(s) for session ${payload.session_id}`);
+    console.log(`Found ${sessionAdminsData?.length || 0} product owner(s) for product ${session?.product_id}`);
 
     // Get admin emails to return to client for email sending
     // Emails must be sent from client-side because EmailJS blocks server-side calls

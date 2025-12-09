@@ -82,14 +82,15 @@ export default function SystemAdminsScreen() {
       if (!currentUser) return;
       const sysAdmin = await db.isUserSystemAdmin(currentUser.id);
       setIsSystemAdmin(sysAdmin);
-      
-      // Check if session admin
-      const { data } = await supabase
-        .from('session_admins')
-        .select('session_id')
-        .eq('user_id', currentUser.id)
-        .limit(1);
-      setIsSessionAdmin(data && data.length > 0);
+
+      // Check if Product Owner (product-scoped ownership)
+      try {
+        const ownedProducts = await db.getProductsForSessionAdmin(currentUser.id);
+        setIsSessionAdmin(Array.isArray(ownedProducts) && ownedProducts.length > 0);
+      } catch (err) {
+        console.error('Error checking product owner status:', err);
+        setIsSessionAdmin(false);
+      }
     };
     checkRoles();
   }, [currentUser]);
@@ -302,7 +303,7 @@ export default function SystemAdminsScreen() {
                 )}
                 {!isSystemAdmin && isSessionAdmin && (
                   <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#576C71] text-white">
-                    Session Admin
+                    Product Owner
                   </span>
                 )}
               </p>
@@ -500,7 +501,7 @@ export default function SystemAdminsScreen() {
               <li>Full access to all voting sessions across the system</li>
               <li>Create and manage any voting session</li>
               <li>Add and remove other system administrators</li>
-              <li>Manage session admins and stakeholders for any session</li>
+              <li>Manage Product Owners and stakeholders for any session</li>
               <li>View all results and analytics system-wide</li>
             </ul>
             <p className="mt-3 text-xs font-medium">

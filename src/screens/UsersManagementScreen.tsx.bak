@@ -1,0 +1,309 @@
+import React from 'react';
+
+// Minimal placeholder Users Management Screen (clean replacement)
+export default function UsersManagementScreen(): JSX.Element {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-2xl font-semibold">Users Management (placeholder)</h1>
+        <p className="text-gray-600 mt-2">Temporary screen to allow local development.</p>
+      </div>
+    </div>
+  );
+}
+import React from 'react';
+
+// Minimal placeholder Users Management Screen (clean replacement)
+export default function UsersManagementScreen(): JSX.Element {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-2xl font-semibold">Users Management (placeholder)</h1>
+        <p className="text-gray-600 mt-2">Temporary screen to allow local development.</p>
+      </div>
+    </div>
+  );
+}
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <div className="relative min-w-[200px]">
+        <div
+          ref={buttonRef}
+          onClick={() => setIsOpen(!isOpen)}
+          className="px-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base cursor-pointer flex items-center justify-between hover:bg-gray-50 transition-colors"
+          style={{
+            backgroundColor: selectedProductColors && selectedProduct ? getRgbaColor(selectedProductColors.background, 0.1) : 'white',
+            borderColor: selectedProductColors && selectedProduct ? getRgbaColor(selectedProductColors.background, 0.3) : undefined
+          }}
+        >
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {selectedProduct && selectedProductColors && (
+              <div
+                className="w-4 h-4 rounded-sm flex-shrink-0 border"
+                style={{ 
+                  backgroundColor: selectedProductColors.background,
+                  borderColor: selectedProductColors.background
+                }}
+              />
+            )}
+            <span className={`text-base truncate ${!value ? 'text-gray-500' : 'text-gray-900'}`}>
+              {selectedProduct ? selectedProduct.name : 'All Products'}
+            </span>
+          </div>
+          <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+        </div>
+      </div>
+      {isOpen && createPortal(dropdownContent, document.body)}
+    </>
+  );
+}
+
+// Role Filter Dropdown Component
+interface RoleFilterDropdownProps {
+  value: 'all' | 'system-admin' | 'product-owner' | 'stakeholder' | 'none';
+  onChange: (value: 'all' | 'system-admin' | 'product-owner' | 'stakeholder' | 'none') => void;
+  viewMode: 'system-admin' | 'product-owner';
+}
+
+function RoleFilterDropdown({ value, onChange, viewMode }: RoleFilterDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) &&
+          buttonRef.current && !buttonRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      // Calculate position when opening - use requestAnimationFrame to avoid forced reflow
+      if (buttonRef.current) {
+        requestAnimationFrame(() => {
+          if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setDropdownPosition({
+              top: rect.bottom + window.scrollY + 4,
+              left: rect.left + window.scrollX,
+              width: rect.width
+            });
+          }
+        });
+      }
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  // Helper function to convert hex/rgb to rgba with opacity
+  const getRgbaColor = (color: string, opacity: number): string => {
+    if (!color) return `rgba(0, 0, 0, ${opacity})`;
+    
+    // Handle hex colors
+    if (color.startsWith('#')) {
+      const hex = color.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    
+    // Handle rgb colors
+    if (color.startsWith('rgb')) {
+      const matches = color.match(/\d+/g);
+      if (matches && matches.length >= 3) {
+        return `rgba(${matches[0]}, ${matches[1]}, ${matches[2]}, ${opacity})`;
+      }
+    }
+    
+    return `rgba(0, 0, 0, ${opacity})`;
+  };
+
+  const getRoleInfo = (role: typeof value) => {
+    switch (role) {
+      case 'system-admin':
+        return {
+          label: 'System Admin',
+          icon: Crown,
+          color: '#C89212'
+        };
+      case 'product-owner':
+        return {
+          label: 'Product Owner',
+          icon: Shield,
+          color: '#576C71'
+        };
+      case 'stakeholder':
+        return {
+          label: 'Stakeholder',
+          icon: UserIcon,
+          color: '#8B5A4A'
+        };
+      case 'none':
+        return {
+          label: 'No Role',
+          icon: null,
+          color: '#6B7280'
+        };
+      default:
+        return {
+          label: 'All Roles',
+          icon: null,
+          color: '#6B7280'
+        };
+    }
+  };
+
+  const selectedRoleInfo = getRoleInfo(value);
+  const roleOptions: Array<{ value: typeof value; label: string; icon: typeof Crown | typeof Shield | typeof UserIcon | null; color: string }> = [
+    { value: 'all', label: 'All Roles', icon: null, color: '#6B7280' },
+    ...(viewMode === 'system-admin' ? [{ value: 'system-admin' as const, label: 'System Admin', icon: Crown, color: '#C89212' }] : []),
+    { value: 'product-owner', label: 'Product Owner', icon: Shield, color: '#576C71' },
+    { value: 'stakeholder', label: 'Stakeholder', icon: UserIcon, color: '#8B5A4A' },
+    { value: 'none', label: 'No Role', icon: null, color: '#6B7280' }
+  ];
+
+  const dropdownContent = isOpen ? (
+    <div 
+      ref={dropdownRef}
+      className="fixed bg-white border border-gray-300 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+      style={{ 
+        top: `${dropdownPosition.top}px`,
+        left: `${dropdownPosition.left}px`,
+        width: '300px',
+        zIndex: 99999
+      }}
+    >
+      {roleOptions.map(option => {
+        const isSelected = value === option.value;
+        const IconComponent = option.icon;
+        return (
+          <div
+            key={option.value}
+            onClick={() => {
+              onChange(option.value);
+              setIsOpen(false);
+            }}
+            className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
+              isSelected ? 'bg-blue-50' : ''
+            }`}
+          >
+            {IconComponent ? (
+              <span
+                className="inline-block w-4 h-4 flex-shrink-0 flex items-center justify-center"
+                style={{ color: option.color }}
+              >
+                <IconComponent className="h-4 w-4" />
+              </span>
+            ) : (
+              <span className="inline-block w-4 h-4 flex-shrink-0" />
+            )}
+            <span className="text-base text-gray-900 flex-1">{option.label}</span>
+            {isSelected && <CheckCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <div className="relative min-w-[200px]">
+        <div
+          ref={buttonRef}
+          onClick={() => setIsOpen(!isOpen)}
+          className="px-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base cursor-pointer flex items-center justify-between hover:bg-gray-50 transition-colors"
+          style={{
+            backgroundColor: value !== 'all' ? getRgbaColor(selectedRoleInfo.color, 0.1) : 'white',
+            borderColor: value !== 'all' ? getRgbaColor(selectedRoleInfo.color, 0.3) : undefined
+          }}
+        >
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {value !== 'all' && selectedRoleInfo.icon && (() => {
+              const IconComponent = selectedRoleInfo.icon;
+              return (
+                <div
+                  className="flex-shrink-0 flex items-center justify-center"
+                >
+                  <IconComponent className="h-5 w-5" style={{ color: selectedRoleInfo.color }} />
+                </div>
+              );
+            })()}
+            <span className={`text-base truncate ${value === 'all' ? 'text-gray-500' : 'text-gray-900'}`}>
+              {selectedRoleInfo.label}
+            </span>
+          </div>
+          <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+        </div>
+      </div>
+      {isOpen && createPortal(dropdownContent, document.body)}
+    </>
+  );
+}
+
+// Product Session Selector Component (Reusable)
+interface ProductSessionSelectorProps {
+  products: Product[];
+  sessions: VotingSession[];
+  selectedProductId: string;
+  onProductChange: (productId: string) => void;
+  useAllSessions: boolean;
+  onToggleAllSessions: (useAll: boolean) => void;
+  selectedSessionIds: string[];
+  onSessionToggle: (sessionId: string) => void;
+  getSessionStatus: (session: VotingSession) => { text: string; color: string };
+  formatSessionDateRange: (session: VotingSession) => string;
+  filterSessions: (sessions: VotingSession[], productId: string) => VotingSession[];
+  isRemoval?: boolean; // Whether this is for removing roles
+}
+
+function ProductSessionSelector({
+  products,
+  sessions,
+  selectedProductId,
+  onProductChange,
+  useAllSessions,
+  onToggleAllSessions,
+  selectedSessionIds,
+  onSessionToggle,
+  getSessionStatus,
+  formatSessionDateRange,
+  filterSessions,
+  isRemoval = false
+}: ProductSessionSelectorProps) {
+  const filteredSessions = selectedProductId ? filterSessions(sessions, selectedProductId) : [];
+
+  // Auto-select the single product if there's only one and none is selected
+  useEffect(() => {
+    if (products.length === 1 && !selectedProductId) {
+      onProductChange(products[0].id);
+      onToggleAllSessions(true);
+    }
+  }, [products.length, selectedProductId, onProductChange, onToggleAllSessions]);
+
+  return (
+    <div className="space-y-3 overflow-visible">
+      {/* Product Selection */}
+      <div className="overflow-visible">
+        {products.length === 1 ? (
+          // Display single product as text
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Product *</label>
+            <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 flex items-center gap-2">
+              {(() => {
+                const product = products[0];
+                const colors = getProductColor(product.name, product.color_hex ?? null);
+                return (
+                  <>
+                    {colors && (
+                      <div
+                        className="w-4 h-4 rounded flex-shrink-0"
+                        style={{ backgroundColor: colors.background }}
+                      />
+                    )}
+                    <span className="text-sm text-gray-900">" (truncated backup)

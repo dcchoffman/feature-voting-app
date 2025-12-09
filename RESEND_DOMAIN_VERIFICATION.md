@@ -13,7 +13,7 @@ address to an email address associated with a verified domain.
 
 ## The Solution
 
-To send emails to other recipients (like session admins), you need to:
+To send emails to other recipients (like product owners), you need to:
 
 ### Option 1: Verify Your Domain (Recommended for Production)
 
@@ -38,7 +38,7 @@ For testing purposes only, you can:
 1. Update the `FROM_EMAIL` secret to: `dave.hoffman@newmill.com`
 2. This will allow sending, but only to your own email address
 
-**Note:** This won't work for sending to session admins - you'll need domain verification for that.
+**Note:** This won't work for sending to product owners - you'll need domain verification for that.
 
 ## Quick Fix for Now
 

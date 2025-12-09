@@ -194,11 +194,12 @@ export interface UserRoleInfo {
 }
 
 export async function getUserRoleInfo(userId: string): Promise<UserRoleInfo> {
-  const [isSystemAdmin, sessionAdminData, userData] = await Promise.all([
+  const [isSystemAdmin, productOwnerData, userData] = await Promise.all([
     isUserSystemAdmin(userId),
+    // product-level ownership is stored in `product_product_owners`
     supabase
-      .from('session_admins')
-      .select('session_id')
+      .from('product_product_owners')
+      .select('product_id')
       .eq('user_id', userId),
     supabase
       .from('users')
@@ -207,14 +208,29 @@ export async function getUserRoleInfo(userId: string): Promise<UserRoleInfo> {
       .single()
   ]);
 
-  const sessionAdminCount = sessionAdminData.data?.length || 0;
+  // Count distinct products where user is a Product Owner
+  const productRows = productOwnerData.data || [];
+  const hasAllProductsFlag = productRows.some((r: any) => r.applies_to_all_products === true || r.product_id == null);
+  let sessionAdminCount = 0;
+  if (hasAllProductsFlag) {
+    // User owns all products; count all products in the system
+    try {
+      const allProducts = await getProducts();
+      sessionAdminCount = allProducts.length;
+    } catch (err) {
+      sessionAdminCount = 0;
+    }
+  } else {
+    sessionAdminCount = productRows.length || 0;
+  }
   
+  // Count distinct products where user is Stakeholder
   let stakeholderCount = 0;
   if (userData.data?.email) {
     const { data: stakeholderData } = await supabase
-      .from('session_stakeholders')
-      .select('session_id')
-      .eq('user_email', userData.data.email);
+      .from('product_stakeholders')
+      .select('product_id')
+      .eq('user_email', userData.data.email.toLowerCase());
     stakeholderCount = stakeholderData?.length || 0;
   }
 
@@ -307,38 +323,29 @@ export async function getProductsForTenant(tenantId: string): Promise<Product[]>
 }
 
 /**
- * Get products that a session admin has access to (products from sessions where they are admin)
+ * Get products that a Product Owner has access to (product-level assignment)
  */
 export async function getProductsForSessionAdmin(userId: string): Promise<Product[]> {
-  // Get all sessions where user is a session admin
-  const { data: adminSessions, error: adminError } = await supabase
-    .from('session_admins')
-    .select('session_id')
+  // Get all products where user is a Product Owner (product-level)
+  const { data: productOwnerData, error: adminError } = await supabase
+    .from('product_product_owners')
+    .select('product_id')
     .eq('user_id', userId);
   
   if (adminError) throw adminError;
   
-  if (!adminSessions || adminSessions.length === 0) {
+  if (!productOwnerData || productOwnerData.length === 0) {
     return [];
   }
   
-  const sessionIds = adminSessions.map(s => s.session_id);
-  
-  // Get product_ids from those sessions
-  const { data: sessions, error: sessionsError } = await supabase
-    .from('voting_sessions')
-    .select('product_id')
-    .in('id', sessionIds)
-    .not('product_id', 'is', null);
-  
-  if (sessionsError) throw sessionsError;
-  
-  if (!sessions || sessions.length === 0) {
-    return [];
+  // If any ownership row grants access to all products, return full product list
+  const hasAllProductsFlag = (productOwnerData || []).some((r: any) => r.applies_to_all_products === true || r.product_id == null);
+  if (hasAllProductsFlag) {
+    return await getProducts();
   }
-  
+
   // Get unique product IDs
-  const productIds = [...new Set(sessions.map(s => s.product_id).filter(Boolean))];
+  const productIds = productOwnerData.map((p: any) => p.product_id).filter((id: any) => !!id);
   
   if (productIds.length === 0) {
     return [];
@@ -361,6 +368,26 @@ export async function getProductsForSessionAdmin(userId: string): Promise<Produc
   }
   
   return products || [];
+}
+
+/**
+ * Get session ids where the given user has cast any votes
+ */
+export async function getUserVotesForSessions(userId: string, sessionIds: string[]): Promise<string[]> {
+  if (!userId || !sessionIds || sessionIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('votes')
+    .select('session_id')
+    .in('session_id', sessionIds)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Error fetching user votes for sessions:', error);
+    throw error;
+  }
+
+  return (data || []).map((d: any) => d.session_id);
 }
 
 export async function updateProduct(productId: string, updates: { name?: string; color_hex?: string | null }): Promise<Product> {
@@ -585,94 +612,69 @@ export async function getSessionsForUser(userId: string): Promise<VotingSession[
     return getAllSessions();
   }
   
-  // Get sessions where user is admin
-    const adminApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_admins?user_id=eq.${userId}&select=session_id`;
-    const adminResponse = await fetch(adminApiUrl, {
-      method: 'GET',
-      headers: {
-        'apikey': (supabase as any).supabaseKey,
-        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
-        'Content-Type': 'application/json',
-      }
-    });
+  // Get products where user is Product Owner (product-level)
+    const { data: productOwnerData, error: productOwnerError } = await supabase
+      .from('product_product_owners')
+      .select('product_id')
+      .eq('user_id', userId);
   
-    if (!adminResponse.ok) {
-      const errorText = await adminResponse.text();
-      console.error('[databaseService] Error loading session admins:', adminResponse.status, errorText);
-      throw new Error(`API error: ${adminResponse.status} - ${errorText}`);
+    if (productOwnerError) {
+      console.error('[databaseService] Error loading product product owners:', productOwnerError);
+      throw productOwnerError;
     }
     
-    const adminSessions = await adminResponse.json();
-    const adminSessionIds = adminSessions?.map((s: any) => s.session_id) || [];
+    const productOwnerProductIds = productOwnerData?.map((p: any) => p.product_id) || [];
   
-  // Get sessions where user is stakeholder (by email)
-    const userApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/users?id=eq.${userId}&select=email&limit=1`;
-    const userResponse = await fetch(userApiUrl, {
-      method: 'GET',
-      headers: {
-        'apikey': (supabase as any).supabaseKey,
-        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
-        'Content-Type': 'application/json',
-      }
-    });
+  // Get products where user is Stakeholder (by email)
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .single();
   
-    if (!userResponse.ok) {
-      const errorText = await userResponse.text();
-      console.error('[databaseService] Error getting user email:', userResponse.status, errorText);
-      throw new Error(`API error: ${userResponse.status} - ${errorText}`);
+    if (userError) {
+      console.error('[databaseService] Error getting user email:', userError);
+      throw userError;
     }
     
-    const userData = await userResponse.json();
-    const userEmailValue = userData?.[0]?.email;
+    const userEmailValue = userData?.email;
     
     if (!userEmailValue) {
       console.error('[databaseService] User email not found');
       throw new Error('User email not found');
     }
     
-    const stakeholderApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_stakeholders?user_email=eq.${encodeURIComponent(userEmailValue)}&select=session_id`;
-    const stakeholderResponse = await fetch(stakeholderApiUrl, {
-      method: 'GET',
-      headers: {
-        'apikey': (supabase as any).supabaseKey,
-        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
-        'Content-Type': 'application/json',
-      }
-    });
+    const { data: stakeholderData, error: stakeholderError } = await supabase
+      .from('product_stakeholders')
+      .select('product_id')
+      .eq('user_email', userEmailValue.toLowerCase());
   
-    if (!stakeholderResponse.ok) {
-      const errorText = await stakeholderResponse.text();
-      console.error('[databaseService] Error loading session stakeholders:', stakeholderResponse.status, errorText);
-      throw new Error(`API error: ${stakeholderResponse.status} - ${errorText}`);
+    if (stakeholderError) {
+      console.error('[databaseService] Error loading product stakeholders:', stakeholderError);
+      throw stakeholderError;
     }
     
-    const stakeholderSessions = await stakeholderResponse.json();
-    const stakeholderSessionIds = stakeholderSessions?.map((s: any) => s.session_id) || [];
-  // Combine and get unique session IDs
-  const allSessionIds = [...new Set([...adminSessionIds, ...stakeholderSessionIds])];
+    const stakeholderProductIds = stakeholderData?.map((s: any) => s.product_id) || [];
   
-    if (allSessionIds.length === 0) {
+  // Combine and get unique product IDs
+  const allProductIds = [...new Set([...productOwnerProductIds, ...stakeholderProductIds])];
+  
+    if (allProductIds.length === 0) {
       return [];
     }
     
-    // Get all sessions using direct fetch
-    const sessionsApiUrl = `${(supabase as any).supabaseUrl}/rest/v1/voting_sessions?select=${encodeURIComponent(SESSION_SELECT)}&id=in.(${allSessionIds.join(',')})&order=created_at.desc`;
-    const sessionsResponse = await fetch(sessionsApiUrl, {
-      method: 'GET',
-      headers: {
-        'apikey': (supabase as any).supabaseKey,
-        'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
-        'Content-Type': 'application/json',
-      }
-    });
+    // Get all sessions for these products
+    const { data: sessions, error: sessionsError } = await supabase
+      .from('voting_sessions')
+      .select(SESSION_SELECT)
+      .in('product_id', allProductIds)
+      .order('created_at', { ascending: false });
     
-    if (!sessionsResponse.ok) {
-      const errorText = await sessionsResponse.text();
-      console.error('[databaseService] Error loading voting sessions:', sessionsResponse.status, errorText);
-      throw new Error(`API error: ${sessionsResponse.status} - ${errorText}`);
+    if (sessionsError) {
+      console.error('[databaseService] Error loading voting sessions:', sessionsError);
+      throw sessionsError;
     }
     
-    const sessions = await sessionsResponse.json();
     return normalizeSessionRows(sessions as SessionRow[]);
   } catch (error) {
     console.error('[databaseService] Error in getSessionsForUser:', error);
@@ -743,12 +745,13 @@ export async function deleteVotesForFeature(sessionId: string, featureId: string
 }
 
 // ============================================
-// SESSION ADMINS
+// PRODUCT OWNERS
 // ============================================
 
 export async function getSessionAdmins(sessionId: string): Promise<SessionAdmin[]> {
+  // Get all Product Owners for this session (session-level)
   const { data, error } = await supabase
-    .from('session_admins')
+    .from('product_owners')
     .select(`
       *,
       users (*)
@@ -767,78 +770,141 @@ export async function getSessionAdmins(sessionId: string): Promise<SessionAdmin[
 }
 
 /**
- * Get all session admins for sessions of a specific product
+ * Get all Product Owners for a specific product (product-level)
  */
 export async function getSessionAdminsForProduct(productId: string): Promise<SessionAdmin[]> {
-  // First, get all sessions for this product
-  const { data: sessions, error: sessionsError } = await supabase
-    .from('voting_sessions')
-    .select('id')
-    .eq('product_id', productId);
-  
-  if (sessionsError) throw sessionsError;
-  
-  if (!sessions || sessions.length === 0) {
-    return [];
-  }
-  
-  const sessionIds = sessions.map(s => s.id);
-  
-  // Get all session admins for these sessions
+  // Get all Product Owners for this product (product-level)
+  // Include users who have an "all products" flag as owners for every product
+  const filter = `or(product_id.eq.${productId},applies_to_all_products.eq.true)`;
   const { data, error } = await supabase
-    .from('session_admins')
+    .from('product_product_owners')
     .select(`
       *,
       users (*)
     `)
-    .in('session_id', sessionIds);
+    .or(filter);
   
   if (error) throw error;
   
-  // Deduplicate by user email to avoid sending multiple emails to the same admin
-  const adminMap = new Map<string, SessionAdmin>();
-  (data || []).forEach(item => {
-    const admin: SessionAdmin = {
-      id: item.id,
-      session_id: item.session_id,
-      user_id: item.user_id,
-      created_at: item.created_at,
-      user: item.users as User
-    };
-    
-    if (admin.user && admin.user.email) {
-      const email = admin.user.email.toLowerCase();
-      if (!adminMap.has(email)) {
-        adminMap.set(email, admin);
-      }
-    }
-  });
-  
-  return Array.from(adminMap.values());
+  // Return in SessionAdmin format for compatibility
+  return (data || []).map(item => ({
+    id: item.id,
+    session_id: '', // Not used in product-level model, but kept for compatibility
+    user_id: item.user_id,
+    created_at: item.created_at,
+    user: item.users as User
+  }));
 }
 
 export async function addSessionAdmin(sessionId: string, userId: string): Promise<SessionAdmin> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', sessionId)
+    .single();
+  
+  if (sessionError || !session?.product_id) {
+    throw new Error('Session not found or has no product_id');
+  }
+  
+  // Add Product Owner at product level
   const { data, error } = await supabase
-    .from('session_admins')
-    .insert([{ session_id: sessionId, user_id: userId }])
-    .select()
+    .from('product_product_owners')
+    .insert([{ product_id: session.product_id, user_id: userId }])
+    .select(`
+      *,
+      users (*)
+    `)
     .single();
   
   if (error) throw error;
-  return data;
+  
+  // Return in SessionAdmin format for compatibility
+  return {
+    id: data.id,
+    session_id: sessionId, // Keep for compatibility
+    user_id: data.user_id,
+    created_at: data.created_at,
+    user: data.users as User
+  };
 }
 
-// Convenience: add a session admin by email, creating the user if needed
+// Convenience: add a Product Owner by email, creating the user if needed
 export async function addSessionAdminByEmail(sessionId: string, email: string, name: string): Promise<SessionAdmin> {
   const user = await getOrCreateUser(email, name);
   return addSessionAdmin(sessionId, user.id);
 }
 
-export async function removeSessionAdmin(sessionId: string, userId: string): Promise<void> {
+// Add a user as Product Owner for all products and sessions
+export async function addProductOwnerAllProducts(userId: string): Promise<void> {
+  // Check if user already has applies_to_all_products = true
+  const { data: existing, error: checkError } = await supabase
+    .from('product_product_owners')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('applies_to_all_products', true)
+    .single();
+
+  if (existing) {
+    // User already is a global product owner
+    return;
+  }
+
+  // Insert a record with applies_to_all_products = true and product_id = null
   const { error } = await supabase
-    .from('session_admins')
+    .from('product_product_owners')
+    .insert([{ 
+      user_id: userId, 
+      product_id: null, 
+      applies_to_all_products: true 
+    }]);
+
+  if (error) throw error;
+}
+
+// Add a user as Product Owner for a specific product
+export async function addProductOwner(productId: string, userId: string): Promise<void> {
+  if (!productId) throw new Error('productId is required');
+
+  const { data: existing, error: checkError } = await supabase
+    .from('product_product_owners')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('product_id', productId)
+    .maybeSingle();
+
+  if (checkError) throw checkError;
+
+  if (existing) {
+    // already owner for this product
+    return;
+  }
+
+  const { error } = await supabase
+    .from('product_product_owners')
+    .insert([{ product_id: productId, user_id: userId, applies_to_all_products: false }]);
+
+  if (error) throw error;
+}
+
+export async function removeSessionAdmin(sessionId: string, userId: string): Promise<void> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', sessionId)
+    .single();
+  
+  if (sessionError || !session?.product_id) {
+    throw new Error('Session not found or has no product_id');
+  }
+  
+  // Remove Product Owner at product level
+  const { error } = await supabase
+    .from('product_product_owners')
     .delete()
-    .eq('session_id', sessionId)
+    .eq('product_id', session.product_id)
     .eq('user_id', userId);
   
   if (error) throw error;
@@ -852,26 +918,33 @@ export async function isUserSessionAdmin(sessionId: string, userId: string): Pro
       return true;
     }
     
-    // Use direct fetch as workaround for Supabase client query execution issue
-    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_admins?session_id=eq.${sessionId}&user_id=eq.${userId}&select=id&limit=1`;
-    const apiHeaders = {
-      'apikey': (supabase as any).supabaseKey,
-      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
-      'Content-Type': 'application/json',
-    };
+    // Get the session's product_id
+    const { data: session, error: sessionError } = await supabase
+      .from('voting_sessions')
+      .select('product_id')
+      .eq('id', sessionId)
+      .single();
     
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: apiHeaders
-    });
-    
-    if (!response.ok) {
-      console.error('Error checking admin status:', response.status);
+    if (sessionError || !session?.product_id) {
       return false;
     }
     
-    const data = await response.json();
-    return Array.isArray(data) && data.length > 0;
+    // Check if user is Product Owner of the session's product (product-level)
+    // Consider entries that grant access to all products as well
+    const filter = `or(product_id.eq.${session.product_id},applies_to_all_products.eq.true)`;
+    const { data, error } = await supabase
+      .from('product_product_owners')
+      .select('id')
+      .or(filter)
+      .eq('user_id', userId)
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Error checking admin status:', error);
+      return false;
+    }
+    
+    return !!data;
   } catch (err) {
     console.error('Caught exception checking admin:', err);
     return false;
@@ -883,25 +956,78 @@ export async function isUserSessionAdmin(sessionId: string, userId: string): Pro
 // ============================================
 
 export async function getSessionStakeholders(sessionId: string): Promise<SessionStakeholder[]> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', sessionId)
+    .single();
+  
+  if (sessionError || !session?.product_id) {
+    return [];
+  }
+  
+  // Get all Stakeholders for this product (product-level)
   const { data, error } = await supabase
-    .from('session_stakeholders')
+    .from('product_stakeholders')
     .select('*')
-    .eq('session_id', sessionId)
+    .eq('product_id', session.product_id)
     .order('user_name', { ascending: true });
   
   if (error) throw error;
-  return data || [];
+  
+  // Convert product-level stakeholders to session-level format for compatibility
+  return (data || []).map(ps => ({
+    id: ps.id,
+    session_id: sessionId, // Use the requested session_id for compatibility
+    user_email: ps.user_email,
+    user_name: ps.user_name,
+    votes_allocated: ps.votes_allocated,
+    has_voted: ps.has_voted,
+    voted_at: ps.voted_at,
+    created_at: ps.created_at
+  }));
 }
 
 export async function addSessionStakeholder(stakeholder: Omit<DbSessionStakeholder, 'id' | 'created_at'>): Promise<SessionStakeholder> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', stakeholder.session_id)
+    .single();
+  
+  if (sessionError || !session?.product_id) {
+    throw new Error('Session not found or has no product_id');
+  }
+  
+  // Add Stakeholder at product level
   const { data, error } = await supabase
-    .from('session_stakeholders')
-    .insert([stakeholder])
+    .from('product_stakeholders')
+    .insert([{
+      product_id: session.product_id,
+      user_email: stakeholder.user_email.toLowerCase(),
+      user_name: stakeholder.user_name,
+      votes_allocated: stakeholder.votes_allocated || 10,
+      has_voted: stakeholder.has_voted || false,
+      voted_at: stakeholder.voted_at || null
+    }])
     .select()
     .single();
   
   if (error) throw error;
-  return data;
+  
+  // Return in SessionStakeholder format for compatibility
+  return {
+    id: data.id,
+    session_id: stakeholder.session_id, // Keep for compatibility
+    user_email: data.user_email,
+    user_name: data.user_name,
+    votes_allocated: data.votes_allocated,
+    has_voted: data.has_voted,
+    voted_at: data.voted_at,
+    created_at: data.created_at
+  };
 }
 
 // Convenience: ensure a stakeholder row exists for email (user account not required)
@@ -910,7 +1036,7 @@ export async function addSessionStakeholderByEmail(sessionId: string, email: str
     session_id: sessionId,
     user_email: email,
     user_name: name,
-    votes_allocated: 0,
+    votes_allocated: 10,
     has_voted: false
   });
 }
@@ -939,52 +1065,82 @@ function formatDateForEmail(dateString: string): string {
 }
 
 export async function removeSessionStakeholder(sessionId: string, email: string): Promise<void> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', sessionId)
+    .single();
+  
+  if (sessionError || !session?.product_id) {
+    throw new Error('Session not found or has no product_id');
+  }
+  
+  // Remove Stakeholder at product level
   const { error } = await supabase
-    .from('session_stakeholders')
+    .from('product_stakeholders')
     .delete()
-    .eq('session_id', sessionId)
-    .eq('user_email', email);
+    .eq('product_id', session.product_id)
+    .eq('user_email', email.toLowerCase());
   
   if (error) throw error;
 }
 
 export async function updateStakeholderVoteStatus(sessionId: string, email: string, hasVoted: boolean): Promise<void> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', sessionId)
+    .single();
+  
+  if (sessionError || !session?.product_id) {
+    throw new Error('Session not found or has no product_id');
+  }
+  
   const updates: any = { has_voted: hasVoted };
   if (hasVoted) {
     updates.voted_at = new Date().toISOString();
   }
   
+  // Update Stakeholder vote status at product level
+  // Note: This marks the stakeholder as having voted in any session of the product
   const { error } = await supabase
-    .from('session_stakeholders')
+    .from('product_stakeholders')
     .update(updates)
-    .eq('session_id', sessionId)
-    .eq('user_email', email);
+    .eq('product_id', session.product_id)
+    .eq('user_email', email.toLowerCase());
   
   if (error) throw error;
 }
 
 export async function isUserSessionStakeholder(sessionId: string, email: string): Promise<boolean> {
   try {
-    // Use direct fetch as workaround for Supabase client query execution issue
-    const apiUrl = `${(supabase as any).supabaseUrl}/rest/v1/session_stakeholders?session_id=eq.${sessionId}&user_email=eq.${encodeURIComponent(email)}&select=id&limit=1`;
-    const apiHeaders = {
-      'apikey': (supabase as any).supabaseKey,
-      'Authorization': `Bearer ${(supabase as any).supabaseKey}`,
-      'Content-Type': 'application/json',
-    };
+    // Get the session's product_id
+    const { data: session, error: sessionError } = await supabase
+      .from('voting_sessions')
+      .select('product_id')
+      .eq('id', sessionId)
+      .single();
     
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: apiHeaders
-    });
-    
-    if (!response.ok) {
-      console.error('Error checking stakeholder status:', response.status);
+    if (sessionError || !session?.product_id) {
       return false;
     }
     
-    const data = await response.json();
-    return Array.isArray(data) && data.length > 0;
+    // Check if user is Stakeholder of the session's product (product-level)
+    const { data, error } = await supabase
+      .from('product_stakeholders')
+      .select('id')
+      .eq('product_id', session.product_id)
+      .eq('user_email', email.toLowerCase())
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Error checking stakeholder status:', error);
+      return false;
+    }
+    
+    return !!data;
   } catch (err) {
     console.error('Caught exception checking stakeholder:', err);
     return false;
@@ -992,10 +1148,22 @@ export async function isUserSessionStakeholder(sessionId: string, email: string)
 }
 
 export async function isUserStakeholder(sessionId: string, email: string): Promise<boolean> {
+  // Get the session's product_id
+  const { data: session, error: sessionError } = await supabase
+    .from('voting_sessions')
+    .select('product_id')
+    .eq('id', sessionId)
+    .single();
+
+  if (sessionError || !session?.product_id) {
+    return false;
+  }
+
+  // Check if user is Stakeholder of the session's product (product-level)
   const { data, error } = await supabase
-    .from('session_stakeholders')
+    .from('product_stakeholders')
     .select('id')
-    .eq('session_id', sessionId)
+    .eq('product_id', session.product_id)
     .eq('user_email', email.toLowerCase())
     .maybeSingle();
 
@@ -1041,6 +1209,7 @@ export async function getFeatures(sessionId: string) {
   }
   
   const data = await response.json();
+  
   return (data || []).filter((feature: any) => {
     const isSuggestionState = feature.state === FEATURE_SUGGESTION_STATE;
     const hasSuggestionTag = Array.isArray(feature.tags) && feature.tags.includes(FEATURE_SUGGESTION_TAG);
@@ -1053,6 +1222,7 @@ export async function getFeatures(sessionId: string) {
     areaPath: feature.area_path || feature.areaPath || null,
     azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
     azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
+    attachmentUrls: feature.attachment_urls || null,
     // Keep original snake_case fields for backward compatibility
     azure_devops_id: feature.azure_devops_id || feature.azureDevOpsId || null
   }));
@@ -1070,6 +1240,7 @@ export async function createFeature(feature: {
   azure_devops_id?: string | null;
   azure_devops_url?: string | null;
   workItemType?: string | null;
+  attachmentUrls?: string[] | null;
 }) {
   const { data, error } = await supabase
     .from('features')
@@ -1084,7 +1255,8 @@ export async function createFeature(feature: {
       tags: feature.tags,
       azure_devops_id: feature.azure_devops_id,
       azure_devops_url: feature.azure_devops_url,
-      work_item_type: feature.workItemType
+      work_item_type: feature.workItemType,
+      attachment_urls: feature.attachmentUrls
     }])
     .select()
     .single();
@@ -1100,6 +1272,7 @@ export async function createFeature(feature: {
     areaPath: data.area_path || data.areaPath || null,
     azureDevOpsId: data.azure_devops_id || data.azureDevOpsId || null,
     azureDevOpsUrl: data.azure_devops_url || data.azureDevOpsUrl || null,
+    attachmentUrls: data.attachment_urls || null,
     // Keep original snake_case fields for backward compatibility
     azure_devops_id: data.azure_devops_id || data.azureDevOpsId || null
   };
@@ -1116,6 +1289,7 @@ export async function updateFeature(id: string, updates: {
   azure_devops_id?: string | null;
   azure_devops_url?: string | null;
   workItemType?: string | null;
+  attachmentUrls?: string[] | null;
 }) {
   const dbUpdates: any = {};
   
@@ -1129,6 +1303,7 @@ export async function updateFeature(id: string, updates: {
   if (updates.azure_devops_id !== undefined) dbUpdates.azure_devops_id = updates.azure_devops_id;
   if (updates.azure_devops_url !== undefined) dbUpdates.azure_devops_url = updates.azure_devops_url;
   if (updates.workItemType !== undefined) dbUpdates.work_item_type = updates.workItemType;
+  if (updates.attachmentUrls !== undefined) dbUpdates.attachment_urls = updates.attachmentUrls;
   
   const { data, error } = await supabase
     .from('features')
@@ -1148,6 +1323,7 @@ export async function updateFeature(id: string, updates: {
     areaPath: data.area_path || data.areaPath || null,
     azureDevOpsId: data.azure_devops_id || data.azureDevOpsId || null,
     azureDevOpsUrl: data.azure_devops_url || data.azureDevOpsUrl || null,
+    attachmentUrls: data.attachment_urls || null,
     // Keep original snake_case fields for backward compatibility
     azure_devops_id: data.azure_devops_id || data.azureDevOpsId || null
   };

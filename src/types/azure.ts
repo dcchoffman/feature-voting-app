@@ -40,15 +40,15 @@ export interface Feature {
   voters: VoterInfo[];
   epic?: string;
   epicId?: string;
-  state?: string; 
-  areaPath?: string;  
+  state?: string;
+  areaPath?: string;
   tags?: string[];
   azureDevOpsId?: string;
   azureDevOpsUrl?: string;
   workItemType?: string;
-}
-
-export interface VoterInfo {
+  attachmentUrls?: string[];
+  azureImageUrls?: string[]; // Temp field for images extracted from Azure DevOps descriptions
+}export interface VoterInfo {
   userId: string;
   name: string;
   email: string;

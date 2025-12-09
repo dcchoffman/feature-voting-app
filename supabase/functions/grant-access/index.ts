@@ -55,23 +55,6 @@ serve(async (req) => {
       );
     }
 
-    // Get all sessions for this product
-    const { data: sessions, error: sessionsError } = await supabase
-      .from('voting_sessions')
-      .select('id')
-      .eq('product_id', productId);
-
-    if (sessionsError) {
-      throw sessionsError;
-    }
-
-    if (!sessions || sessions.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'No sessions found for this product' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Get or create user
     const fallbackName = email.split('@')[0].replace(/\./g, ' ');
     
@@ -113,36 +96,33 @@ serve(async (req) => {
       }
     }
 
-    // Grant access to all sessions
-    const grantPromises = sessions.map(session => {
-      if (action === 'grant-admin') {
-        return supabase
-          .from('session_admins')
-          .insert([{ session_id: session.id, user_id: user.id }])
-          .select();
-      } else {
-        return supabase
-          .from('session_stakeholders')
-          .insert([{
-            session_id: session.id,
-            user_email: email.toLowerCase(),
-            user_name: user.name,
-            votes_allocated: 0,
-            has_voted: false
-          }])
-          .select();
+    // Grant access at product level
+    if (action === 'grant-admin') {
+      const { data, error } = await supabase
+        .from('product_product_owners')
+        .insert([{ product_id: productId, user_id: user.id }])
+        .select();
+      
+      // Ignore duplicate key errors (user already Product Owner for this product)
+      if (error && error.code !== '23505') {
+        throw error;
       }
-    });
-
-    const results = await Promise.all(grantPromises);
-    
-    // Check for errors (ignore duplicate key errors)
-    const errors = results
-      .map((result, index) => ({ result, index }))
-      .filter(({ result }) => result.error && result.error.code !== '23505'); // Ignore duplicate key errors
-
-    if (errors.length > 0) {
-      console.error('Some grants failed:', errors);
+    } else {
+      const { data, error } = await supabase
+        .from('product_stakeholders')
+        .insert([{
+          product_id: productId,
+          user_email: email.toLowerCase(),
+          user_name: user.name,
+          votes_allocated: 10,
+          has_voted: false
+        }])
+        .select();
+      
+      // Ignore duplicate key errors (user already Stakeholder for this product)
+      if (error && error.code !== '23505') {
+        throw error;
+      }
     }
 
     // Get product name
@@ -155,9 +135,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Successfully granted ${action === 'grant-admin' ? 'Session Admin' : 'Stakeholder'} access`,
-        productName: product?.name || 'the product',
-        sessionsGranted: sessions.length
+        message: `Successfully granted ${action === 'grant-admin' ? 'Product Owner' : 'Stakeholder'} access`,
+        productName: product?.name || 'the product'
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

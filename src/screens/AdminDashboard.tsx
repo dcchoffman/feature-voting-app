@@ -47,7 +47,8 @@ import {
   CircleAlert,
   Database,
   Tag,
-  User as UserIcon
+  User as UserIcon,
+  MoreVertical
 } from "lucide-react";
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
@@ -594,6 +595,33 @@ function PreviewFeaturesModal({ isOpen, onClose, previewFeatures, onConfirmSync,
                                   <div className="text-xs text-gray-500 mt-1 line-clamp-2">
                                     {feature.description.replace(/<[^>]*>/g, '').substring(0, 100)}
                                     {feature.description.replace(/<[^>]*>/g, '').length > 100 ? '...' : ''}
+                                  </div>
+                                )}
+                                {feature.attachmentUrls && feature.attachmentUrls.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {feature.attachmentUrls.slice(0, 3).map((url, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="relative border border-gray-300 rounded overflow-hidden"
+                                        style={{ width: '32px', height: '32px' }}
+                                        title="Image from work item"
+                                      >
+                                        <img
+                                          src={url}
+                                          alt={`Attachment ${idx + 1}`}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            // Hide broken images
+                                            e.currentTarget.style.display = 'none';
+                                          }}
+                                        />
+                                      </div>
+                                    ))}
+                                    {feature.attachmentUrls.length > 3 && (
+                                      <div className="flex items-center justify-center" style={{ width: '32px', height: '32px' }}>
+                                        <span className="text-xs text-gray-500">+{feature.attachmentUrls.length - 3}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                                 {feature.tags && feature.tags.length > 0 && (
@@ -2500,12 +2528,27 @@ export function AdminDashboard({
   const [isSessionAdmin, setIsSessionAdmin] = useState(false);
   
   // Compute effective role based on adminPerspective
-  // When adminPerspective is 'session', treat as Session Admin even if user is System Admin
+  // When adminPerspective is 'session', treat as Product Owner even if user is System Admin
   const effectiveIsSystemAdmin = adminPerspective === 'system' && isSystemAdmin;
   const effectiveIsSessionAdmin = adminPerspective === 'session' || (adminPerspective === 'system' && !isSystemAdmin && isSessionAdmin);
   const [adminCount, setAdminCount] = useState<number>(0);
   const [stakeholderCount, setStakeholderCount] = useState<number>(0);
   const sessionActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  
+  // Feature actions dropdown state
+  const [hoveredFeatureId, setHoveredFeatureId] = useState<string | null>(null);
+  const [openFeatureDropdown, setOpenFeatureDropdown] = useState<string | null>(null);
+  
+  // Feature attachment state
+  const [showAttachmentModal, setShowAttachmentModal] = useState(false);
+  const [featureToAttach, setFeatureToAttach] = useState<Feature | null>(null);
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<string[]>([]);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [viewingAttachment, setViewingAttachment] = useState<string | null>(null);
+  
   const [suggestionToPromote, setSuggestionToPromote] = useState<FeatureSuggestion | null>(null);
   const [isPromotingSuggestion, setIsPromotingSuggestion] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
@@ -2594,9 +2637,9 @@ export function AdminDashboard({
       const sysAdmin = await db.isUserSystemAdmin(currentUser.id);
       setIsSystemAdmin(sysAdmin);
       
-      // Check if session admin
+      // Check if product owner
       const { data } = await supabase
-        .from('session_admins')
+        .from('product_owners')
         .select('session_id')
         .eq('user_id', currentUser.id)
         .limit(1);
@@ -2899,18 +2942,24 @@ export function AdminDashboard({
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    // Navigate to users screen with session-admin filter and perspective
-    navigate(`/users?filter=session-admin&perspective=${adminPerspective}`);
-  }, [currentSession, setCurrentSession, navigate, adminPerspective]);
+    // Get product ID from votingSession or currentSession
+    const productId = (votingSession as any)?.product_id ?? (votingSession as any)?.productId ?? (currentSession as any)?.product_id ?? (currentSession as any)?.productId ?? null;
+    // Navigate to users screen with product-owner filter, perspective, and product
+    const url = `/users?filter=product-owner&perspective=${adminPerspective}${productId ? `&product=${productId}` : ''}`;
+    navigate(url);
+  }, [currentSession, setCurrentSession, navigate, adminPerspective, votingSession]);
 
   const handleManageStakeholders = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (currentSession) {
       setCurrentSession(currentSession);
     }
-    // Navigate to users screen with stakeholder filter and perspective
-    navigate(`/users?filter=stakeholder&perspective=${adminPerspective}`);
-  }, [currentSession, setCurrentSession, navigate, adminPerspective]);
+    // Get product ID from votingSession or currentSession
+    const productId = (votingSession as any)?.product_id ?? (votingSession as any)?.productId ?? (currentSession as any)?.product_id ?? (currentSession as any)?.productId ?? null;
+    // Navigate to users screen with stakeholder filter, perspective, and product
+    const url = `/users?filter=stakeholder&perspective=${adminPerspective}${productId ? `&product=${productId}` : ''}`;
+    navigate(url);
+  }, [currentSession, setCurrentSession, navigate, adminPerspective, votingSession]);
 
   const logStatusNote = useCallback(async (note: {
     type: 'reopen' | 'ended-early';
@@ -3169,6 +3218,162 @@ export function AdminDashboard({
     onRequestDeleteSession();
   }, [onRequestDeleteSession]);
 
+  // Attachment handlers
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const validFiles: File[] = [];
+    const previewUrls: string[] = [];
+    
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+    
+    files.forEach(file => {
+      if (validTypes.includes(file.type)) {
+        validFiles.push(file);
+        if (file.type.startsWith('image/')) {
+          previewUrls.push(URL.createObjectURL(file));
+        } else {
+          previewUrls.push('');
+        }
+      }
+    });
+
+    const remainingSlots = 3 - attachmentFiles.length;
+    const filesToAdd = validFiles.slice(0, remainingSlots);
+    const urlsToAdd = previewUrls.slice(0, remainingSlots);
+    
+    setAttachmentFiles(prev => [...prev, ...filesToAdd]);
+    setAttachmentPreviewUrls(prev => [...prev, ...urlsToAdd]);
+    
+    if (attachmentFileInputRef.current) {
+      attachmentFileInputRef.current.value = '';
+    }
+  }, [attachmentFiles.length]);
+
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachmentFiles(prev => {
+      const fileToRemove = prev[index];
+      if (fileToRemove && fileToRemove.type.startsWith('image/')) {
+        setAttachmentPreviewUrls(prevUrls => {
+          const urlToRevoke = prevUrls[index];
+          if (urlToRevoke) {
+            URL.revokeObjectURL(urlToRevoke);
+          }
+          return prevUrls.filter((_, i) => i !== index);
+        });
+      } else {
+        setAttachmentPreviewUrls(prevUrls => prevUrls.filter((_, i) => i !== index));
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  }, []);
+
+  const openAttachmentModal = useCallback((feature: Feature) => {
+    setFeatureToAttach(feature);
+    setAttachmentError(null);
+    setShowAttachmentModal(true);
+  }, []);
+
+  const closeAttachmentModal = useCallback(() => {
+    if (!isUploadingAttachment) {
+      attachmentPreviewUrls.forEach(url => {
+        if (url) {
+          URL.revokeObjectURL(url);
+        }
+      });
+      setShowAttachmentModal(false);
+      setFeatureToAttach(null);
+      setAttachmentFiles([]);
+      setAttachmentPreviewUrls([]);
+      setAttachmentError(null);
+      if (attachmentFileInputRef.current) {
+        attachmentFileInputRef.current.value = '';
+      }
+    }
+  }, [isUploadingAttachment, attachmentPreviewUrls]);
+
+  const handleSubmitAttachment = useCallback(async () => {
+    if (!featureToAttach || attachmentFiles.length === 0) {
+      setAttachmentError('Please select at least one file to upload.');
+      return;
+    }
+
+    try {
+      setIsUploadingAttachment(true);
+      setAttachmentError(null);
+
+      // Upload attachments to Supabase storage
+      const attachmentUrls: string[] = [];
+      for (let i = 0; i < attachmentFiles.length; i++) {
+        const file = attachmentFiles[i];
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${i}.${fileExt}`;
+        const filePath = `features/${featureToAttach.id}/${fileName}`;
+
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from('feature-attachments')
+            .upload(filePath, file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error('Error uploading file:', uploadError);
+            if (uploadError.message?.includes('Bucket not found')) {
+              console.warn('Storage bucket "feature-attachments" not found. Please create it in Supabase Storage.');
+            }
+          } else {
+            const { data: { publicUrl } } = supabase.storage
+              .from('feature-attachments')
+              .getPublicUrl(filePath);
+            attachmentUrls.push(publicUrl);
+          }
+        } catch (error: any) {
+          console.error('Error uploading file:', error);
+        }
+      }
+
+      if (attachmentUrls.length === 0) {
+        setAttachmentError('Failed to upload files. Please try again.');
+        setIsUploadingAttachment(false);
+        return;
+      }
+
+      // Update feature with new attachment URLs
+      const existingAttachments = featureToAttach.attachmentUrls || [];
+      const updatedFeature = {
+        ...featureToAttach,
+        attachmentUrls: [...existingAttachments, ...attachmentUrls]
+      };
+
+      onUpdateFeature(updatedFeature);
+      closeAttachmentModal();
+    } catch (error) {
+      console.error('Error submitting attachment:', error);
+      setAttachmentError('Failed to upload attachments. Please try again.');
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  }, [featureToAttach, attachmentFiles, onUpdateFeature, closeAttachmentModal]);
+
+  const handleRemoveFeatureAttachment = useCallback((feature: Feature, urlToRemove: string) => {
+    const updatedAttachments = (feature.attachmentUrls || []).filter(url => url !== urlToRemove);
+    const updatedFeature = {
+      ...feature,
+      attachmentUrls: updatedAttachments
+    };
+    onUpdateFeature(updatedFeature);
+    
+    // Optionally delete from storage
+    const pathMatch = urlToRemove.match(/features\/[^\/]+\/[^\/]+$/);
+    if (pathMatch) {
+      supabase.storage
+        .from('feature-attachments')
+        .remove([pathMatch[0]])
+        .catch(err => console.error('Error deleting file from storage:', err));
+    }
+  }, [onUpdateFeature]);
+
   // Handle click outside mobile menu
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -3201,6 +3406,22 @@ export function AdminDashboard({
     };
   }, [sessionActionsMenuOpen]);
 
+  // Handle click outside feature actions dropdown
+  useEffect(() => {
+    if (!openFeatureDropdown) return;
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (!(e.target as Element).closest('.feature-actions-dropdown-container')) {
+        setOpenFeatureDropdown(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside as any);
+    };
+  }, [openFeatureDropdown]);
+
   return (
     <div className="container mx-auto p-4 max-w-6xl min-h-screen pb-8">
       {/* Desktop: Centered logo at top */}
@@ -3230,16 +3451,16 @@ export function AdminDashboard({
                 Welcome, {currentUser.name}
                 {(() => {
                   // Determine primary role based on actual roles
-                  const primaryRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder';
+                  const primaryRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'product-owner' : 'stakeholder';
                   const primaryBadge = primaryRole === 'system-admin' ? (
                     <span className="inline-flex items-baseline text-[#C89212]">
                       <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
                       <span className="ml-1 text-sm">System Admin</span>
                     </span>
-                  ) : primaryRole === 'session-admin' ? (
+                  ) : primaryRole === 'product-owner' ? (
                     <span className="inline-flex items-baseline text-[#576C71]">
                       <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
-                      <span className="ml-1 text-sm">Session Admin</span>
+                      <span className="ml-1 text-sm">Product Owner</span>
                     </span>
                   ) : (
                     <span className="inline-flex items-baseline text-[#8B5A4A]">
@@ -3249,7 +3470,7 @@ export function AdminDashboard({
                   );
                   
                   // Determine current view role based on adminPerspective
-                  const currentViewRole = effectiveIsSystemAdmin ? 'system-admin' : effectiveIsSessionAdmin ? 'session-admin' : 'stakeholder';
+                  const currentViewRole = effectiveIsSystemAdmin ? 'system-admin' : effectiveIsSessionAdmin ? 'product-owner' : 'stakeholder';
                   
                   // If view mode matches primary role, just show primary role
                   if (currentViewRole === primaryRole) {
@@ -3266,10 +3487,10 @@ export function AdminDashboard({
                       <span className="inline-flex items-center"><Crown className="h-3.5 w-3.5" /></span>
                       <span className="ml-1 text-sm">System Admin</span>
                     </span>
-                  ) : currentViewRole === 'session-admin' ? (
+                  ) : currentViewRole === 'product-owner' ? (
                     <span className="inline-flex items-baseline text-[#576C71]">
                       <span className="inline-flex items-center"><Shield className="h-3.5 w-3.5" /></span>
-                      <span className="ml-1 text-sm">Session Admin</span>
+                      <span className="ml-1 text-sm">Product Owner</span>
                     </span>
                   ) : (
                     <span className="inline-flex items-baseline text-[#8B5A4A]">
@@ -3307,7 +3528,7 @@ export function AdminDashboard({
           </button>
           )}
           <button 
-            onClick={() => navigate(effectiveIsSystemAdmin || effectiveIsSessionAdmin ? `/users?perspective=${adminPerspective}` : '/users?filter=stakeholder')} 
+            onClick={() => navigate(effectiveIsSystemAdmin || effectiveIsSessionAdmin ? `/users?perspective=${adminPerspective}&filter=all` : '/users?filter=stakeholder')} 
             className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
           >
             {effectiveIsSystemAdmin || effectiveIsSessionAdmin ? (
@@ -3358,7 +3579,7 @@ export function AdminDashboard({
                 </button>
                 )}
                 <button
-                  onClick={() => { setMobileMenuOpen(false); navigate(effectiveIsSystemAdmin || effectiveIsSessionAdmin ? `/users?perspective=${adminPerspective}` : '/users?filter=stakeholder'); }}
+                  onClick={() => { setMobileMenuOpen(false); navigate(effectiveIsSystemAdmin || effectiveIsSessionAdmin ? `/users?perspective=${adminPerspective}&filter=all` : '/users?filter=stakeholder'); }}
                   className="w-full px-3 py-2 flex items-center text-left hover:bg-gray-50"
                 >
                   {effectiveIsSystemAdmin || effectiveIsSessionAdmin ? (
@@ -4084,7 +4305,16 @@ export function AdminDashboard({
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {features.map((feature) => (
-                <tr key={feature.id} className="align-top group hover:bg-gray-50 bg-white">
+                <tr 
+                  key={feature.id} 
+                  className="align-top group hover:bg-gray-50 bg-white"
+                  onMouseEnter={() => {
+                    if (!openFeatureDropdown) {
+                      setHoveredFeatureId(feature.id);
+                    }
+                  }}
+                  onMouseLeave={() => setHoveredFeatureId(null)}
+                >
                   <td className="sticky left-0 bg-white group-hover:bg-gray-50 px-4 py-3 z-10">
                     <div className="flex items-start gap-2">
                       <div className="flex-1 min-w-0">
@@ -4095,6 +4325,54 @@ export function AdminDashboard({
                             {feature.description.replace(/<[^>]*>/g, '').length > 100 ? '...' : ''}
                           </div>
                         )}
+                        
+                        {/* Attachment Thumbnails */}
+                        {feature.attachmentUrls && feature.attachmentUrls.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {feature.attachmentUrls.map((url, index) => {
+                              const isImage = url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                              const isPDF = url.match(/\.pdf$/i);
+                              
+                              return (
+                                <div
+                                  key={index}
+                                  className="relative group/thumb border border-gray-300 rounded overflow-hidden cursor-pointer hover:border-[#C89212] transition-colors"
+                                  style={{ width: '40px', height: '40px' }}
+                                  onClick={() => setViewingAttachment(url)}
+                                >
+                                  {isImage ? (
+                                    <img
+                                      src={url}
+                                      alt={`Attachment ${index + 1}`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : isPDF ? (
+                                    <div className="w-full h-full flex items-center justify-center bg-red-50">
+                                      <Paperclip className="h-4 w-4 text-red-600" />
+                                    </div>
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                                      <Paperclip className="h-4 w-4 text-gray-600" />
+                                    </div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveFeatureAttachment(feature, url);
+                                    }}
+                                    className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center"
+                                    style={{ width: '16px', height: '16px' }}
+                                    title="Remove attachment"
+                                  >
+                                    <X className="h-2.5 w-2.5" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        
                         {feature.tags && feature.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1 items-center">
                             {feature.tags.slice(0, 3).map((tag, idx) => (
@@ -4238,21 +4516,83 @@ export function AdminDashboard({
                     </div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm">{feature.votes}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => setEditingFeature(feature)}
-                      className="text-[#2D4660] hover:text-[#C89212] inline-block cursor-pointer"
-                      title="Edit Feature"
-                    >
-                      <Edit className="h-5 w-5" />
-                    </button>
-                    <button 
-                      onClick={() => onDeleteFeature(feature.id)}
-                      className="text-[#2D4660] hover:text-[#591D0F] inline-block cursor-pointer"
-                      title="Delete Feature"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <div className="flex items-center justify-end feature-actions-dropdown-container">
+                      <div className="relative inline-block">
+                        {((hoveredFeatureId === feature.id && !openFeatureDropdown) || openFeatureDropdown === feature.id) && (
+                          <button
+                            onClick={() => setOpenFeatureDropdown(openFeatureDropdown === feature.id ? null : feature.id)}
+                            className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+                            title="Feature actions"
+                          >
+                            <MoreVertical className="h-5 w-5 text-gray-600" />
+                          </button>
+                        )}
+                        
+                        {/* Dropdown menu */}
+                        {openFeatureDropdown === feature.id && (
+                          <div 
+                            className="absolute right-0 w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-visible"
+                            style={{ 
+                              zIndex: 1000,
+                              top: 'auto',
+                              bottom: 'auto',
+                              marginTop: '0.25rem',
+                              maxHeight: 'calc(100vh - 100px)',
+                              overflowY: 'auto'
+                            }}
+                          >
+                            <div>
+                              <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-200">
+                                Feature Actions
+                              </div>
+                              
+                              <button
+                                onClick={() => {
+                                  setEditingFeature(feature);
+                                  setOpenFeatureDropdown(null);
+                                }}
+                                className="w-full px-4 py-3 text-left flex items-center hover:bg-blue-50 text-[#2D4660] transition-colors cursor-pointer"
+                              >
+                                <Edit className="h-5 w-5 mr-3 flex-shrink-0" />
+                                <div>
+                                  <div className="font-medium text-base">Edit Feature</div>
+                                  <div className="text-xs text-gray-500">Modify feature details</div>
+                                </div>
+                              </button>
+                              
+                              <button
+                                onClick={() => {
+                                  openAttachmentModal(feature);
+                                  setOpenFeatureDropdown(null);
+                                }}
+                                className="w-full px-4 py-3 text-left flex items-center hover:bg-green-50 text-green-700 border-t border-gray-200 transition-colors cursor-pointer"
+                              >
+                                <Paperclip className="h-5 w-5 mr-3 flex-shrink-0" />
+                                <div>
+                                  <div className="font-medium text-base">Add Attachment</div>
+                                  <div className="text-xs text-gray-500">Upload a file</div>
+                                </div>
+                              </button>
+                              
+                              <button
+                                onClick={() => {
+                                  onDeleteFeature(feature.id);
+                                  setOpenFeatureDropdown(null);
+                                }}
+                                className="w-full px-4 py-3 text-left flex items-center hover:bg-red-50 text-red-700 border-t border-gray-200 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="h-5 w-5 mr-3 flex-shrink-0" />
+                                <div>
+                                  <div className="font-medium text-base">Delete Feature</div>
+                                  <div className="text-xs text-gray-500">Remove from session</div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -4938,6 +5278,155 @@ export function AdminDashboard({
                 </div>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Attachment Modal */}
+      <Modal
+        isOpen={showAttachmentModal}
+        onClose={closeAttachmentModal}
+        title={`Add Attachment - ${featureToAttach?.title || ''}`}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">
+            Upload images or PDF files to attach to this feature (maximum 3 files).
+          </p>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Attach Images or PDFs (optional, up to 3)
+            </label>
+            <input
+              ref={attachmentFileInputRef}
+              type="file"
+              accept="image/*,.pdf"
+              multiple
+              onChange={handleFileSelect}
+              disabled={isUploadingAttachment || attachmentFiles.length >= 3}
+              className="hidden"
+              id="attachment-file-input"
+            />
+            <label
+              htmlFor="attachment-file-input"
+              className={`inline-flex items-center px-4 py-2 border border-gray-300 rounded-md cursor-pointer ${
+                isUploadingAttachment || attachmentFiles.length >= 3
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Paperclip className="h-4 w-4 mr-2" />
+              {attachmentFiles.length >= 3 ? 'Maximum 3 files' : 'Attach Files'}
+            </label>
+            
+            {attachmentFiles.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-3">
+                {attachmentFiles.map((file, index) => {
+                  const isImage = file.type.startsWith('image/');
+                  const isPDF = file.type === 'application/pdf';
+                  const previewUrl = attachmentPreviewUrls[index] || null;
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="relative group border border-gray-300 rounded-md overflow-hidden"
+                      style={{ width: '100px', height: '100px' }}
+                    >
+                      {isImage && previewUrl ? (
+                        <img
+                          src={previewUrl}
+                          alt={file.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : isPDF ? (
+                        <div className="w-full h-full flex items-center justify-center bg-red-50">
+                          <Paperclip className="h-8 w-8 text-red-600" />
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(index)}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        style={{ width: '20px', height: '20px' }}
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">
+                        {file.name.length > 15 ? `${file.name.substring(0, 15)}...` : file.name}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {attachmentError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">
+              {attachmentError}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 mt-6">
+            <Button
+              variant="secondary"
+              onClick={closeAttachmentModal}
+              disabled={isUploadingAttachment}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gold"
+              onClick={handleSubmitAttachment}
+              disabled={isUploadingAttachment || attachmentFiles.length === 0}
+            >
+              {isUploadingAttachment ? 'Uploading...' : 'Upload'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Attachment Viewer Modal */}
+      {viewingAttachment && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
+          onClick={() => setViewingAttachment(null)}
+        >
+          <button
+            onClick={() => setViewingAttachment(null)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors z-10"
+            title="Close"
+          >
+            <X className="h-8 w-8" />
+          </button>
+          <div className="max-w-7xl max-h-full w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            {viewingAttachment.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+              <img
+                src={viewingAttachment}
+                alt="Attachment"
+                className="max-w-full max-h-full object-contain"
+              />
+            ) : viewingAttachment.match(/\.pdf$/i) ? (
+              <iframe
+                src={viewingAttachment}
+                className="w-full h-full bg-white"
+                title="PDF Viewer"
+              />
+            ) : (
+              <div className="text-white text-center">
+                <Paperclip className="h-16 w-16 mx-auto mb-4" />
+                <p className="mb-4">Unable to preview this file type</p>
+                <a
+                  href={viewingAttachment}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#C89212] hover:text-[#A07810] underline"
+                >
+                  Open in new tab
+                </a>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -126,7 +126,7 @@ Replace `YOUR_ANON_KEY` with your Supabase anon key from `src/supabaseClient.ts`
 ## Next Steps
 
 Once the function is deployed and working:
-1. Test the "Request Access" feature on the login page
-2. Verify emails are being sent to session admins
-3. Check that the fallback mailto mechanism still works as a backup
+2. Test the "Request Access" feature on the login page
+3. Verify emails are being sent to product owners
+4. Check that the fallback mailto mechanism still works as a backup
 

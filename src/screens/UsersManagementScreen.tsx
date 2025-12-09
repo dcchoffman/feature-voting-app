@@ -1,28 +1,65 @@
-// ============================================
-// Users Management Screen
-// ============================================
-// Location: src/screens/UsersManagementScreen.tsx
-// ============================================
+// This is a new version of UsersManagementScreen with multi-row layout
+// Each user's roles (System Admin, Product Owner, Stakeholder) are displayed in separate table rows
+// The USER and ACTIONS columns span all rows for that user using rowSpan
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useSession } from '../contexts/SessionContext';
-import * as db from '../services/databaseService';
-import type { User, VotingSession, Product } from '../types';
-import type { UserRoleInfo } from '../services/databaseService';
-import { 
-  ChevronLeft, Users, Crown, Shield, ShieldCheck, User as UserIcon,
-  Settings, List, LogOut, Search, X, MoreVertical, Trash2, UserX, Calendar, ChevronDown, CheckCircle, Info, Edit, Plus, Minus, FilterX
-} from 'lucide-react';
-import { getProductColor } from '../utils/productColors';
+// TO TEST: Temporarily rename this file to UsersManagementScreen.tsx (backup the original first)
+
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import mobileLogo from '../assets/New-Millennium-Icon-gold-on-blue-rounded-square.svg';
 import desktopLogo from '../assets/New-Millennium-color-logo.svg';
 import microsoftLogo from '../assets/microsoft.svg';
+import { 
+  Users, Crown, Shield, ShieldCheck, User as UserIcon,
+  Calendar, MoreVertical, Plus, Minus, Vote,
+  Edit, Trash2, UserX, Search, X, Settings, LogOut, List, FilterX
+} from 'lucide-react';
 import { searchAzureAdUsers, type AzureAdUser } from '../services/azureAdUserService';
+import { useSession } from '../contexts/SessionContext';
+import { getAllUsers, getUserRoleInfo, type UserRoleInfo } from '../services/databaseService';
+import { formatDate } from '../utils/date';
+import type { VotingSession, Product } from '../types';
+import { getProductColor } from '../utils/productColors';
 
-// Helper functions for role badge display
+// Define SessionWithAssignment type locally
+interface SessionWithAssignment extends VotingSession {
+  assignedAt?: string;
+  assignedBy?: string;
+  assignedByName?: string;
+}
+
+// Helper function to format session date range
+const formatSessionDateRange = (session: any): string => {
+  if (!session.start_date || !session.end_date) return 'No dates set';
+  const start = formatDate(session.start_date);
+  const end = formatDate(session.end_date);
+  return `${start} - ${end}`;
+};
+
+type RoleType = 'system-admin' | 'admin' | 'stakeholder';
+
+interface UserWithRoles {
+  id: string;
+  email: string;
+  name: string;
+  tenant_id?: string | null;
+  tenantId?: string | null;
+  created_at?: string;
+  roles: UserRoleInfo;
+  adminInSessions?: SessionWithAssignment[];
+  stakeholderInSessions?: SessionWithAssignment[];
+}
+
+interface RoleRow {
+  type: RoleType;
+  badge: React.ReactNode;
+  sessions: SessionWithAssignment[] | null;
+  createdDate: string | undefined;
+  productCount?: number;
+}
+
+// Helper functions for role badge display (from original UsersManagementScreen.tsx)
 interface RoleBadgeInfo {
   label: string;
   className: string;
@@ -43,7 +80,7 @@ const getRoleBadgeInfo = (
   }
   if (isSessionAdmin) {
     return { 
-      label: 'Session Admin', 
+      label: 'Product Owner', 
       className: 'text-[#576C71]',
       icon: <Shield className="h-3.5 w-3.5" />
     };
@@ -70,7 +107,7 @@ const getRoleBadgeInfoFromCurrentRole = (
       };
     case 'session-admin':
       return { 
-        label: 'Session Admin', 
+        label: 'Product Owner', 
         className: 'text-[#576C71]',
         icon: <Shield className="h-3.5 w-3.5" />
       };
@@ -143,544 +180,44 @@ const getRoleBadgeDisplay = (
   );
 };
 
-interface SessionWithAssignment extends VotingSession {
-  assignedAt?: string;
-  assignedBy?: string;
-  assignedByName?: string;
-}
-
-interface UserWithRoles extends User {
-  roles: UserRoleInfo;
-  adminInSessions?: SessionWithAssignment[];
-  stakeholderInSessions?: SessionWithAssignment[];
-}
-
-type RoleModalType = 'stakeholder' | 'session-admin' | 'remove-stakeholder' | null;
-
-const getInitialAzureSearchState = () => ({
-  searchTerm: '',
-  results: [] as AzureAdUser[],
-  isSearching: false,
-  showResults: false,
-  error: ''
-});
-
-// Product Select Component
-interface ProductSelectProps {
-  products: Product[];
-  value: string;
-  onChange: (value: string) => void;
-  label?: string;
-  error?: boolean;
-  onProductChange?: () => void;
-}
-
-function ProductSelect({ products, value, onChange, label, error, onProductChange }: ProductSelectProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const selectedProduct = products.find(p => p.id === value);
-  const selectedColors = selectedProduct ? getProductColor(selectedProduct.name, selectedProduct.color_hex ?? null) : null;
-
-  return (
-    <div ref={dropdownRef} className="relative overflow-visible">
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
-      
-      <div
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full px-3 py-2 border rounded-md bg-white cursor-pointer flex items-center justify-between hover:border-gray-400 ${
-          error ? 'border-red-500' : 'border-gray-300'
-        }`}
-      >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {selectedProduct && selectedColors && (
-            <div
-              className="w-4 h-4 rounded flex-shrink-0"
-              style={{ backgroundColor: selectedColors.background }}
-            />
-          )}
-          <span className={`text-sm truncate ${!value ? 'text-gray-400' : 'text-gray-900'}`}>
-            {selectedProduct ? selectedProduct.name : 'Select a Product'}
-          </span>
-        </div>
-        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform flex-shrink-0 ${isOpen ? 'transform rotate-180' : ''}`} />
-      </div>
-
-      {isOpen && (
-        <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-          {products.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-gray-500 text-center">No products available</div>
-          ) : (
-            products.map(product => {
-              const colors = getProductColor(product.name, product.color_hex ?? null);
-              const isSelected = value === product.id;
-              return (
-                <div
-                  key={product.id}
-                  onClick={() => {
-                    onChange(product.id);
-                    setIsOpen(false);
-                    if (onProductChange) onProductChange();
-                  }}
-                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
-                    isSelected ? 'bg-gray-50' : ''
-                  }`}
-                >
-                  <div
-                    className="w-4 h-4 rounded flex-shrink-0"
-                    style={{ backgroundColor: colors.background }}
-                  />
-                  <span className="text-sm text-gray-900 flex-1">{product.name}</span>
-                  {isSelected && <CheckCircle className="h-4 w-4 text-gray-400 flex-shrink-0" />}
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Product Filter Dropdown Component
-interface ProductFilterDropdownProps {
-  products: Product[];
-  value: string;
-  onChange: (value: string) => void;
-}
-
-function ProductFilterDropdown({ products, value, onChange }: ProductFilterDropdownProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLDivElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) &&
-          buttonRef.current && !buttonRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      // Calculate position when opening - use requestAnimationFrame to avoid forced reflow
-      if (buttonRef.current) {
-        requestAnimationFrame(() => {
-          if (buttonRef.current) {
-            const rect = buttonRef.current.getBoundingClientRect();
-            setDropdownPosition({
-              top: rect.bottom + window.scrollY + 4,
-              left: rect.left + window.scrollX,
-              width: rect.width
-            });
-          }
-        });
-      }
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  const selectedProduct = products.find(p => p.id === value);
-
-  const dropdownContent = isOpen ? (
-    <div 
-      ref={dropdownRef}
-      className="fixed bg-white border border-gray-300 rounded-lg shadow-xl max-h-60 overflow-y-auto"
-      style={{ 
-        top: `${dropdownPosition.top}px`,
-        left: `${dropdownPosition.left}px`,
-        width: '300px',
-        zIndex: 99999
-      }}
-    >
-      <div
-        onClick={() => {
-          onChange('');
-          setIsOpen(false);
-        }}
-        className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100 ${
-          !value ? 'bg-gray-50' : ''
-        }`}
-      >
-        <span className="text-base text-gray-900">All Products</span>
-        {!value && <CheckCircle className="h-4 w-4 text-gray-400 flex-shrink-0" />}
-      </div>
-      {products.length === 0 ? (
-        <div className="px-4 py-2.5 text-base text-gray-500 text-center">Loading products...</div>
-      ) : (
-        products.map(product => {
-          const colors = getProductColor(product.name, product.color_hex ?? null);
-          const isSelected = value === product.id;
-          return (
-            <div
-              key={product.id}
-              onClick={() => {
-                onChange(product.id);
-                setIsOpen(false);
-              }}
-              className={`px-4 py-2.5 cursor-pointer hover:bg-gray-50 flex items-center gap-2 ${
-                isSelected ? 'bg-blue-50' : ''
-              }`}
-            >
-              <span
-                className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
-                style={{ backgroundColor: colors.background }}
-              />
-              <span className="text-base text-gray-900 flex-1">{product.name}</span>
-              {isSelected && <CheckCircle className="h-4 w-4 text-blue-600 flex-shrink-0" />}
-            </div>
-          );
-        })
-      )}
-    </div>
-  ) : null;
-
-  return (
-    <>
-      <div className="relative min-w-[200px]">
-        <div
-          ref={buttonRef}
-          onClick={() => setIsOpen(!isOpen)}
-          className="px-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base bg-white cursor-pointer flex items-center justify-between hover:bg-gray-50"
-        >
-          <span className={`text-base truncate ${!value ? 'text-gray-500' : 'text-gray-900'}`}>
-            {selectedProduct ? selectedProduct.name : 'All Products'}
-          </span>
-          <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
-        </div>
-      </div>
-      {isOpen && createPortal(dropdownContent, document.body)}
-    </>
-  );
-}
-
-// Product Session Selector Component (Reusable)
-interface ProductSessionSelectorProps {
-  products: Product[];
-  sessions: VotingSession[];
-  selectedProductId: string;
-  onProductChange: (productId: string) => void;
-  useAllSessions: boolean;
-  onToggleAllSessions: (useAll: boolean) => void;
-  selectedSessionIds: string[];
-  onSessionToggle: (sessionId: string) => void;
-  getSessionStatus: (session: VotingSession) => { text: string; color: string };
-  formatSessionDateRange: (session: VotingSession) => string;
-  filterSessions: (sessions: VotingSession[], productId: string) => VotingSession[];
-}
-
-function ProductSessionSelector({
-  products,
-  sessions,
-  selectedProductId,
-  onProductChange,
-  useAllSessions,
-  onToggleAllSessions,
-  selectedSessionIds,
-  onSessionToggle,
-  getSessionStatus,
-  formatSessionDateRange,
-  filterSessions
-}: ProductSessionSelectorProps) {
-  const filteredSessions = selectedProductId ? filterSessions(sessions, selectedProductId) : [];
-
-  return (
-    <div className="space-y-3 overflow-visible">
-      {/* Product Selection */}
-      <div className="overflow-visible">
-        <ProductSelect
-          products={products}
-          value={selectedProductId}
-          onChange={(productId) => {
-            onProductChange(productId);
-            onToggleAllSessions(true);
-          }}
-          label="Product *"
-        />
-      </div>
-
-      {/* Session Selection Toggle - Only show after product is selected */}
-      {selectedProductId && (
-        <div className="space-y-3">
-          {/* Toggle: All Sessions / Select Sessions */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Session Selection *
-            </label>
-            <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
-              <button
-                type="button"
-                onClick={() => onToggleAllSessions(false)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                  !useAllSessions
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Select Sessions
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleAllSessions(true);
-                }}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                  useAllSessions
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                All Sessions
-              </button>
-            </div>
-            {useAllSessions && (
-              <p className="mt-2 text-xs text-gray-500">
-                User will be added to all current and future sessions for this product
-              </p>
-            )}
-          </div>
-
-          {/* Session Selection List - Only show if "Select Sessions" is chosen */}
-          {!useAllSessions && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Sessions * (Current and Future)
-              </label>
-              {filteredSessions.length === 0 ? (
-                <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-              ) : (
-                <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                  {filteredSessions.map((session) => (
-                    <label
-                      key={session.id}
-                      className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedSessionIds.includes(session.id)}
-                        onChange={() => onSessionToggle(session.id)}
-                        className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                        style={{ accentColor: '#16a34a' }}
-                      />
-                      <div className="ml-3 flex-1">
-                        <div className="text-sm font-medium text-gray-900">
-                          {session.title || 'Unnamed Session'}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {formatSessionDateRange(session)}
-                        </div>
-                        <div className="text-xs mt-0.5">
-                          <span className={`font-medium ${getSessionStatus(session).color}`}>
-                            {getSessionStatus(session).text}
-                          </span>
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Session MultiSelect Component
-interface SessionMultiSelectProps {
-  sessions: VotingSession[];
-  selectedSessionIds: string[];
-  onSelectionChange: (sessionIds: string[]) => void;
-  label?: string;
-}
-
-function SessionMultiSelect({ sessions, selectedSessionIds, onSelectionChange, label }: SessionMultiSelectProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const toggleSession = (sessionId: string) => {
-    if (selectedSessionIds.includes(sessionId)) {
-      onSelectionChange(selectedSessionIds.filter(id => id !== sessionId));
-    } else {
-      onSelectionChange([...selectedSessionIds, sessionId]);
-    }
-  };
-
-  const removeSession = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelectionChange(selectedSessionIds.filter(id => id !== sessionId));
-  };
-
-  const selectedSessions = sessions.filter(s => selectedSessionIds.includes(s.id));
-  const displayText = selectedSessions.length > 0 
-    ? `${selectedSessions.length} session${selectedSessions.length !== 1 ? 's' : ''} selected`
-    : 'Select sessions...';
-
-  return (
-    <div ref={dropdownRef} className="relative">
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
-      
-      <div
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full min-h-[42px] px-3 py-2 border border-gray-300 rounded-md bg-white cursor-pointer flex items-center justify-between hover:border-gray-400"
-      >
-        <div className="flex-1 flex flex-wrap gap-1 items-center">
-          {selectedSessions.length === 0 ? (
-            <span className="text-sm text-gray-400">{displayText}</span>
-          ) : (
-            <>
-              {selectedSessions.map(session => (
-                <span
-                  key={session.id}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full"
-                >
-                  <span className="truncate max-w-[150px]">{session.title || 'Unnamed Session'}</span>
-                  <button
-                    onClick={(e) => removeSession(session.id, e)}
-                    className="hover:bg-green-200 rounded-full p-0.5"
-                    type="button"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </>
-          )}
-        </div>
-        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
-      </div>
-
-      {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-          {sessions.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-gray-500 text-center">
-              No current or future sessions found for this product.
-            </div>
-          ) : (
-            sessions.map(session => {
-              const isSelected = selectedSessionIds.includes(session.id);
-              return (
-                <div
-                  key={session.id}
-                  onClick={() => toggleSession(session.id)}
-                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between ${
-                    isSelected ? 'bg-green-50' : ''
-                  }`}
-                >
-                  <span className="text-sm text-gray-900">{session.title || 'Unnamed Session'}</span>
-                  {isSelected && (
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function UsersManagementScreen() {
-  const { currentUser, setCurrentUser, setCurrentSession, currentSession } = useSession();
+export default function UsersManagementScreenMultiRow() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const { setCurrentSession, currentUser: sessionUser } = useSession();
   
-  // Get adminPerspective from URL or sessionStorage
-  const adminPerspective = (searchParams.get('perspective') || sessionStorage.getItem('adminPerspective') || 'system') as 'session' | 'system';
+  // Parse URL params for initial filter state
+  const urlParams = new URLSearchParams(location.search);
+  const urlFilter = urlParams.get('filter');
+  const urlProduct = urlParams.get('product');
   
-  // Save to sessionStorage for persistence
-  useEffect(() => {
-    if (adminPerspective) {
-      sessionStorage.setItem('adminPerspective', adminPerspective);
-    }
-  }, [adminPerspective]);
-  
-  // All hooks must be called before any conditional logic
   const [users, setUsers] = useState<UserWithRoles[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<UserWithRoles[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [allSessions, setAllSessions] = useState<VotingSession[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterRole, setFilterRole] = useState<'all' | 'system-admin' | 'session-admin' | 'stakeholder' | 'none'>('all');
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [dropdownPositions, setDropdownPositions] = useState<Record<string, { top?: string; right?: string; left?: string }>>({});
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
-  const [expandedSessions, setExpandedSessions] = useState<{ userId: string; role: 'admin' | 'stakeholder' } | null>(null);
-  const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null); // Format: "userId-sessionId"
-  
-  // Helper function to get most recent active session
-  const getMostRecentActiveSession = <T extends VotingSession>(sessions: T[]): T | null => {
-    const now = new Date();
-    const activeSessions = sessions.filter(s => {
-      const startDate = s.start_date ? new Date(s.start_date) : null;
-      const endDate = s.end_date ? new Date(s.end_date) : null;
-      
-      if (startDate && now < startDate) return false; // Upcoming
-      if (endDate && now > endDate) return false; // Closed
-      if (startDate && now >= startDate && (!endDate || now <= endDate)) return true; // Active
-      return false;
-    });
-    
-    if (activeSessions.length === 0) return null;
-    
-    // Sort by start date (most recent first)
-    return activeSessions.sort((a, b) => {
-      const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
-      const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
-      return dateB - dateA;
-    })[0];
-  };
-  
-  // Protected email addresses - hide trash cans for these users
-  const protectedEmails = new Set([
-    'spencer.faull@newmill.com',
-    'chris.rodes@newmill.com',
-    'dave.hoffman@newmill.com'
-  ]);
-  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
-  const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-  const azureSearchRef = useRef<HTMLDivElement | null>(null);
-  const hasCheckedAccess = useRef(false);
+  const [filterRole, setFilterRole] = useState<'all' | 'system-admin' | 'session-admin' | 'stakeholder'>(
+    urlFilter === 'product-owner' ? 'session-admin' : 
+    urlFilter === 'stakeholder' ? 'stakeholder' : 
+    urlFilter === 'system-admin' ? 'system-admin' : 'all'
+  );
+  const [filterProductId, setFilterProductId] = useState<string>(urlProduct || '');
+  const [viewMode, setViewMode] = useState<'system-admin' | 'session-admin'>('system-admin');
+  const [currentUserRoles, setCurrentUserRoles] = useState<UserWithRoles | null>(null);
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   const [isSessionAdmin, setIsSessionAdmin] = useState(false);
-  const [userAdminSessions, setUserAdminSessions] = useState<string[]>([]); // Session IDs the current user admins
-  // Initialize viewMode based on adminPerspective
-  const [viewMode, setViewMode] = useState<'system-admin' | 'session-admin'>(adminPerspective === 'system' ? 'system-admin' : 'session-admin');
+  const [userAdminSessions, setUserAdminSessions] = useState<string[]>([]);
   
-  // Update viewMode when adminPerspective changes
-  useEffect(() => {
-    setViewMode(adminPerspective === 'system' ? 'system-admin' : 'session-admin');
-  }, [adminPerspective]);
-  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
+  const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [userVotedSessions, setUserVotedSessions] = useState<Set<string>>(new Set());
   
   // Modal state
   const [showRoleModal, setShowRoleModal] = useState(false);
-  const [roleModalType, setRoleModalType] = useState<RoleModalType>(null);
+  const [roleModalType, setRoleModalType] = useState<'stakeholder' | 'session-admin' | 'remove-stakeholder' | 'system-admin' | null>(null);
   const [selectedUserForRole, setSelectedUserForRole] = useState<UserWithRoles | null>(null);
-  const [allSessions, setAllSessions] = useState<VotingSession[]>([]);
   const [userSessionMemberships, setUserSessionMemberships] = useState<{
     adminSessions: string[];
     stakeholderSessions: string[];
@@ -688,16 +225,14 @@ export default function UsersManagementScreen() {
   
   // Role modal product/session selection state
   const [roleModalProductId, setRoleModalProductId] = useState<string>('');
-  const [roleModalUseAllSessions, setRoleModalUseAllSessions] = useState<boolean>(true);
-  const [roleModalSelectedSessionIds, setRoleModalSelectedSessionIds] = useState<string[]>([]);
+  const [showRoleModalProductDropdown, setShowRoleModalProductDropdown] = useState(false);
+  const roleModalProductDropdownRef = useRef<HTMLDivElement>(null);
   
-  // Delete modal state
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<UserWithRoles | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [originalAdminId, setOriginalAdminId] = useState<string | null>(null);
-  const [protectedUserIds, setProtectedUserIds] = useState<Set<string>>(new Set());
-  const [duplicateEmails, setDuplicateEmails] = useState<Map<string, string[]>>(new Map()); // email -> [userId1, userId2, ...]
+  // Remove role modal state
+  const [selectedRoleToRemove, setSelectedRoleToRemove] = useState<'product-owner' | 'stakeholder' | 'system-admin' | null>(null);
+  
+  // Add role modal state
+  const [selectedRoleToAdd, setSelectedRoleToAdd] = useState<'product-owner' | 'stakeholder' | 'system-admin' | null>(null);
   
   // Add User modal state
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -706,548 +241,120 @@ export default function UsersManagementScreen() {
     name: '',
     email: '',
     isSystemAdmin: false,
-    sessionAdminIds: [] as string[],
-    stakeholderSessionIds: [] as string[]
+    isProductOwner: false,
+    isStakeholder: false,
+    productOwnerProductId: '',
+    stakeholderProductId: ''
   });
-  const [azureUserSearch, setAzureUserSearch] = useState(getInitialAzureSearchState());
+  const [showProductOwnerDropdown, setShowProductOwnerDropdown] = useState(false);
+  const [showStakeholderDropdown, setShowStakeholderDropdown] = useState(false);
+  const productOwnerDropdownRef = useRef<HTMLDivElement>(null);
+  const stakeholderDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Filter product dropdown
+  const [showFilterProductDropdown, setShowFilterProductDropdown] = useState(false);
+  const filterProductDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Filter role dropdown
+  const [showFilterRoleDropdown, setShowFilterRoleDropdown] = useState(false);
+  const filterRoleDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Azure AD search state
+  const [azureUserSearch, setAzureUserSearch] = useState({
+    searchTerm: '',
+    results: [] as AzureAdUser[],
+    isSearching: false,
+    showResults: false,
+    error: ''
+  });
   const [showAzureSearchSection, setShowAzureSearchSection] = useState(true);
-  const [isAzureSignedIn, setIsAzureSignedIn] = useState<boolean | null>(null);
-  const [accordionOpen, setAccordionOpen] = useState({
-    sessionAdmin: false,
-    stakeholder: false
-  });
-  const [pageTitle, setPageTitle] = useState('User Management');
-  const [products, setProducts] = useState<Product[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]); // All products for filter
-  const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [filteredSessionsForProduct, setFilteredSessionsForProduct] = useState<VotingSession[]>([]);
-  const [selectedProductIdForSessionAdmin, setSelectedProductIdForSessionAdmin] = useState<string>('');
-  const [filteredSessionsForSessionAdmin, setFilteredSessionsForSessionAdmin] = useState<VotingSession[]>([]);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [successModalData, setSuccessModalData] = useState<{ email: string; userType: string } | null>(null);
-  const [useAllSessionsForStakeholder, setUseAllSessionsForStakeholder] = useState<boolean>(true);
-  const [useAllSessionsForSessionAdmin, setUseAllSessionsForSessionAdmin] = useState<boolean>(true);
-  const [filterProductId, setFilterProductId] = useState<string>(''); // Product filter for user list
-
-  const sessionAdminActive =
-    Boolean(selectedProductIdForSessionAdmin) &&
-    (useAllSessionsForSessionAdmin || newUserData.sessionAdminIds.length > 0);
-
-  const stakeholderActive =
-    Boolean(selectedProductId) &&
-    (useAllSessionsForStakeholder || newUserData.stakeholderSessionIds.length > 0);
-
-  const sessionAdminProductName = products.find(p => p.id === selectedProductIdForSessionAdmin)?.name || '';
-
-  const stakeholderProductName = products.find(p => p.id === selectedProductId)?.name || '';
-
-  const formatSessionNames = (sessionIds: string[]) => {
-    const selected = sessionIds
-      .map(id => allSessions.find(session => session.id === id))
-      .filter((session): session is VotingSession => Boolean(session));
-    if (selected.length === 0) return '';
-    const titles = selected.map(session => session.title || 'Unnamed Session');
-    return titles.join(', ');
-  };
-
-  const sessionAdminSummary = sessionAdminActive
-    ? `${sessionAdminProductName || 'Selected Product'} · ${
-        useAllSessionsForSessionAdmin
-          ? 'All Sessions'
-          : formatSessionNames(newUserData.sessionAdminIds) || 'Sessions selected'
-      }`
-    : '';
-
-  const stakeholderSummary = stakeholderActive
-    ? `${stakeholderProductName || 'Selected Product'} · ${
-        useAllSessionsForStakeholder
-          ? 'All Sessions'
-          : formatSessionNames(newUserData.stakeholderSessionIds) || 'Sessions selected'
-      }`
-    : '';
-
-  const selectedRoleLabels = (() => {
-    const roles: string[] = [];
-    if (newUserData.isSystemAdmin) roles.push('System Admin');
-    if (sessionAdminActive) roles.push('Session Admin');
-    if (stakeholderActive) roles.push('Stakeholder');
-    return roles;
-  })();
-
-  const getRoleButtonLabel = (isLoading: boolean) => {
-    if (selectedRoleLabels.length === 0) {
-      return isLoading ? 'Creating User...' : 'Create User';
-    }
-    const label = selectedRoleLabels.join(' & ');
-    return isLoading ? `Adding ${label}...` : `Add ${label}`;
-  };
-
+  const azureSearchRef = useRef<HTMLDivElement>(null);
+  
   // Edit user modal state
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [userToEdit, setUserToEdit] = useState<UserWithRoles | null>(null);
   const [editingUserName, setEditingUserName] = useState('');
   const [editingUserEmail, setEditingUserEmail] = useState('');
-  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
-
-  const handleLogout = async (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-    
-    try {
-      setCurrentSession(null as any);
-    } catch (error) {
-      console.error('Error clearing session:', error);
-    }
-    
-    setCurrentUser(null);
-    
-    try {
-      localStorage.removeItem('voting_system_current_session');
-      localStorage.removeItem('voting_system_user');
-      localStorage.removeItem('azureDevOpsAuthInProgress');
-      sessionStorage.removeItem('oauth_return_path');
-      sessionStorage.removeItem('oauth_action');
-      sessionStorage.removeItem('oauth_error');
-    } catch (error) {
-      console.error('Error clearing storage:', error);
-    }
-    
-    setMobileMenuOpen(false);
-    
-    // Navigate to login - React Router handles basename automatically
-    navigate('/login', { replace: true });
-  };
+  
+  // Alert modal state
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertModalConfig, setAlertModalConfig] = useState<{
+    title: string;
+    message: string;
+    type: 'success' | 'error' | 'info';
+  }>({ title: '', message: '', type: 'info' });
+  
+  // Protected users
+  const protectedEmails = new Set([
+    'spencer.faull@newmill.com',
+    'chris.rodes@newmill.com',
+    'dave.hoffman@newmill.com'
+  ]);
+  const [originalAdminId, setOriginalAdminId] = useState<string | null>(null);
+  const [protectedUserIds, setProtectedUserIds] = useState<Set<string>>(new Set());
+  
+  const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   useEffect(() => {
-    if (!mobileMenuOpen) return;
-    const handleOutside = (e: MouseEvent | TouchEvent) => {
-      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
-        setMobileMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutside);
-    document.addEventListener('touchstart', handleOutside, { passive: true });
-    return () => {
-      document.removeEventListener('mousedown', handleOutside);
-      document.removeEventListener('touchstart', handleOutside as any);
-    };
-  }, [mobileMenuOpen]);
-
-  // Calculate dropdown position when it opens - use requestAnimationFrame to avoid forced reflow
-  useEffect(() => {
-    if (!openDropdown) {
-      setDropdownPositions({});
-      return;
-    }
-
-    const calculatePosition = () => {
-      const ref = dropdownRefs.current[openDropdown];
-      if (!ref) return;
-
-      requestAnimationFrame(() => {
-        const rect = ref.getBoundingClientRect();
-        if (window.innerWidth < 768) {
-          // Mobile: use fixed positioning
-          setDropdownPositions({
-            [openDropdown]: {
-              top: `${rect.bottom + 4}px`,
-              right: `${window.innerWidth - rect.right + 4}px`,
-              left: 'auto'
-            }
-          });
-        } else {
-          // Desktop: use absolute positioning (default)
-          setDropdownPositions({
-            [openDropdown]: {}
-          });
-        }
-      });
-    };
-
-    // Small delay to ensure DOM is ready
-    const timeoutId = setTimeout(calculatePosition, 0);
-    return () => clearTimeout(timeoutId);
-  }, [openDropdown]);
-
-  // Handle dropdown close when clicking outside
-  useEffect(() => {
-    if (!openDropdown) return;
-    const handleOutside = (e: MouseEvent | TouchEvent) => {
-      const ref = dropdownRefs.current[openDropdown];
-      if (ref && !ref.contains(e.target as Node)) {
-        setOpenDropdown(null);
-      }
-    };
-    document.addEventListener('mousedown', handleOutside);
-    document.addEventListener('touchstart', handleOutside, { passive: true });
-    return () => {
-      document.removeEventListener('mousedown', handleOutside);
-      document.removeEventListener('touchstart', handleOutside as any);
-    };
-  }, [openDropdown]);
-
-
-  const loadSessions = async () => {
-    try {
-      const sessions = await db.getAllSessions();
-      setAllSessions(sessions);
-    } catch (error) {
-      console.error('Error loading sessions:', error);
-    }
-  };
-
-  const loadProducts = useCallback(async () => {
-    try {
-      const productsList = await db.getProducts();
-      // Store all products for filter dropdown
-      setAllProducts(productsList);
-      
-      // Use already loaded allSessions instead of fetching again
-      const now = new Date();
-      
-      // Filter products to only show those with active or upcoming sessions (for add user modal)
-      const productsWithSessions = productsList.filter(product => {
-        return allSessions.some(session => {
-          if (session.product_id !== product.id) return false;
-          const endDate = new Date(session.end_date);
-          return endDate >= now; // Only current and future sessions
-        });
-      });
-      
-      setProducts(productsWithSessions);
-    } catch (error) {
-      console.error('Error loading products:', error);
-    }
-  }, [allSessions]);
-
-  // Load all products independently (for filter dropdown)
-  const loadAllProducts = useCallback(async () => {
-    try {
-      const productsList = await db.getProducts();
-      console.log('Loaded products:', productsList);
-      setAllProducts(productsList);
-    } catch (error) {
-      console.error('Error loading all products:', error);
-      setAllProducts([]); // Set empty array on error
-    }
+    loadData();
   }, []);
 
-  const clearSessionAdminSelections = () => {
-    setSelectedProductIdForSessionAdmin('');
-    setFilteredSessionsForSessionAdmin([]);
-    setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
-    setUseAllSessionsForSessionAdmin(true);
-    setAccordionOpen(prev => ({ ...prev, sessionAdmin: false }));
-  };
-
-  const clearStakeholderSelections = () => {
-    setSelectedProductId('');
-    setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
-    setUseAllSessionsForStakeholder(true);
-    setAccordionOpen(prev => ({ ...prev, stakeholder: false }));
-  };
-
-  const filterSessionsByProduct = (productId: string) => {
-    if (!productId) {
-      setFilteredSessionsForProduct([]);
-      return;
-    }
-    const now = new Date();
-    const filtered = allSessions.filter(session => {
-      // Filter by product
-      if (session.product_id !== productId) return false;
-      // Only show current and future sessions (not past)
-      const endDate = new Date(session.end_date);
-      return endDate >= now;
-    });
-    setFilteredSessionsForProduct(filtered);
-  };
-
+  // Close dropdown when clicking outside
   useEffect(() => {
-    if (selectedProductId) {
-      filterSessionsByProduct(selectedProductId);
-    } else {
-      setFilteredSessionsForProduct([]);
-    }
-  }, [selectedProductId, allSessions]);
-
-  const filterSessionsForSessionAdmin = (productId: string) => {
-    if (!productId) {
-      setFilteredSessionsForSessionAdmin([]);
-      return;
-    }
-    const now = new Date();
-    const filtered = allSessions.filter(session => {
-      // Filter by product
-      if (session.product_id !== productId) return false;
-      // Only show current and future sessions (not past)
-      const endDate = new Date(session.end_date);
-      return endDate >= now;
-    });
-    setFilteredSessionsForSessionAdmin(filtered);
-  };
-
-  useEffect(() => {
-    if (selectedProductIdForSessionAdmin) {
-      filterSessionsForSessionAdmin(selectedProductIdForSessionAdmin);
-    } else {
-      setFilteredSessionsForSessionAdmin([]);
-    }
-  }, [selectedProductIdForSessionAdmin, allSessions]);
-
-  // Update title when query string and session context change
-  useEffect(() => {
-    const filterParam = searchParams.get('filter');
-    if (filterParam === 'session-admin') {
-      setPageTitle('Session Admin Management');
-      setFilterRole('session-admin');
-    } else if (filterParam === 'stakeholder') {
-      setPageTitle('Stakeholder Management');
-      setFilterRole('stakeholder');
-    } else {
-      setPageTitle('User Management');
-    }
-  }, [searchParams]);
-
-  const loadUsers = async (sessions: VotingSession[]) => {
-    setIsLoading(true);
-    
-    try {
-      // Fetch all data in parallel
-      const [allUsers, allAdminRelations, allStakeholderRelations] = await Promise.all([
-        db.getAllUsers(),
-        // Fetch all session_admin relations at once
-        supabase
-          .from('session_admins')
-          .select('user_id, session_id, created_at')
-          .then(({ data, error }) => {
-            if (error) {
-              console.error('Error fetching all admin relations:', error);
-              return [];
-            }
-            return data || [];
-          }),
-        // Fetch all session_stakeholder relations at once
-        // Note: session_stakeholders table uses user_email, not user_id
-        supabase
-          .from('session_stakeholders')
-          .select('user_email, session_id, created_at')
-          .then(({ data, error }) => {
-            if (error) {
-              console.error('Error fetching all stakeholder relations:', error);
-              return [];
-            }
-            return data || [];
-          })
-      ]);
-      
-      // Build maps for fast lookup
-      const adminRelationsByUser = new Map<string, Array<{ session_id: string; created_at: string }>>();
-      allAdminRelations.forEach(rel => {
-        if (!adminRelationsByUser.has(rel.user_id)) {
-          adminRelationsByUser.set(rel.user_id, []);
-        }
-        adminRelationsByUser.get(rel.user_id)!.push({
-          session_id: rel.session_id,
-          created_at: rel.created_at
-        });
-      });
-      
-      const stakeholderRelationsByUser = new Map<string, Array<{ session_id: string; created_at: string }>>();
-      allStakeholderRelations.forEach(rel => {
-        // session_stakeholders uses user_email, not user_id
-        const key = rel.user_email?.toLowerCase() || '';
-        if (key) {
-          if (!stakeholderRelationsByUser.has(key)) {
-            stakeholderRelationsByUser.set(key, []);
-          }
-          stakeholderRelationsByUser.get(key)!.push({
-            session_id: rel.session_id,
-            created_at: rel.created_at
-          });
-        }
-      });
-      
-      // Create session lookup map
-      const sessionMap = new Map(sessions.map(s => [s.id, s]));
-      
-      // Process users with pre-loaded data
-      const usersWithRoles = await Promise.all(
-        allUsers.map(async (user) => {
-          const roles = await db.getUserRoleInfo(user.id);
-          
-          const adminInSessions: SessionWithAssignment[] = [];
-          const stakeholderInSessions: SessionWithAssignment[] = [];
-          
-          // Get admin sessions from pre-loaded data
-          const userAdminRelations = adminRelationsByUser.get(user.id) || [];
-          userAdminRelations.forEach(rel => {
-            const session = sessionMap.get(rel.session_id);
-            if (session) {
-              adminInSessions.push({
-                ...session,
-                assignedAt: rel.created_at,
-                assignedBy: 'System',
-                assignedByName: 'System'
-              });
-            }
-          });
-          
-          // Get stakeholder sessions from pre-loaded data
-          // session_stakeholders uses user_email, not user_id
-          const userEmailKey = user.email.toLowerCase();
-          const userStakeholderRelations = stakeholderRelationsByUser.get(userEmailKey) || [];
-          userStakeholderRelations.forEach(rel => {
-            const session = sessionMap.get(rel.session_id);
-            if (session) {
-              stakeholderInSessions.push({
-                ...session,
-                assignedAt: rel.created_at,
-                assignedBy: 'System',
-                assignedByName: 'System'
-              });
-            }
-          });
-          
-          return { ...user, roles, adminInSessions, stakeholderInSessions };
-        })
-      );
-      
-      setUsers(usersWithRoles);
-      
-      // Detect duplicate emails
-      const emailMap = new Map<string, string[]>();
-      usersWithRoles.forEach(user => {
-        const normalizedEmail = user.email.toLowerCase().trim();
-        if (!emailMap.has(normalizedEmail)) {
-          emailMap.set(normalizedEmail, []);
-        }
-        emailMap.get(normalizedEmail)!.push(user.id);
-      });
-      
-      // Filter to only emails with duplicates
-      const duplicates = new Map<string, string[]>();
-      emailMap.forEach((userIds, email) => {
-        if (userIds.length > 1) {
-          duplicates.set(email, userIds);
-        }
-      });
-      
-      setDuplicateEmails(duplicates);
-    } catch (error) {
-      console.error('Error loading users:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const checkAccess = async () => {
-    if (!currentUser) return;
-    
-    setCheckingAccess(true);
-    try {
-      // Get all sessions first (needed for both system and session admins)
-      const allSessionsCheck = await db.getAllSessions();
-      
-      // Check system admin and session admin status in parallel
-      const [sysAdmin, adminRelations] = await Promise.all([
-        db.isUserSystemAdmin(currentUser.id),
-        // Fetch all session_admin relations for this user at once (much faster than N queries)
-        supabase
-          .from('session_admins')
-          .select('session_id')
-          .eq('user_id', currentUser.id)
-          .then(({ data, error }) => {
-            if (error) {
-              console.error('Error fetching admin sessions:', error);
-              return [];
-            }
-            return (data || []).map(r => r.session_id);
-          })
-      ]);
-      
-      setIsSystemAdmin(sysAdmin);
-      
-      // Check if user is a session admin
-      const sessionAdminSessions: string[] = adminRelations;
-      
-      if (!sysAdmin) {
-        const hasSessionAdminAccess = sessionAdminSessions.length > 0;
-        setIsSessionAdmin(hasSessionAdminAccess);
-        setUserAdminSessions(sessionAdminSessions);
-        
-        if (!hasSessionAdminAccess) {
-          // Not a system admin or session admin, redirect to sessions
-          navigate('/sessions');
-          return;
-        }
-        
-        // Session admin: only show sessions they admin
-        const filteredSessions = allSessionsCheck.filter(s => sessionAdminSessions.includes(s.id));
-        setAllSessions(filteredSessions);
-        setViewMode('session-admin');
-        
-        // Load users for session admin (only users in their sessions)
-        await loadUsers(filteredSessions);
-      } else {
-        // System admin: show all sessions
-        setAllSessions(allSessionsCheck);
-        // Load original admin ID and users in parallel
-        await Promise.all([
-          loadOriginalAdminId(),
-          loadUsers(allSessionsCheck)
-        ]);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (openDropdown && !(event.target as Element).closest('.actions-dropdown-container')) {
+        setOpenDropdown(null);
       }
       
-      // Load products after sessions are loaded
-      await loadProducts();
-    } catch (error) {
-      console.error('Error checking access:', error);
-      navigate('/sessions');
-    } finally {
-      setCheckingAccess(false);
-    }
-  };
-
-  const loadOriginalAdminId = async () => {
-    try {
-      const protectedEmails = [
-        'chris.rodes@newmill.com',     // Manager
-        'spencer.faull@newmill.com'    // Portfolio Owner
-      ];
-      
-      const protectedIds = new Set<string>();
-      
-      // Get the original admin (first system admin by created_at)
-      const systemAdmins = await db.getSystemAdmins();
-      if (systemAdmins.length > 0) {
-        const firstAdmin = systemAdmins.reduce((earliest, admin) => 
-          new Date(admin.created_at) < new Date(earliest.created_at) ? admin : earliest
-        );
-        setOriginalAdminId(firstAdmin.user_id);
-        protectedIds.add(firstAdmin.user_id);
+      // Close product dropdowns when clicking outside
+      if (showProductOwnerDropdown && productOwnerDropdownRef.current && !productOwnerDropdownRef.current.contains(event.target as Node)) {
+        setShowProductOwnerDropdown(false);
+      }
+      if (showStakeholderDropdown && stakeholderDropdownRef.current && !stakeholderDropdownRef.current.contains(event.target as Node)) {
+        setShowStakeholderDropdown(false);
+      }
+      if (showRoleModalProductDropdown && roleModalProductDropdownRef.current && !roleModalProductDropdownRef.current.contains(event.target as Node)) {
+        setShowRoleModalProductDropdown(false);
+      }
+      if (showFilterProductDropdown && filterProductDropdownRef.current && !filterProductDropdownRef.current.contains(event.target as Node)) {
+        setShowFilterProductDropdown(false);
+      }
+      if (showFilterRoleDropdown && filterRoleDropdownRef.current && !filterRoleDropdownRef.current.contains(event.target as Node)) {
+        setShowFilterRoleDropdown(false);
       }
       
-      // Get all users to find protected accounts by email
-      const allUsers = await db.getAllUsers();
-      allUsers.forEach(user => {
-        if (protectedEmails.includes(user.email.toLowerCase())) {
-          protectedIds.add(user.id);
-        }
-      });
-      
-      setProtectedUserIds(protectedIds);
-    } catch (error) {
-      console.error('Error loading protected accounts:', error);
-    }
+      // Close Azure search dropdown when clicking outside
+      if (azureUserSearch.showResults && azureSearchRef.current && !azureSearchRef.current.contains(event.target as Node)) {
+        setAzureUserSearch(prev => ({ ...prev, showResults: false }));
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [openDropdown, showProductOwnerDropdown, showStakeholderDropdown, showRoleModalProductDropdown, showFilterProductDropdown, showFilterRoleDropdown, azureUserSearch.showResults]);
+
+  // Temporarily disabled due to Supabase 406 errors
+  // useEffect(() => {
+  //   const checkAdmin = async () => {
+  //     const { data: { user } } = await supabase.auth.getUser();
+  //     if (user) {
+  //       const admin = await getUserRoleInfo(user.id).then(info => info.isSystemAdmin).catch(() => true);
+  //       console.log('UsersManagementScreenMultiRow: Is system admin:', admin);
+  //       setIsSystemAdmin(admin);
+  //       if (!admin) {
+  //         setViewMode('session-admin');
+  //       }
+  //     }
+  //   };
+  //   checkAdmin();
+  // }, []);
+
+  // Helper functions
+  const showAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setAlertModalConfig({ title, message, type });
+    setShowAlertModal(true);
   };
 
   const getProtectedAccountLabel = (user: UserWithRoles): string | null => {
@@ -1266,632 +373,177 @@ export default function UsersManagementScreen() {
     return null;
   };
 
-  const isDuplicateAccount = (user: UserWithRoles): boolean => {
-    const normalizedEmail = user.email.toLowerCase().trim();
-    const duplicateGroup = duplicateEmails.get(normalizedEmail);
-    return duplicateGroup ? duplicateGroup.length > 1 : false;
-  };
-
-  const getDuplicateCount = (user: UserWithRoles): number => {
-    const normalizedEmail = user.email.toLowerCase().trim();
-    const duplicateGroup = duplicateEmails.get(normalizedEmail);
-    return duplicateGroup ? duplicateGroup.length : 1;
-  };
-
-  const filterUsers = () => {
-    let filtered = [...users];
-
-    // Restrict visibility based on current view mode
-    if (viewMode === 'session-admin' && allSessions.length > 0) {
-      const managedSessionIds = new Set(allSessions.map((session) => session.id));
-      filtered = filtered.filter((user) => {
-        if (user.id === currentUser?.id) {
-          return true;
-        }
-
-        const adminMatch = user.adminInSessions?.some((session) => session && managedSessionIds.has(session.id));
-        const stakeholderMatch = user.stakeholderInSessions?.some((session) => session && managedSessionIds.has(session.id));
-
-        return !!adminMatch || !!stakeholderMatch;
-      });
-    }
-
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        user =>
-          user.name.toLowerCase().includes(query) ||
-          user.email.toLowerCase().includes(query)
-      );
-    }
-
-    // Filter by role and product together
-    if (filterRole !== 'all' || filterProductId) {
-      filtered = filtered.filter(user => {
-        // Get all sessions the user is associated with
-        const userSessions = [
-          ...(user.adminInSessions || []),
-          ...(user.stakeholderInSessions || [])
-        ];
-        
-        // Filter by product first (if specified)
-        let productFilteredSessions = userSessions;
-        if (filterProductId) {
-          productFilteredSessions = userSessions.filter(session => {
-            const productId = (session as any).product_id || (session as any).productId;
-            return productId === filterProductId;
-          });
-        }
-        
-        // If filtering by product and no sessions match, exclude user
-        if (filterProductId && productFilteredSessions.length === 0) {
-          return false;
-        }
-        
-        // Filter by role (checking if user has the role in the filtered sessions)
-        if (filterRole !== 'all') {
-        switch (filterRole) {
-          case 'system-admin':
-            return user.roles.isSystemAdmin;
-          case 'session-admin':
-              // Check if user is admin in any of the product-filtered sessions
-              if (filterProductId) {
-                return productFilteredSessions.some(session => 
-                  user.adminInSessions?.some(adminSession => adminSession.id === session.id)
-                );
-              }
-              return user.roles.sessionAdminCount > 0;
-          case 'stakeholder':
-              // Check if user is stakeholder in any of the product-filtered sessions
-              if (filterProductId) {
-                return productFilteredSessions.some(session => 
-                  user.stakeholderInSessions?.some(stakeholderSession => stakeholderSession.id === session.id)
-                );
-              }
-              return user.roles.stakeholderSessionCount > 0;
-          case 'none':
-            return !user.roles.isSystemAdmin &&
-                   user.roles.sessionAdminCount === 0 &&
-                   user.roles.stakeholderSessionCount === 0;
-          default:
-            return true;
-        }
-        }
-        
-        // If only product filter (no role filter), user passes if they have sessions in that product
-        return true;
-      });
-    }
-
-    setFilteredUsers(filtered);
-  };
-
-  // Get products associated with a user
-  const getUserProducts = (user: UserWithRoles): Product[] => {
-    const userSessions = [
-      ...(user.adminInSessions || []),
-      ...(user.stakeholderInSessions || [])
-    ];
+  const canAddToMoreSessions = (user: UserWithRoles, roleType: 'stakeholder' | 'session-admin' | 'remove-stakeholder' | null) => {
+    if (!roleType) return false;
     
-    // Get unique product IDs from user's sessions
-    const productIds = new Set<string>();
-    userSessions.forEach(session => {
-      // Check both product_id and productId (in case of different naming)
-      const productId = (session as any).product_id || (session as any).productId;
-      if (productId) {
-        productIds.add(productId);
-      }
-    });
-    
-    
-    // Return products that match
-    return allProducts.filter(product => productIds.has(product.id));
-  };
-
-  // Load all products when user is available (for filter dropdown)
-  useEffect(() => {
-    if (currentUser) {
-      loadAllProducts();
-    }
-  }, [currentUser, loadAllProducts]);
-
-  useEffect(() => {
-    if (!currentUser) {
-      navigate('/login');
-      return;
-    }
-    
-    // Prevent duplicate calls in React StrictMode
-    if (hasCheckedAccess.current) {
-      return;
-    }
-    hasCheckedAccess.current = true;
-    
-    checkAccess();
-    
-    // Cleanup function
-    return () => {
-      // Cleanup if needed
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser]);
-  
-  // Separate useEffect to handle URL filter parameters
-  useEffect(() => {
-    const filterParam = searchParams.get('filter');
-    if (filterParam && ['system-admin', 'session-admin', 'stakeholder', 'none'].includes(filterParam)) {
-      setFilterRole(filterParam as any);
-    }
-    
-    // Handle product filter from URL
-    const productParam = searchParams.get('product');
-    if (productParam) {
-      setFilterProductId(productParam);
-    }
-  }, [searchParams]);
-
-  // Ensure session-admin mode never exposes system-admin filter
-  // Session admins can only filter by 'stakeholder' or 'none'
-  // When switching to system-admin, always default to 'all'
-  // BUT: Don't override if we have a filter from URL params
-  useEffect(() => {
-    const filterParam = searchParams.get('filter');
-    // If there's a filter in the URL, don't override it
-    if (filterParam) {
-      return;
-    }
-    
-    if (viewMode === 'session-admin') {
-      if (filterRole === 'system-admin' || filterRole === 'session-admin' || filterRole === 'all') {
-        setFilterRole('stakeholder');
-      }
-    } else if (viewMode === 'system-admin') {
-      // When switching to system-admin view, always reset filter to 'all'
-      // But only if there's no filter in the URL
-      if (!searchParams.get('filter')) {
-        setFilterRole('all');
-    }
-    }
-  }, [viewMode, searchParams, filterRole]);
-
-  // Memoize filterUsers to prevent unnecessary recalculations
-  const memoizedFilterUsers = useCallback(() => {
-    filterUsers();
-  }, [users, searchQuery, filterRole, filterProductId, viewMode, allSessions, currentUser]);
-  
-  useEffect(() => {
-    memoizedFilterUsers();
-  }, [memoizedFilterUsers]);
-
-  // Handle click outside for Azure AD search dropdown
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (azureSearchRef.current && !azureSearchRef.current.contains(event.target as Node)) {
-        setAzureUserSearch(prev => ({ ...prev, showResults: false }));
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const loadUserSessionMemberships = async (userId: string) => {
-    try {
-      // Get all sessions where user is admin
-      const adminSessions: string[] = [];
-      const stakeholderSessions: string[] = [];
-      
-      for (const session of allSessions) {
-        const isAdmin = await db.isUserSessionAdmin(userId, session.id);
-        if (isAdmin) {
-          adminSessions.push(session.id);
-        }
-        
-        const isStakeholder = await db.isUserStakeholder(userId, session.id);
-        if (isStakeholder) {
-          stakeholderSessions.push(session.id);
-        }
-      }
-      
-      setUserSessionMemberships({ adminSessions, stakeholderSessions });
-    } catch (error) {
-      console.error('Error loading user session memberships:', error);
+    if (roleType === 'session-admin') {
+      return user.roles.sessionAdminCount < allSessions.length;
+    } else {
+      return user.roles.stakeholderSessionCount < allSessions.length;
     }
   };
 
-  const openRoleModal = async (user: UserWithRoles, roleType: RoleModalType) => {
+  // Handler functions
+  const openRoleModal = async (user: UserWithRoles, roleType: 'stakeholder' | 'session-admin' | 'remove-stakeholder' | 'system-admin') => {
     setSelectedUserForRole(user);
     setRoleModalType(roleType);
     setRoleModalProductId('');
-    setRoleModalUseAllSessions(true);
-    setRoleModalSelectedSessionIds([]);
+    setSelectedRoleToRemove(null);
+    setSelectedRoleToAdd(null);
     setShowRoleModal(true);
     setOpenDropdown(null);
     
-    // Load products if not already loaded
-    if (products.length === 0) {
-      await loadProducts();
+    // TODO: Load user session memberships if needed
+  };
+
+  const handleAddRole = async () => {
+    // For system-admin role, we don't need a product
+    if (selectedRoleToAdd !== 'system-admin' && (!selectedUserForRole || !roleModalType || !roleModalProductId)) {
+      showAlert('Missing Information', 'Please select a product to continue.', 'error');
+      return;
     }
     
-    await loadUserSessionMemberships(user.id);
-  };
-
-  const closeRoleModal = () => {
-    setShowRoleModal(false);
-    setRoleModalType(null);
-    setSelectedUserForRole(null);
-    setRoleModalProductId('');
-    setRoleModalUseAllSessions(true);
-    setRoleModalSelectedSessionIds([]);
-    setUserSessionMemberships({ adminSessions: [], stakeholderSessions: [] });
-  };
-
-  // Helper function to filter sessions by product (for role modal)
-  const filterSessionsForRoleModal = (sessions: VotingSession[], productId: string): VotingSession[] => {
-    if (!productId) return [];
-    const now = new Date();
-    return sessions.filter(session => {
-      // Filter by product
-      if (session.product_id !== productId) return false;
-      // Only show current and future sessions (not past)
-      const endDate = new Date(session.end_date);
-      return endDate >= now;
-    });
-  };
-
-  const handleAddToSession = async () => {
-    if (!selectedUserForRole || !roleModalType) return;
-    
-    // Validate product selection
-    if (!roleModalProductId) {
-      alert('Please select a product first.');
+    // Basic validation for system-admin
+    if (selectedRoleToAdd === 'system-admin' && (!selectedUserForRole || !roleModalType)) {
+      showAlert('Missing Information', 'Unable to process request.', 'error');
       return;
     }
 
-    // Get sessions to add/remove
-    let sessionsToProcess: string[] = [];
-    if (roleModalUseAllSessions) {
-      // Get all current and future sessions for the product
-      const filtered = filterSessionsForRoleModal(
-        getAvailableSessions(roleModalType),
-        roleModalProductId
-      );
-      sessionsToProcess = filtered.map(s => s.id);
-    } else {
-      // Use selected sessions
-      if (roleModalSelectedSessionIds.length === 0) {
-        alert('Please select at least one session.');
+    // For remove operations, validate role selection
+    if (roleModalType === 'remove-stakeholder' && !selectedRoleToRemove) {
+      showAlert('Missing Information', 'Please select a role to remove.', 'error');
+      return;
+    }
+    
+    // For add operations, validate role selection
+    if ((roleModalType === 'session-admin' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && !selectedRoleToAdd) {
+      showAlert('Missing Information', 'Please select a role to add.', 'error');
+      return;
+    }
+
+    try {
+      // Get all sessions for the selected product
+      const sessions = allSessions.filter(s => s.product_id === roleModalProductId);
+
+      if (sessions.length === 0) {
+        showAlert('No Sessions Found', 'There are no sessions available for this product.', 'error');
         return;
       }
-      sessionsToProcess = roleModalSelectedSessionIds;
-    }
 
-    if (sessionsToProcess.length === 0) {
-      alert('No sessions available for this product.');
-      return;
-    }
+      // Handle REMOVE operations
+      if (roleModalType === 'remove-stakeholder') {
+        
+        if (selectedRoleToRemove === 'system-admin') {
+          // Remove System Admin role
+          const { error } = await supabase
+            .from('users')
+            .update({ is_system_admin: false })
+            .eq('id', selectedUserForRole.id);
 
-    try {
-      // Process each session
-      for (const sessionId of sessionsToProcess) {
-      if (roleModalType === 'session-admin') {
-          await db.addSessionAdmin(sessionId, selectedUserForRole.id);
-      } else if (roleModalType === 'stakeholder') {
-        // Use addSessionStakeholderByEmail which handles the stakeholder creation
-          await db.addSessionStakeholderByEmail(sessionId, selectedUserForRole.email, selectedUserForRole.name);
-      } else if (roleModalType === 'remove-stakeholder') {
-        // Remove stakeholder using email
-          await db.removeSessionStakeholder(sessionId, selectedUserForRole.email);
-        }
-      }
-      
-      // Close modal first
-      closeRoleModal();
-      
-      // Reload users to refresh session memberships and show updated data
-      await loadUsers(allSessions);
-    } catch (error: any) {
-      console.error('Error modifying user session role:', error);
-      // Show more detailed error message
-      const errorMessage = error?.message || error?.toString() || 'Unknown error';
-      console.error('Full error details:', error);
-      alert(`Failed to ${roleModalType === 'remove-stakeholder' ? 'remove stakeholder from' : 'add user to'} session(s).\n\nError: ${errorMessage}\n\nPlease check the console for more details.`);
-    }
-  };
+          if (error) throw error;
 
-  const handleToggleSystemAdmin = async (userId: string, currentStatus: boolean) => {
-    setOpenDropdown(null);
-    
-    if (!confirm(`Are you sure you want to ${currentStatus ? 'remove' : 'grant'} system admin access for this user?`)) {
-      return;
-    }
+          showAlert(
+            'Role Removed Successfully',
+            `${selectedUserForRole.name} has been removed as System Admin.`,
+            'success'
+          );
+        } else if (selectedRoleToRemove === 'product-owner') {
+          // Remove Product Owner role - use product_id, not session_id
+          const { error } = await supabase
+            .from('product_product_owners')
+            .delete()
+            .eq('user_id', selectedUserForRole.id)
+            .eq('product_id', roleModalProductId);
 
-    try {
-      if (currentStatus) {
-        await db.removeSystemAdmin(userId);
-      } else {
-        await db.addSystemAdmin(userId);
-      }
-      await loadUsers(allSessions);
-    } catch (error) {
-      console.error('Error toggling system admin:', error);
-      alert('Failed to update system admin status. Please try again.');
-    }
-  };
+          if (error) throw error;
 
-  const handleRemoveAllRoles = async (userId: string, userName: string) => {
-    setOpenDropdown(null);
-    
-    const confirmMessage = viewMode === 'session-admin'
-      ? `Are you sure you want to remove ${userName} from all sessions you manage? This will remove them as a stakeholder or session admin from your sessions only.`
-      : `Are you sure you want to remove all roles from ${userName}? This will remove them from all sessions and revoke system admin access.`;
-    
-    if (!confirm(confirmMessage)) {
-      return;
-    }
+          showAlert(
+            'Role Removed Successfully',
+            `${selectedUserForRole.name} has been removed as Product Owner from this product.`,
+            'success'
+          );
+        } else if (selectedRoleToRemove === 'stakeholder') {
+          // Remove Stakeholder role from all sessions for this product
+          const sessionIds = sessions.map(s => s.id);
+          const { error } = await supabase
+            .from('product_stakeholders')
+            .delete()
+            .eq('user_id', selectedUserForRole.id)
+            .in('session_id', sessionIds);
 
-    try {
-      // Only remove system admin in system-admin mode
-      if (viewMode === 'system-admin') {
-        await db.removeSystemAdmin(userId);
-      }
-      
-      // For session-admin mode, only remove from sessions they manage
-      if (viewMode === 'session-admin') {
-        // Remove as session admin from user's sessions
-        for (const sessionId of userAdminSessions) {
-          try {
-            await db.removeSessionAdmin(sessionId, userId);
-          } catch (error) {
-            console.error(`Error removing session admin from ${sessionId}:`, error);
-          }
-        }
-        // Remove as stakeholder from user's sessions
-        for (const sessionId of userAdminSessions) {
-          try {
-            await db.removeStakeholder(sessionId, userId);
-          } catch (error) {
-            console.error(`Error removing stakeholder from ${sessionId}:`, error);
-          }
-        }
-      } else {
-        // Remove from all sessions (system-admin mode)
-        for (const session of allSessions) {
-          try {
-            await db.removeSessionAdmin(session.id, userId);
-            await db.removeStakeholder(session.id, userId);
-          } catch (err) {
-            // Continue even if removal fails (they might not be in that session)
-          }
-        }
-      }
-      
-      await loadUsers(allSessions);
-    } catch (error) {
-      console.error('Error removing roles:', error);
-      alert('Failed to remove roles. Please try again.');
-    }
-  };
+          if (error) throw error;
 
-  const handleDeleteUser = async (userId: string, userName: string) => {
-    const user = users.find(u => u.id === userId);
-    if (!user) return;
-    
-    // In session-admin mode, remove as stakeholder instead of deleting
-    if (viewMode === 'session-admin') {
-      // Check if user has any stakeholder roles (they might be a stakeholder in sessions we manage)
-      if (user.roles.stakeholderSessionCount === 0) {
-        alert('This user is not a stakeholder in any sessions.');
-        return;
-      }
-      
-      // Remove as stakeholder from all sessions the Session Admin manages
-      // (Assume Session Admin manages all sessions shown in session-admin view mode)
-      const confirmMessage = `Are you sure you want to remove ${userName} as a stakeholder from all sessions you manage?`;
-      if (!confirm(confirmMessage)) {
-        return;
-      }
-      
-      try {
-        let removedCount = 0;
-        for (const session of allSessions) {
-          try {
-            await db.removeSessionStakeholder(session.id, user.email);
-            removedCount++;
-          } catch (err) {
-            // Continue even if removal fails (they might not be in that session)
-            console.error(`Error removing stakeholder from session ${session.id}:`, err);
-          }
-        }
-        await loadUsers(allSessions);
-        if (removedCount > 0) {
-          alert(`${userName} has been removed as a stakeholder from ${removedCount} session(s) you manage.`);
-        } else {
-          alert(`${userName} was not a stakeholder in any of the sessions you manage.`);
-        }
-      } catch (error) {
-        console.error('Error removing stakeholder:', error);
-        alert('Failed to remove stakeholder. Please try again.');
-      }
-      return;
-    }
-    
-    // System admin mode: show delete modal
-    setUserToDelete(user);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDeleteUser = async () => {
-    if (!userToDelete) return;
-    
-    // Check if this is a protected account
-    if (protectedUserIds.has(userToDelete.id)) {
-      const label = getProtectedAccountLabel(userToDelete);
-      alert(`Cannot delete this protected account${label ? ` (${label})` : ''}. This protects against accidentally locking important users out of the system.`);
-      setShowDeleteModal(false);
-      setUserToDelete(null);
-      return;
-    }
-    
-    setIsDeleting(true);
-    try {
-      if (!currentUser) {
-        throw new Error('You must be logged in to delete users');
-      }
-
-      // Use Edge Function to delete user (bypasses RLS)
-      const supabaseUrl = (supabase as any).supabaseUrl;
-      const deleteUserUrl = `${supabaseUrl}/functions/v1/delete-user`;
-
-      const response = await fetch(deleteUserUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(supabase as any).supabaseKey}`, // Use service key for Edge Function call
-        },
-        body: JSON.stringify({
-          userId: userToDelete.id,
-          currentUserId: currentUser.id
-        })
-      });
-
-      if (!response.ok) {
-        let errorMessage = 'Failed to delete user';
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch {
-          errorMessage = `Server returned ${response.status}: ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const result = await response.json();
-      
-      // Remove from local state immediately (optimistic update)
-      setUsers(prevUsers => prevUsers.filter(u => u.id !== userToDelete.id));
-      
-      // Close modal first
-      setShowDeleteModal(false);
-      const deletedUserId = userToDelete.id;
-      setUserToDelete(null);
-      
-      // Then reload users to ensure consistency
-      try {
-        await loadUsers(allSessions);
-      } catch (reloadError) {
-        console.error('Error reloading users after deletion:', reloadError);
-        // If reload fails, at least we've already removed from state
-      }
-    } catch (error: any) {
-      console.error('Error deleting user:', error);
-      const errorMessage = error?.message || error?.error?.message || 'Unknown error';
-      
-      // Revert optimistic update if deletion failed
-      setUsers(prevUsers => {
-        // If user was removed optimistically, add them back
-        const wasRemoved = !prevUsers.find(u => u.id === userToDelete?.id);
-        if (wasRemoved && userToDelete) {
-          return [...prevUsers, userToDelete].sort((a, b) => 
-            (a.name || a.email).localeCompare(b.name || b.email)
+          showAlert(
+            'Role Removed Successfully',
+            `${selectedUserForRole.name} has been removed as Stakeholder from ${sessions.length} session(s).`,
+            'success'
           );
         }
-        return prevUsers;
-      });
-      
-      alert(`Failed to delete user: ${errorMessage}\n\nIf this persists, the deletion may be blocked by database security policies. Please check the console for details.`);
-      
-      // Still try to reload users in case partial deletion occurred
-      try {
-        await loadUsers(allSessions);
-      } catch (reloadError) {
-        console.error('Error reloading users after failed deletion:', reloadError);
+      } 
+      // Handle ADD operations
+      else {
+        if (selectedRoleToAdd === 'system-admin') {
+          // Add as system admin
+          const { error } = await supabase
+            .from('users')
+            .update({ is_system_admin: true })
+            .eq('id', selectedUserForRole.id);
+
+          if (error) throw error;
+
+          showAlert(
+            'Role Added Successfully',
+            `${selectedUserForRole.name} has been granted System Admin privileges.`,
+            'success'
+          );
+        } else if (selectedRoleToAdd === 'product-owner') {
+          // Add as product owner - use product_id
+          const { error } = await supabase
+            .from('product_product_owners')
+            .insert({
+              product_id: roleModalProductId,
+              user_id: selectedUserForRole.id
+            });
+
+          if (error) throw error;
+
+          showAlert(
+            'Role Added Successfully',
+            `${selectedUserForRole.name} has been added as Product Owner to this product.`,
+            'success'
+          );
+        } else if (selectedRoleToAdd === 'stakeholder') {
+          // Add as stakeholder to all sessions
+          const sessionIds = sessions.map(s => s.id);
+
+          for (const sessionId of sessionIds) {
+            await supabase
+              .from('product_stakeholders')
+              .insert({
+                session_id: sessionId,
+                user_id: selectedUserForRole.id,
+                user_email: selectedUserForRole.email,
+                user_name: selectedUserForRole.name
+              });
+          }
+
+          showAlert(
+            'Role Added Successfully',
+            `${selectedUserForRole.name} has been added as Stakeholder to ${sessions.length} session(s).`,
+            'success'
+          );
+        }
       }
-    } finally {
-      setIsDeleting(false);
-    }
-  };
 
-  const cancelDeleteUser = () => {
-    setShowDeleteModal(false);
-    setUserToDelete(null);
-  };
-
-  const handleUpdateUser = async () => {
-    if (!userToEdit) return;
-    
-    if (!editingUserName.trim()) {
-      alert('Name is required');
-      return;
-    }
-    
-    if (!editingUserEmail.trim()) {
-      alert('Email is required');
-      return;
-    }
-    
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(editingUserEmail.trim())) {
-      alert('Please enter a valid email address');
-      return;
-    }
-    
-    setIsUpdatingUser(true);
-    
-    try {
-      // Update user in Supabase auth.users table (if admin API is available)
-      // Otherwise, update the users table directly
-      const { error: dbError } = await supabase
-        .from('users')
-        .update({
-          name: editingUserName.trim(),
-          email: editingUserEmail.trim().toLowerCase()
-        })
-        .eq('id', userToEdit.id);
+      // Close modal and reload data
+      setShowRoleModal(false);
+      await loadData();
       
-      if (dbError) {
-        throw dbError;
-      }
-      
-      // Update local state
-      setUsers(prevUsers => 
-        prevUsers.map(u => 
-          u.id === userToEdit.id 
-            ? { ...u, name: editingUserName.trim(), email: editingUserEmail.trim().toLowerCase() }
-            : u
-        )
-      );
-      
-      setShowEditUserModal(false);
-      setUserToEdit(null);
-      setEditingUserName('');
-      setEditingUserEmail('');
-    } catch (error) {
-      console.error('Error updating user:', error);
-      alert('Failed to update user. Please try again.');
-    } finally {
-      setIsUpdatingUser(false);
+    } catch (error: any) {
+      console.error('Error with role operation:', error);
+      const operation = roleModalType === 'remove-stakeholder' ? 'Remove' : 'Add';
+      showAlert(`Failed to ${operation} Role`, error.message || 'An unknown error occurred. Please try again.', 'error');
     }
-  };
-
-  const openAddUserModal = () => {
-    setMobileMenuOpen(false);
-    setShowAddUserModal(true);
-    setNewUserData({
-      name: '',
-      email: '',
-      isSystemAdmin: false,
-      sessionAdminIds: [],
-      stakeholderSessionIds: []
-    });
-    setAzureUserSearch(getInitialAzureSearchState());
-    setSelectedProductId('');
-    setFilteredSessionsForProduct([]);
-    setSelectedProductIdForSessionAdmin('');
-    setFilteredSessionsForSessionAdmin([]);
-    loadProducts();
-    setShowAzureSearchSection(true);
   };
 
   const closeAddUserModal = () => {
@@ -1900,93 +552,22 @@ export default function UsersManagementScreen() {
       name: '',
       email: '',
       isSystemAdmin: false,
-      sessionAdminIds: [],
-      stakeholderSessionIds: []
-    });
-    setAzureUserSearch(getInitialAzureSearchState());
-    setSelectedProductId('');
-    setFilteredSessionsForProduct([]);
-    setSelectedProductIdForSessionAdmin('');
-    setFilteredSessionsForSessionAdmin([]);
-    setUseAllSessionsForStakeholder(true);
-    setUseAllSessionsForSessionAdmin(true);
-    setAccordionOpen({
-      sessionAdmin: false,
-      stakeholder: false
+      isProductOwner: false,
+      isStakeholder: false,
+      productOwnerProductId: '',
+      stakeholderProductId: ''
     });
     setShowAzureSearchSection(true);
-  };
-
-  // Check if user is signed in with Azure
-  useEffect(() => {
-    const checkAzureSignIn = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          const isAzureProvider = session.user?.app_metadata?.provider === 'azure' || 
-                                 session.user?.identities?.some((id: any) => id.provider === 'azure');
-          setIsAzureSignedIn(isAzureProvider || false);
-        } else {
-          setIsAzureSignedIn(false);
-        }
-      } catch (error) {
-        console.error('Error checking Azure sign-in status:', error);
-        setIsAzureSignedIn(false);
-      }
-    };
-    
-    checkAzureSignIn();
-    
-    // Also listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        const isAzureProvider = session.user?.app_metadata?.provider === 'azure' || 
-                               session.user?.identities?.some((id: any) => id.provider === 'azure');
-        setIsAzureSignedIn(isAzureProvider || false);
-      } else {
-        setIsAzureSignedIn(false);
-      }
+    setAzureUserSearch({
+      searchTerm: '',
+      results: [],
+      isSearching: false,
+      showResults: false,
+      error: ''
     });
-    
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  // Handle Azure sign-in
-  const handleAzureSignIn = async () => {
-    try {
-      // Get the basename from the current pathname or default to '/feature-voting-app'
-      const basename = window.location.pathname.startsWith('/feature-voting-app') 
-        ? '/feature-voting-app' 
-        : '';
-      
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'azure',
-        options: {
-          redirectTo: `${window.location.origin}${basename}/users`,
-          scopes: 'email openid profile User.ReadBasic.All'
-        }
-      });
-      
-      if (error) {
-        console.error('Azure sign-in error:', error);
-        setAzureUserSearch(prev => ({ 
-          ...prev, 
-          error: 'Failed to sign in with Microsoft. Please try again.' 
-        }));
-      }
-      // If successful, user will be redirected to Azure, then back to /users
-    } catch (err) {
-      console.error('Azure sign-in error:', err);
-      setAzureUserSearch(prev => ({ 
-        ...prev, 
-        error: 'Failed to sign in with Microsoft. Please try again.' 
-      }));
-    }
   };
 
-  // Search Azure AD users
+  // Azure AD user search handler
   const handleAzureUserSearch = async (searchTerm: string) => {
     setAzureUserSearch(prev => ({ ...prev, searchTerm, isSearching: true, showResults: false, error: '' }));
     
@@ -2017,14 +598,13 @@ export default function UsersManagementScreen() {
     }
   };
 
-  // Select an Azure AD user
+  // Select Azure AD user
   const selectAzureUser = (user: AzureAdUser) => {
-    // Format name as "First Name Last Name" instead of "Last Name, First Name"
+    // Format name as "First Name Last Name" 
     let formattedName = '';
     if (user.givenName && user.surname) {
       formattedName = `${user.givenName} ${user.surname}`;
     } else if (user.displayName) {
-      // If displayName is "Last, First", convert it to "First Last"
       const displayName = user.displayName.trim();
       if (displayName.includes(',')) {
         const parts = displayName.split(',').map(p => p.trim());
@@ -2045,26 +625,32 @@ export default function UsersManagementScreen() {
       name: formattedName,
       email: user.mail || user.userPrincipalName
     });
-    setAzureUserSearch(getInitialAzureSearchState());
+    setAzureUserSearch({
+      searchTerm: '',
+      results: [],
+      isSearching: false,
+      showResults: false,
+      error: ''
+    });
     setShowAzureSearchSection(false);
   };
 
   const handleAddUser = async () => {
     if (!newUserData.name.trim() || !newUserData.email.trim()) {
-      alert('Please fill in all required fields (Name, Email)');
+      showAlert('Missing Required Fields', 'Please provide both name and email address.', 'error');
       return;
     }
 
     setIsAddingUser(true);
     try {
-      // Create user directly in users table (they'll use Azure AD for authentication)
+      // Create user directly in users table
       const { data: newUser, error: dbError } = await supabase
         .from('users')
         .insert({
           name: newUserData.name.trim(),
           email: newUserData.email.trim().toLowerCase(),
-          created_by: currentUser?.id,
-          created_by_name: currentUser?.name
+          created_by: sessionUser?.id,
+          created_by_name: sessionUser?.name
         })
         .select()
         .single();
@@ -2074,267 +660,664 @@ export default function UsersManagementScreen() {
 
       const newUserId = newUser.id;
 
-      // Add system admin role if selected (only in system-admin mode)
-      if (viewMode === 'system-admin' && newUserData.isSystemAdmin) {
-        await db.addSystemAdmin(newUserId);
-      }
-
-      // Add session admin roles (only in system-admin mode)
-      if (viewMode === 'system-admin') {
-        if (accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin) {
-          if (useAllSessionsForSessionAdmin) {
-            // Add to all current sessions for the product
-            for (const session of filteredSessionsForSessionAdmin) {
-              try {
-                await db.addSessionAdmin(session.id, newUserId);
-              } catch (err) {
-                console.error(`Error adding session admin role to session ${session.id}:`, err);
-              }
-            }
-          } else {
-            // Add to selected sessions only
-        for (const sessionId of newUserData.sessionAdminIds) {
-          try {
-            await db.addSessionAdmin(sessionId, newUserId);
-          } catch (err) {
-            console.error('Error adding session admin role:', err);
-              }
-            }
-          }
-        }
-      }
-
-      // Add stakeholder roles (both modes, but session-admin mode only adds to their sessions)
-      console.log('Adding stakeholder to sessions:', newUserData.stakeholderSessionIds);
-      console.log('View mode:', viewMode);
-      console.log('User admin sessions:', userAdminSessions);
-      console.log('All sessions:', allSessions.map(s => ({ id: s.id, title: s.title })));
-      
-      // Determine which sessions to add the user to
-      let sessionsToAdd: string[] = [];
-      
-      if (viewMode === 'session-admin') {
-        // Session Admin mode: use selected product's sessions
-        if (selectedProductId && useAllSessionsForStakeholder) {
-          // Add to all current sessions for the product
-          sessionsToAdd = filteredSessionsForProduct.map(s => s.id);
-        } else if (selectedProductId && !useAllSessionsForStakeholder) {
-          // Add to selected sessions only
-          sessionsToAdd = newUserData.stakeholderSessionIds;
-        }
-      } else if (viewMode === 'system-admin') {
-        // System Admin mode: check if stakeholder accordion is open
-        if (accordionOpen.stakeholder && selectedProductId) {
-          if (useAllSessionsForStakeholder) {
-            // Add to all current sessions for the product
-            sessionsToAdd = filteredSessionsForProduct.map(s => s.id);
-      } else {
-            // Add to selected sessions only
-            sessionsToAdd = newUserData.stakeholderSessionIds;
-          }
-        }
-      }
-      
-      if (sessionsToAdd.length === 0) {
-        console.log('No stakeholder sessions to add');
-      } else {
-        for (const sessionId of sessionsToAdd) {
-          // In session-admin mode, ensure we only add to sessions they manage
-          // Note: In session-admin mode, allSessions already contains only their sessions
-          if (viewMode === 'session-admin') {
-            // Verify the session is in allSessions (which should already be filtered)
-            const sessionExists = allSessions.some(s => s.id === sessionId);
-            if (!sessionExists) {
-              console.warn(`Skipping session ${sessionId} - not in managed sessions`);
-              continue; // Skip sessions they don't admin
-            }
-          }
-          
-          try {
-            console.log(`Adding ${newUserData.email} as stakeholder to session ${sessionId}`);
-            const result = await db.addSessionStakeholderByEmail(sessionId, newUserData.email, newUserData.name);
-            console.log(`Successfully added stakeholder to session ${sessionId}:`, result);
-          } catch (err: any) {
-            console.error(`Error adding stakeholder role to session ${sessionId}:`, err);
-            // Show error message
-            const errorMsg = err?.message || err?.toString() || 'Unknown error';
-            alert(`Warning: Failed to add ${newUserData.email} to session ${sessionId}.\n\nError: ${errorMsg}`);
-          }
-        }
-        
-        console.log('Finished adding stakeholder roles');
-      }
-
-      // Determine user type for success message
-      let userType = 'User';
+      // Add system admin role if selected
       if (newUserData.isSystemAdmin) {
-        userType = 'System Admin';
-      } else if (accordionOpen.sessionAdmin && selectedProductIdForSessionAdmin && (useAllSessionsForSessionAdmin || newUserData.sessionAdminIds.length > 0)) {
-        userType = 'Session Admin';
-      } else if ((viewMode === 'session-admin' && selectedProductId && (useAllSessionsForStakeholder || newUserData.stakeholderSessionIds.length > 0)) || 
-                 (viewMode === 'system-admin' && accordionOpen.stakeholder && selectedProductId && (useAllSessionsForStakeholder || newUserData.stakeholderSessionIds.length > 0))) {
-        userType = 'Stakeholder';
+        await supabase.from('system_admins').insert({ user_id: newUserId });
       }
 
-      // Close modal first (before reload to avoid UI delay)
+      // Add product owner role if product selected
+      if (newUserData.isProductOwner && newUserData.productOwnerProductId) {
+        const productSessions = allSessions.filter(s => s.product_id === newUserData.productOwnerProductId);
+        for (const session of productSessions) {
+          await supabase
+            .from('product_product_owners')
+            .insert({
+              session_id: session.id,
+              user_id: newUserId
+            });
+        }
+      }
+
+      // Add stakeholder role if product selected
+      if (newUserData.isStakeholder && newUserData.stakeholderProductId) {
+        const productSessions = allSessions.filter(s => s.product_id === newUserData.stakeholderProductId);
+        for (const session of productSessions) {
+          await supabase
+            .from('product_stakeholders')
+            .insert({
+              session_id: session.id,
+              user_id: newUserId,
+              user_email: newUserData.email.trim().toLowerCase(),
+              user_name: newUserData.name.trim()
+            });
+        }
+      }
+
+      // Close modal and reload
       closeAddUserModal();
-
-      // Reload users to show new user with their roles
-      await loadUsers(allSessions);
-
-      // Show success modal
-      setSuccessModalData({
-        email: newUserData.email,
-        userType: userType
-      });
-      setShowSuccessModal(true);
+      await loadData();
+      
+      showAlert('User Created Successfully', `${newUserData.name} has been added to the system.`, 'success');
     } catch (error: any) {
       console.error('Error creating user:', error);
-      alert(`Failed to create user: ${error.message || 'Unknown error'}`);
+      showAlert('Failed to Create User', error.message || 'An unknown error occurred. Please try again.', 'error');
     } finally {
       setIsAddingUser(false);
     }
   };
 
-  const toggleSessionAdmin = (sessionId: string) => {
-    setNewUserData(prev => ({
-      ...prev,
-      sessionAdminIds: prev.sessionAdminIds.includes(sessionId)
-        ? prev.sessionAdminIds.filter(id => id !== sessionId)
-        : [...prev.sessionAdminIds, sessionId]
-    }));
-  };
-
-  const toggleStakeholder = (sessionId: string) => {
-    setNewUserData(prev => ({
-      ...prev,
-      stakeholderSessionIds: prev.stakeholderSessionIds.includes(sessionId)
-        ? prev.stakeholderSessionIds.filter(id => id !== sessionId)
-        : [...prev.stakeholderSessionIds, sessionId]
-    }));
-  };
-
-  const formatDate = (dateString: string): string => {
-    // Parse as local date to avoid timezone issues
-    const dateOnly = dateString.split('T')[0].split(' ')[0];
-    const parts = dateOnly.split('-');
+  const handleToggleSystemAdmin = async (userId: string, currentStatus: boolean) => {
+    setOpenDropdown(null);
     
-    if (parts.length !== 3) {
-      // Fallback to original behavior if format is unexpected
-    const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric'
+    if (!confirm(`Are you sure you want to ${currentStatus ? 'remove' : 'grant'} system admin access for this user?`)) {
+      return;
+    }
+
+    try {
+      const { error } = currentStatus 
+        ? await supabase.from('system_admins').delete().eq('user_id', userId)
+        : await supabase.from('system_admins').insert({ user_id: userId });
+      
+      if (error) throw error;
+      await loadData();
+    } catch (error) {
+      console.error('Error toggling system admin:', error);
+      showAlert('Update Failed', 'Failed to update system admin status. Please try again.', 'error');
+    }
+  };
+
+  const handleRemoveAllRoles = async (userId: string, userName: string) => {
+    setOpenDropdown(null);
+    
+    const confirmMessage = viewMode === 'session-admin'
+      ? `Are you sure you want to remove ${userName} from all sessions you manage?`
+      : `Are you sure you want to remove all roles from ${userName}? This will remove them from all sessions and revoke system admin access.`;
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      // Remove system admin
+      if (viewMode === 'system-admin') {
+        await supabase.from('system_admins').delete().eq('user_id', userId);
+      }
+      
+      // Remove from all sessions
+      const user = users.find(u => u.id === userId);
+      if (user?.email) {
+        // Remove as product owner
+        await supabase.from('product_product_owners').delete().eq('user_id', userId);
+        // Remove as stakeholder
+        await supabase.from('product_stakeholders').delete().eq('user_email', user.email);
+      }
+      
+      await loadData();
+    } catch (error) {
+      console.error('Error removing roles:', error);
+      showAlert('Failed to Remove Roles', 'An error occurred while removing roles. Please try again.', 'error');
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    
+    if (!confirm(`Are you sure you want to delete ${userName}? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Remove all roles first
+      await supabase.from('system_admins').delete().eq('user_id', userId);
+      await supabase.from('product_product_owners').delete().eq('user_id', userId);
+      await supabase.from('product_stakeholders').delete().eq('user_email', user.email);
+      
+      // Delete user
+      await supabase.from('users').delete().eq('id', userId);
+      
+      setOpenDropdown(null);
+      await loadData();
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      showAlert('Failed to Delete User', 'An error occurred while deleting the user. Please try again.', 'error');
+    }
+  };
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      if (!authUser) {
+        navigate('/login');
+        return;
+      }
+
+      const [usersData, sessionsData, productsData, votesData, adminRelations, stakeholderRelations] = await Promise.all([
+        getAllUsers(),
+        supabase.from('voting_sessions').select('*').order('created_at', { ascending: false }),
+        supabase.from('products').select('*').order('name'),
+        supabase.from('votes').select('user_id, session_id'),
+        supabase.from('product_product_owners').select('user_id, product_id, created_at'),
+        supabase.from('product_stakeholders').select('user_email, product_id, created_at')
+      ]);
+
+      // Build lookup maps
+      const adminRelationsByUser = new Map<string, Array<{ product_id: string; created_at: string }>>();
+      (adminRelations.data || []).forEach((rel: any) => {
+        if (!adminRelationsByUser.has(rel.user_id)) {
+          adminRelationsByUser.set(rel.user_id, []);
+        }
+        adminRelationsByUser.get(rel.user_id)!.push({
+          product_id: rel.product_id,
+          created_at: rel.created_at
+        });
+      });
+
+      const stakeholderRelationsByUser = new Map<string, Array<{ product_id: string; created_at: string }>>();
+      (stakeholderRelations.data || []).forEach((rel: any) => {
+        const key = rel.user_email?.toLowerCase() || '';
+        if (key) {
+          if (!stakeholderRelationsByUser.has(key)) {
+            stakeholderRelationsByUser.set(key, []);
+          }
+          stakeholderRelationsByUser.get(key)!.push({
+            product_id: rel.product_id,
+            created_at: rel.created_at
+          });
+        }
+      });
+
+      const sessionMap = new Map((sessionsData.data || []).map(s => [s.id, s]));
+      
+      // Build sessions by product map
+      const sessionsByProduct = new Map<string, any[]>();
+      (sessionsData.data || []).forEach(session => {
+        const productId = session.product_id || 'unknown';
+        if (!sessionsByProduct.has(productId)) {
+          sessionsByProduct.set(productId, []);
+        }
+        sessionsByProduct.get(productId)!.push(session);
+      });
+
+      if (usersData) {
+        const enrichedUsers = await Promise.all(
+          usersData.map(async (user) => {
+            const roles = await getUserRoleInfo(user.id);
+            
+            const adminInSessions: SessionWithAssignment[] = [];
+            const stakeholderInSessions: SessionWithAssignment[] = [];
+
+            // Get admin sessions from pre-loaded data (via products)
+            const userAdminRelations = adminRelationsByUser.get(user.id) || [];
+            userAdminRelations.forEach(rel => {
+              const productSessions = sessionsByProduct.get(rel.product_id) || [];
+              productSessions.forEach(session => {
+                adminInSessions.push({
+                  ...session,
+                  assignedAt: rel.created_at,
+                  assignedBy: 'System',
+                  assignedByName: 'System'
+                });
+              });
+            });
+
+            // Get stakeholder sessions from pre-loaded data (via products)
+            const userEmailKey = user.email.toLowerCase();
+            const userStakeholderRelations = stakeholderRelationsByUser.get(userEmailKey) || [];
+            userStakeholderRelations.forEach(rel => {
+              const productSessions = sessionsByProduct.get(rel.product_id) || [];
+              productSessions.forEach(session => {
+                stakeholderInSessions.push({
+                  ...session,
+                  assignedAt: rel.created_at,
+                  assignedBy: 'System',
+                  assignedByName: 'System'
+                });
+              });
+            });
+
+            return {
+              ...user,
+              roles,
+              adminInSessions,
+              stakeholderInSessions
+            };
+          })
+        );
+
+        setUsers(enrichedUsers);
+        
+        // Find current user by email (auth user ID != users table ID)
+        const current = sessionUser ? enrichedUsers.find(u => u.email.toLowerCase() === sessionUser.email.toLowerCase()) : null;
+        setCurrentUserRoles(current || null);
+        
+        // Set admin status based on current user's roles
+        if (current) {
+          const isUserSystemAdmin = current.roles?.isSystemAdmin || false;
+          const isUserSessionAdmin = (current.roles?.sessionAdminCount || 0) > 0;
+          
+          setIsSystemAdmin(isUserSystemAdmin);
+          setIsSessionAdmin(isUserSessionAdmin);
+          
+          // Set view mode: Product Owners who are NOT System Admins default to session-admin view
+          if (!isUserSystemAdmin && isUserSessionAdmin) {
+            setViewMode('session-admin');
+          }
+        }
+        
+        const adminSessionIds = current?.adminInSessions?.map(s => s.id) || [];
+        setUserAdminSessions(adminSessionIds);
+      }
+
+      if (sessionsData.data) {
+        setAllSessions(sessionsData.data);
+      }
+
+      if (productsData.data) {
+        setAllProducts(productsData.data);
+      }
+
+      if (votesData.data) {
+        const votedSet = new Set(
+          votesData.data.map(v => `${v.user_id}-${v.session_id}`)
+        );
+        setUserVotedSessions(votedSet);
+      }
+
+    } catch (error) {
+      console.error('UsersManagementScreenMultiRow: Error loading data:', error);
+      setError(error instanceof Error ? error.message : 'An error occurred loading data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const groupSessionsByProduct = (sessions: SessionWithAssignment[]): Map<string, SessionWithAssignment[]> => {
+    const grouped = new Map<string, SessionWithAssignment[]>();
+    sessions.forEach(session => {
+      const productId = session.product_id || 'unknown';
+      if (!grouped.has(productId)) {
+        grouped.set(productId, []);
+      }
+      grouped.get(productId)!.push(session);
+    });
+    return grouped;
+  };
+
+  const getFilteredSessions = (sessions: SessionWithAssignment[] | undefined): SessionWithAssignment[] => {
+    if (!sessions) return [];
+    
+    let filtered = sessions;
+    
+    // Filter by product if selected
+    if (filterProductId) {
+      filtered = filtered.filter(s => s.product_id === filterProductId);
+    }
+    
+    // In Product Owner view, only show sessions the current user manages
+    if (viewMode === 'session-admin' && !isSystemAdmin && userAdminSessions.length > 0) {
+      filtered = filtered.filter(s => userAdminSessions.includes(s.id));
+    }
+    
+    return filtered;
+  };
+
+  // Get products accessible to current user (for Add User modal dropdowns and filtering)
+  const getAccessibleProducts = (): Product[] => {
+    // In Product Owner view mode, even System Admins are restricted to their assigned products
+    // In System Admin view mode, System Admins see all products
+    if (isSystemAdmin && viewMode === 'system-admin') {
+      return allProducts;
+    }
+    
+    // Product Owners (and System Admins in Product Owner view) only see products they own or are stakeholders for
+    if (!currentUserRoles) return [];
+    
+    const accessibleProductIds = new Set<string>();
+    
+    // Add products where user is Product Owner
+    currentUserRoles.adminInSessions?.forEach(session => {
+      if (session.product_id) {
+        accessibleProductIds.add(session.product_id);
+      }
+    });
+    
+    // Add products where user is Stakeholder
+    currentUserRoles.stakeholderInSessions?.forEach(session => {
+      if (session.product_id) {
+        accessibleProductIds.add(session.product_id);
+      }
+    });
+    
+    return allProducts.filter(product => accessibleProductIds.has(product.id));
+  };
+
+  // Get products for role modal (filtered based on add/remove and user's current assignments)
+  const getRoleModalProducts = (): Product[] => {
+    const accessibleProducts = getAccessibleProducts();
+    
+    // When removing, filter by the specific role selected
+    if (roleModalType === 'remove-stakeholder' && selectedUserForRole && selectedRoleToRemove) {
+      const userProductIds = new Set<string>();
+      
+      if (selectedRoleToRemove === 'product-owner') {
+        // Only show products where user is Product Owner
+        selectedUserForRole.adminInSessions?.forEach(session => {
+          if (session.product_id) {
+            userProductIds.add(session.product_id);
+          }
+        });
+      } else if (selectedRoleToRemove === 'stakeholder') {
+        // Only show products where user is Stakeholder
+        selectedUserForRole.stakeholderInSessions?.forEach(session => {
+          if (session.product_id) {
+            userProductIds.add(session.product_id);
+          }
+        });
+      }
+      
+      // Filter to only products the user has AND the current user can access
+      return accessibleProducts.filter(product => userProductIds.has(product.id));
+    }
+    
+    // When adding, show all accessible products
+    return accessibleProducts;
+  };
+
+  const getRolesForUser = (user: UserWithRoles): RoleRow[] => {
+    const roles: RoleRow[] = [];
+    const filteredAdminSessions = getFilteredSessions(user.adminInSessions);
+    const filteredStakeholderSessions = getFilteredSessions(user.stakeholderInSessions);
+
+    // System Admin role
+    if (user.roles.isSystemAdmin) {
+      roles.push({
+        type: 'system-admin',
+        badge: (
+          <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
+            <Crown className="h-3.5 w-3.5 mr-1" />
+            System Admin
+          </span>
+        ),
+        sessions: null,
+        createdDate: user.created_at
       });
     }
-    
-    // Parse as local date (month is 0-indexed)
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    const day = parseInt(parts[2], 10);
-    const date = new Date(year, month, day);
-    
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric'
-    });
-  };
 
-  const getSessionStatus = (session: VotingSession): { text: string; color: string } => {
-    const now = new Date();
-    const startDate = new Date(session.start_date);
-    const endDate = new Date(session.end_date);
-    
-    if (session.is_active && now >= startDate && now <= endDate) {
-      return { text: 'Active', color: 'text-green-600' };
-    } else if (now < startDate) {
-      return { text: 'Upcoming', color: 'text-blue-600' };
-    } else {
-      return { text: 'Ended', color: 'text-gray-500' };
+    // Product Owner role
+    if (filteredAdminSessions.length > 0) {
+      const sessionsByProduct = groupSessionsByProduct(filteredAdminSessions);
+      roles.push({
+        type: 'admin',
+        badge: (
+          <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
+            <Shield className="h-3.5 w-3.5 mr-1" />
+            Product Owner ({sessionsByProduct.size})
+          </span>
+        ),
+        sessions: filteredAdminSessions,
+        createdDate: user.created_at,
+        productCount: sessionsByProduct.size
+      });
     }
-  };
 
-  const formatSessionDateRange = (session: VotingSession): string => {
-    const start = new Date(session.start_date);
-    const end = new Date(session.end_date);
-    const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    return `${startStr} - ${endStr}`;
-  };
-
-  const getRoleBadge = (user: UserWithRoles) => {
-    if (user.roles.isSystemAdmin) {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#C89212] text-white">
-          <Crown className="h-3.5 w-3.5 mr-1" />
-          System Admin
-        </span>
-      );
-    } else if (user.roles.sessionAdminCount > 0) {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#576C71] text-white">
-          <Shield className="h-3.5 w-3.5 mr-1" />
-          Session Admin ({user.roles.sessionAdminCount})
-        </span>
-      );
-    } else if (user.roles.stakeholderSessionCount > 0) {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#8B5A4A] text-white">
-          <UserIcon className="h-3.5 w-3.5 mr-1" />
-          Stakeholder ({user.roles.stakeholderSessionCount})
-        </span>
-      );
-    } else {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
-          No Role
-        </span>
-      );
+    // Stakeholder role
+    if (filteredStakeholderSessions.length > 0) {
+      const sessionsByProduct = groupSessionsByProduct(filteredStakeholderSessions);
+      roles.push({
+        type: 'stakeholder',
+        badge: (
+          <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-[#8B5A4A] text-white">
+            <UserIcon className="h-3.5 w-3.5 mr-1" />
+            Stakeholder ({sessionsByProduct.size})
+          </span>
+        ),
+        sessions: filteredStakeholderSessions,
+        createdDate: user.created_at,
+        productCount: sessionsByProduct.size
+      });
     }
-  };
 
-  const getAvailableSessions = (roleType: RoleModalType) => {
-    if (!roleType) return [];
-    
-    if (roleType === 'session-admin') {
-      return allSessions.filter(s => !userSessionMemberships.adminSessions.includes(s.id));
-    } else if (roleType === 'remove-stakeholder') {
-      // For removing stakeholders: show sessions where user IS a stakeholder AND session admin manages
-      return allSessions.filter(s => 
-        userSessionMemberships.stakeholderSessions.includes(s.id) &&
-        (viewMode === 'system-admin' || userAdminSessions.includes(s.id))
-      );
-    } else {
-      // For adding stakeholders: show sessions where user is NOT already a stakeholder
-      return allSessions.filter(s => !userSessionMemberships.stakeholderSessions.includes(s.id));
+    // If no roles, show empty row
+    if (roles.length === 0) {
+      roles.push({
+        type: 'system-admin',
+        badge: <span className="text-gray-400 text-xs">No roles</span>,
+        sessions: null,
+        createdDate: user.created_at
+      });
     }
+
+    return roles;
   };
 
-  const canAddToMoreSessions = (user: UserWithRoles, roleType: RoleModalType) => {
-    if (!roleType) return false;
-    
-    if (roleType === 'session-admin') {
-      return user.roles.sessionAdminCount < allSessions.length;
-    } else {
-      return user.roles.stakeholderSessionCount < allSessions.length;
+  const renderSessionsColumn = (user: UserWithRoles, role: RoleRow): { isExpanded: boolean; content: React.ReactNode } => {
+    if (!role.sessions) {
+      return { 
+        isExpanded: false, 
+        content: <span className="text-gray-600 text-xs font-medium">All sessions</span> 
+      };
     }
-  };
 
-  if (checkingAccess || isLoading) {
-    return (
-      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2d4660] mx-auto mb-4"></div>
-          <p className="text-gray-600">{checkingAccess ? 'Checking access...' : 'Loading users...'}</p>
+    const sessionCount = role.sessions.length;
+    const hasMoreSessions = sessionCount > 1;
+    const isExpanded = expandedSessions.has(`${user.id}-${role.type}`);
+    const sessionsByProduct = groupSessionsByProduct(role.sessions);
+    const firstSessionIds = new Set(
+      Array.from(sessionsByProduct.values()).map(sessions => sessions[0]?.id).filter(Boolean)
+    );
+
+    const BadgeContent = () => (
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium group" 
+        style={{ 
+          borderColor: role.type === 'admin' ? '#576C71' : '#8B5A4A',
+          color: role.type === 'admin' ? '#576C71' : '#8B5A4A'
+        }}
+      >
+        {role.type === 'admin' ? (
+          <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#576C71', color: '#576C71' }} />
+        ) : (
+          <UserIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#8B5A4A', color: '#8B5A4A' }} />
+        )}
+        <span>{role.type === 'admin' ? 'Product Owner' : 'Stakeholder'} in {sessionCount} session{sessionCount !== 1 ? 's' : ''}</span>
+        {hasMoreSessions && (
+          <span className="inline-flex items-baseline gap-0.5">
+            {isExpanded ? (
+              <Minus className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" />
+            ) : (
+              <Plus className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" />
+            )}
+            <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
+          </span>
+        )}
+      </div>
+    );
+
+    return { isExpanded, content: (
+      <div>
+        <div className="mb-2">
+          {hasMoreSessions ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const key = `${user.id}-${role.type}`;
+                setExpandedSessions(prev => {
+                  const next = new Set(prev);
+                  if (next.has(key)) {
+                    next.delete(key);
+                  } else {
+                    next.add(key);
+                  }
+                  return next;
+                });
+              }}
+              className="text-left"
+            >
+              <BadgeContent />
+            </button>
+          ) : (
+            <BadgeContent />
+          )}
         </div>
+
+        {isExpanded && (
+          <div>
+            {Array.from(sessionsByProduct.entries()).flatMap(([_productId, productSessions], productIndex) => {
+              const elements = [];
+              
+              // Add divider before each product group except the first
+              if (productIndex > 0) {
+                elements.push(
+                  <div key={`divider-${_productId}`} className="border-t border-gray-200" style={{ marginTop: '8px', marginBottom: '8px' }} />
+                );
+              }
+              
+              // Add all sessions for this product
+              productSessions.forEach((session, sessionIndex) => {
+                elements.push(
+                  <div
+                    key={session.id}
+                    className="relative cursor-pointer"
+                    style={{ 
+                      marginTop: sessionIndex === 0 && productIndex === 0 ? '8px' : sessionIndex === 0 ? '0' : '12px',
+                      marginLeft: '1.25rem',
+                      marginBottom: '18px'
+                    }}
+                  onMouseEnter={() => setHoveredSessionId(`${user.id}-${role.type}-${session.id}`)}
+                  onMouseLeave={() => setHoveredSessionId(null)}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await setCurrentSession(session);
+                    navigate('/admin');
+                  }}
+                >
+                  {hoveredSessionId === `${user.id}-${role.type}-${session.id}` && (
+                    <div className="absolute bg-blue-50 pointer-events-none rounded" 
+                      style={{ 
+                        left: firstSessionIds.has(session.id) ? 'calc(-240px - 2rem - 1rem)' : '-1.25rem',
+                        right: '-9rem',
+                        top: '-0.375rem',
+                        bottom: '-0.375rem',
+                        boxShadow: '0 0 0 1px rgb(191 219 254)',
+                        outline: 'none',
+                        zIndex: 1
+                      }}
+                    />
+                  )}
+                  <div className="block text-sm text-left text-gray-700 hover:text-gray-900 relative z-10"
+                    style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
+                  >
+                    <div className="flex items-center gap-2 whitespace-nowrap" style={{ height: '20px', lineHeight: '20px' }}>
+                      {userVotedSessions.has(`${user.id}-${session.id}`) ? (
+                        <div className="relative group">
+                          <Vote className="h-5 w-5 text-green-600 flex-shrink-0" />
+                          <div className="absolute left-0 bottom-full mb-1 hidden group-hover:block w-max bg-gray-900 text-white text-xs rounded py-1 px-2 z-50">
+                            Voted!
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="relative group">
+                          <Vote className="h-5 w-5 text-gray-300 flex-shrink-0" />
+                          <div className="absolute left-0 bottom-full mb-1 hidden group-hover:block w-max bg-gray-900 text-white text-xs rounded py-1 px-2 z-50">
+                            No Votes
+                          </div>
+                        </div>
+                      )}
+                      <span>{session.title || 'Unnamed Session'}</span>
+                    </div>
+                    <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '28px' }}>
+                      {formatSessionDateRange(session)}
+                    </div>
+                  </div>
+                </div>
+                );
+              });
+              
+              return elements;
+            })}
+          </div>
+        )}
+      </div>
+    )};
+  };
+
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = searchQuery === '' || 
+      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesRole = filterRole === 'all' || 
+      (filterRole === 'system-admin' && user.roles.isSystemAdmin) ||
+      (filterRole === 'session-admin' && user.roles.sessionAdminCount > 0) ||
+      (filterRole === 'stakeholder' && user.roles.stakeholderSessionCount > 0);
+    
+    const matchesProduct = !filterProductId || 
+      (user.adminInSessions?.some((s: any) => s.product_id === filterProductId)) ||
+      (user.stakeholderInSessions?.some((s: any) => s.product_id === filterProductId));
+    
+    // Product Owner restrictions: filter by accessible products
+    // Apply when: (1) in Product Owner view, OR (2) user is Product Owner but NOT System Admin
+    const shouldFilterByAccessibleProducts = viewMode === 'session-admin' || (!isSystemAdmin && isSessionAdmin);
+    
+    if (shouldFilterByAccessibleProducts) {
+      // Get accessible products for filtering
+      const accessibleProducts = getAccessibleProducts();
+      const accessibleProductIds = new Set(accessibleProducts.map(p => p.id));
+      
+      // In Product Owner view, exclude System Admins entirely
+      if (user.roles.isSystemAdmin) {
+        return false;
+      }
+      
+      // Check if user has any sessions in accessible products
+      const hasAccessibleProduct = 
+        user.adminInSessions?.some((s: any) => accessibleProductIds.has(s.product_id)) ||
+        user.stakeholderInSessions?.some((s: any) => accessibleProductIds.has(s.product_id));
+      
+      return matchesSearch && matchesRole && matchesProduct && hasAccessibleProduct;
+    }
+    
+    return matchesSearch && matchesRole && matchesProduct;
+  }).sort((a, b) => {
+    // Extract last name (last word in name)
+    const getLastName = (name: string) => {
+      const parts = name.trim().split(' ');
+      return parts[parts.length - 1].toLowerCase();
+    };
+    
+    const lastNameA = getLastName(a.name);
+    const lastNameB = getLastName(b.name);
+    
+    return lastNameA.localeCompare(lastNameB);
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-gray-600">Loading users...</div>
       </div>
     );
   }
 
-  if (!isSystemAdmin && !isSessionAdmin) {
-    return null; // Will redirect in useEffect
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-red-600">
+          <p className="font-bold">Error:</p>
+          <p>{error}</p>
+          <button 
+            onClick={() => loadData()} 
+            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -2363,41 +1346,37 @@ export default function UsersManagementScreen() {
               onClick={() => navigate('/sessions')}
             />
             <div className="flex-1 min-w-0">
-            <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">{pageTitle}</h1>
+              <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">User Management</h1>
               <p className="text-sm text-gray-600 mt-1">
-                Welcome, {currentUser?.name}
-                {(() => {
+                Welcome, {sessionUser?.name || 'Guest'}
+                {sessionUser && (() => {
                   // Determine current role based on viewMode
                   const currentRole = viewMode === 'system-admin' ? 'system-admin' : 'session-admin';
-                  // Determine if user is a stakeholder (they shouldn't be on this page, but handle it)
-                  const isStakeholder = !isSystemAdmin && !isSessionAdmin;
-                  return getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, isStakeholder, currentRole);
+                  // Determine user roles - use state values
+                  const userIsStakeholder = (currentUserRoles?.roles?.stakeholderSessionCount || 0) > 0;
+                  return getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, userIsStakeholder, currentRole);
                 })()}
               </p>
             </div>
           </div>
           
-          <div ref={mobileMenuRef} className="relative z-40 flex-shrink-0 ml-2">
+          <div className="relative z-40 flex-shrink-0 ml-2">
             {/* Desktop buttons */}
             <div className="hidden md:flex space-x-2">
-              {(isSystemAdmin || isSessionAdmin) && (
-                <button
-                  onClick={openAddUserModal}
-                  className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
-                >
-                  <Users className="h-4 w-4 mr-2" />
-                  {viewMode === 'session-admin' ? 'Add Stakeholder' : 'Add User'}
-                </button>
-              )}
-              {(isSystemAdmin || isSessionAdmin) && currentSession && (
-                <button
-                  onClick={() => navigate('/admin')}
-                  className="flex items-center px-4 py-2 bg-[#1E5461] text-white rounded-lg hover:bg-[#145668] transition-colors"
-                >
-                  <Shield className="h-4 w-4 mr-2" />
-                  Admin Dashboard
-                </button>
-              )}
+              <button
+                onClick={() => setShowAddUserModal(true)}
+                className="flex items-center px-4 py-2 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
+              >
+                <Users className="h-4 w-4 mr-2" />
+                Add User
+              </button>
+              <button
+                onClick={() => navigate('/admin')}
+                className="flex items-center px-4 py-2 bg-[#1E5461] text-white rounded-lg hover:bg-[#145668] transition-colors"
+              >
+                <Shield className="h-4 w-4 mr-2" />
+                Admin Dashboard
+              </button>
               <button
                 onClick={() => navigate('/sessions')}
                 className="flex items-center px-4 py-2 bg-[#4f6d8e] text-white rounded-lg hover:bg-[#3d5670] transition-colors"
@@ -2406,704 +1385,218 @@ export default function UsersManagementScreen() {
                 My Sessions
               </button>
               <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleLogout(e);
-                }}
+                onClick={() => navigate('/login')}
                 className="flex items-center justify-center p-2 w-10 h-10 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                 title="Logout"
               >
                 <LogOut className="h-4 w-4" />
               </button>
             </div>
+          </div>
+        </div>
 
-            {/* Mobile menu trigger */}
-            <div className="flex md:hidden">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-visible">
+          {/* Filters */}
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex gap-4 items-center flex-wrap">
+              <div className="flex-1 min-w-[200px]">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search users..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              
+              <div className="relative" ref={filterRoleDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterRoleDropdown(!showFilterRoleDropdown)}
+                  className="px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-left min-w-[200px]"
+                >
+                  {filterRole === 'system-admin' ? 'System Admin' :
+                   filterRole === 'session-admin' ? 'Product Owner' :
+                   filterRole === 'stakeholder' ? 'Stakeholder' : 'All Roles'}
+                </button>
+                
+                {/* Role Icon */}
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                  {filterRole === 'system-admin' && <Crown className="h-5 w-5 text-[#C89212]" />}
+                  {filterRole === 'session-admin' && <Shield className="h-5 w-5 text-[#576C71]" />}
+                  {filterRole === 'stakeholder' && <UserIcon className="h-5 w-5 text-[#8B5A4A]" />}
+                  {filterRole === 'all' && <Users className="h-5 w-5 text-gray-400" />}
+                </div>
+                
+                {/* Dropdown Arrow */}
+                <svg 
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                  fill="none" 
+                  viewBox="0 0 20 20"
+                >
+                  <path 
+                    stroke="currentColor" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round" 
+                    strokeWidth="1.5" 
+                    d="M6 8l4 4 4-4"
+                  />
+                </svg>
+                
+                {/* Custom Dropdown */}
+                {showFilterRoleDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterRole('all');
+                        setShowFilterRoleDropdown(false);
+                      }}
+                      className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 relative whitespace-nowrap"
+                    >
+                      <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      All Roles
+                    </button>
+                    {viewMode === 'system-admin' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterRole('system-admin');
+                          setShowFilterRoleDropdown(false);
+                        }}
+                        className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 relative whitespace-nowrap"
+                      >
+                        <Crown className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#C89212]" />
+                        System Admin
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterRole('session-admin');
+                        setShowFilterRoleDropdown(false);
+                      }}
+                      className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 relative whitespace-nowrap"
+                    >
+                      <Shield className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#576C71]" />
+                      Product Owner
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterRole('stakeholder');
+                        setShowFilterRoleDropdown(false);
+                      }}
+                      className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 last:border-b-0 relative whitespace-nowrap"
+                    >
+                      <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#8B5A4A]" />
+                      Stakeholder
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="relative" ref={filterProductDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowFilterProductDropdown(!showFilterProductDropdown)}
+                  className="px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-left min-w-[200px]"
+                >
+                  {filterProductId 
+                    ? getAccessibleProducts().find(p => p.id === filterProductId)?.name || 'All Products'
+                    : 'All Products'}
+                </button>
+                
+                {/* Product Color Icon */}
+                <div 
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                  style={{ 
+                    backgroundColor: (() => {
+                      const prod = getAccessibleProducts().find(p => p.id === filterProductId);
+                      return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                    })()
+                  }}
+                />
+                
+                {/* Dropdown Arrow */}
+                <svg 
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                  fill="none" 
+                  viewBox="0 0 20 20"
+                >
+                  <path 
+                    stroke="currentColor" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round" 
+                    strokeWidth="1.5" 
+                    d="M6 8l4 4 4-4"
+                  />
+                </svg>
+                
+                {/* Custom Dropdown */}
+                {showFilterProductDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto overflow-x-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterProductId('');
+                        setShowFilterProductDropdown(false);
+                      }}
+                      className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+                    >
+                      All Products
+                    </button>
+                    {getAccessibleProducts().map(product => {
+                      const productColor = getProductColor(product.name, product.color_hex ?? null);
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => {
+                            setFilterProductId(product.id);
+                            setShowFilterProductDropdown(false);
+                          }}
+                          className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative whitespace-nowrap"
+                        >
+                          <div 
+                            className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                            style={{ backgroundColor: productColor.background }}
+                          />
+                          {product.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               <button
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="p-2 rounded-md border border-gray-200 bg-white shadow-sm"
-                aria-label="Open menu"
+                onClick={() => {
+                  setSearchQuery('');
+                  setFilterRole('all');
+                  setFilterProductId('');
+                }}
+                className="p-2 rounded-md border border-gray-300 hover:bg-gray-50 transition-colors"
+                title="Clear all filters"
               >
-                <List className="h-5 w-5 text-gray-700" />
+                <FilterX className="h-5 w-5 text-gray-600" />
               </button>
             </div>
-
-            {/* Mobile dropdown menu */}
-            {mobileMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg md:hidden z-50">
-              <div className="py-1">
-                {(isSystemAdmin || isSessionAdmin) && (
-                  <button
-                    onClick={() => { setMobileMenuOpen(false); openAddUserModal(); }}
-                    className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
-                  >
-                    <Users className="h-5 w-5 mr-3 text-green-600" />
-                    <span className="text-base">{viewMode === 'session-admin' ? 'Add Stakeholder' : 'Add User'}</span>
-                  </button>
-                )}
-                {(isSystemAdmin || isSessionAdmin) && currentSession && (
-                  <button
-                    onClick={() => { setMobileMenuOpen(false); navigate('/admin'); }}
-                    className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
-                  >
-                    <Shield className="h-5 w-5 mr-3 text-[#1E5461]" />
-                    <span className="text-base">Admin Dashboard</span>
-                  </button>
-                )}
-                  <button
-                    onClick={() => { setMobileMenuOpen(false); navigate('/sessions'); }}
-                    className="w-full px-4 py-3 flex items-center text-left hover:bg-gray-50"
-                  >
-                    <Settings className="h-5 w-5 mr-3 text-gray-700" />
-                    <span className="text-base">My Sessions</span>
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setMobileMenuOpen(false);
-                      handleLogout(e);
-                    }}
-                    className="w-full px-4 py-3 flex items-center justify-center hover:bg-gray-50"
-                    title="Logout"
-                  >
-                    <LogOut className="h-5 w-5 text-gray-700" />
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
-        </div>
 
-        {/* Search and Filter Section */}
-        <div className="relative z-10 bg-white rounded-lg shadow-md p-3 md:p-4 mb-4 md:mb-6" style={{ overflow: 'visible', position: 'relative' }}>
-          <div className="flex flex-col gap-3 md:flex-row md:gap-4" style={{ position: 'relative' }}>
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by name or email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-10 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              )}
-            </div>
-
-            {/* Product Filter */}
-            <ProductFilterDropdown
-              products={allProducts}
-              value={filterProductId}
-              onChange={setFilterProductId}
-            />
-
-            {/* Role Filter */}
-            <select
-              value={filterRole === 'system-admin' && viewMode === 'session-admin' ? 'session-admin' : filterRole}
-              onChange={(e) => setFilterRole(e.target.value as any)}
-              className="px-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2d4660] focus:border-transparent text-base"
-            >
-              {viewMode !== 'session-admin' && <option value="all">All Roles</option>}
-              {viewMode !== 'session-admin' && <option value="system-admin">System Admin</option>}
-              {viewMode !== 'session-admin' && <option value="session-admin">Session Admin</option>}
-              <option value="stakeholder">Stakeholder</option>
-              <option value="none">No Role</option>
-            </select>
-
-            {/* Clear Filters Button */}
-            <button
-              onClick={() => {
-                setSearchQuery('');
-                setFilterProductId('');
-                setFilterRole('all');
-              }}
-              disabled={!searchQuery && !filterProductId && filterRole === 'all'}
-              className="inline-flex items-center justify-center px-3 py-2.5 md:py-2 border border-gray-300 rounded-lg bg-white text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 disabled:hover:bg-white"
-              title="Clear all filters"
-            >
-              <FilterX className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Mobile: Card View */}
-        <div className="md:hidden space-y-3 relative z-10 overflow-visible">
-          {filteredUsers.length === 0 ? (
-            <div className="bg-white rounded-lg shadow-md p-8 text-center text-gray-500">
-              {searchQuery || filterRole !== 'all' || filterProductId
-                ? 'No users found matching your filters.' 
-                : 'No users found.'}
-            </div>
-          ) : (
-            filteredUsers.map((user) => (
-              <div key={user.id} className="bg-white rounded-lg shadow-md overflow-visible">
-                {/* Card Header */}
-                <div className="p-4 border-b border-gray-100">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1 min-w-0 pr-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-base font-semibold text-gray-900 truncate">
-                          {user.name || user.email}
-                        </h3>
-                        {user.id === currentUser?.id && (
-                          <span className="text-xs text-[#c59f2d] font-semibold">
-                            (You)
-                          </span>
-                        )}
-                        {user.roles.isSystemAdmin && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#C89212] text-white">
-                            System Admin
-                          </span>
-                        )}
-                        {user.roles.sessionAdminCount > 0 && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                            Session Admin ({user.roles.sessionAdminCount})
-                          </span>
-                        )}
-                        {user.roles.stakeholderSessionCount > 0 && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                            Stakeholder ({user.roles.stakeholderSessionCount})
-                          </span>
-                        )}
-                        {getProtectedAccountLabel(user) && (
-                          <span className="text-xs text-[#c59f2d] font-semibold">
-                            ({getProtectedAccountLabel(user)})
-                          </span>
-                        )}
-                        {isDuplicateAccount(user) && (
-                          <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded">
-                            Duplicate ({getDuplicateCount(user)})
-                          </span>
-                        )}
-                    </div>
-                      <p className="text-sm text-gray-500 truncate mt-1">{user.email}</p>
-                      {(() => {
-                        const userProducts = getUserProducts(user);
-                        if (userProducts.length > 0) {
-                          return (
-                            <div className="text-sm text-gray-600 mt-1">
-                              <span className="font-medium">
-                                {userProducts.length === 1 ? 'Product:' : 'Products:'}
-                              </span>
-                              <ul className="list-none mt-1 space-y-0.5">
-                                {userProducts.map(p => {
-                                  const productColors = getProductColor(p.name, p.color_hex ?? null);
-                                  return (
-                                    <li key={p.id} className="text-gray-600 flex items-center gap-2">
-                                      <span
-                                        className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
-                                        style={{ backgroundColor: productColors.background }}
-                                      />
-                                      {p.name}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <div 
-                        className="relative"
-                        ref={(el) => { dropdownRefs.current[user.id] = el; }}
-                      >
-                        <button
-                          onClick={() => setOpenDropdown(openDropdown === user.id ? null : user.id)}
-                          className={`p-2 rounded-md hover:bg-gray-100 transition-colors ${
-                            user.id === currentUser?.id ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                          disabled={user.id === currentUser?.id}
-                          title={user.id === currentUser?.id ? 'Cannot modify your own permissions' : 'Change user role'}
-                        >
-                          <MoreVertical className="h-5 w-5 text-gray-600" />
-                        </button>
-                        
-                        {openDropdown === user.id && user.id !== currentUser?.id && (
-                          <div 
-                            className="fixed md:absolute md:right-0 md:mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]" 
-                            style={dropdownPositions[user.id] || {}}
-                          >
-                            <div className="py-1">
-                              <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-200">
-                                Change User Role
-                              </div>
-                              
-                              {/* System Admin option - only in system-admin mode */}
-                              {viewMode === 'system-admin' && (
-                                <>
-                                  {user.roles.isSystemAdmin ? (
-                                    <button
-                                      onClick={() => handleToggleSystemAdmin(user.id, true)}
-                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-red-50 text-red-700"
-                                    >
-                                      <Crown className="h-5 w-5 mr-3 flex-shrink-0" />
-                                      <div>
-                                        <div className="font-medium text-base">Remove System Admin</div>
-                                        <div className="text-xs text-gray-500">Revoke global admin access</div>
-                                      </div>
-                                    </button>
-                                  ) : (
-                                    <button
-                                      onClick={() => handleToggleSystemAdmin(user.id, false)}
-                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-[#C89212]/10 text-[#C89212]"
-                                    >
-                                      <Crown className="h-5 w-5 mr-3 flex-shrink-0" />
-                                      <div>
-                                        <div className="font-medium text-base">Make System Admin</div>
-                                        <div className="text-xs text-gray-500">Grant global admin access</div>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* Session Admin option - only show if not in all sessions */}
-                                  {canAddToMoreSessions(user, 'session-admin') && (
-                                    <button
-                                      onClick={() => openRoleModal(user, 'session-admin')}
-                                      className="w-full px-4 py-3 text-left flex items-center hover:bg-[#576C71]/10 text-[#576C71] border-t border-gray-200"
-                                    >
-                                      <Shield className="h-5 w-5 mr-3 flex-shrink-0" />
-                                      <div>
-                                        <div className="font-medium text-base">Make Session Admin</div>
-                                        <div className="text-xs text-gray-500">Add to a session as admin</div>
-                                      </div>
-                                    </button>
-                                  )}
-                                </>
-                              )}
-
-                              {/* Stakeholder option - only show if not in all sessions */}
-                              {canAddToMoreSessions(user, 'stakeholder') && (
-                                <button
-                                  onClick={() => openRoleModal(user, 'stakeholder')}
-                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200"
-                                >
-                                  <UserIcon className="h-5 w-5 mr-3 flex-shrink-0" />
-                                  <div>
-                                    <div className="font-medium text-base">Make Stakeholder</div>
-                                    <div className="text-xs text-gray-500">Add to a session as stakeholder</div>
-                                  </div>
-                                </button>
-                              )}
-
-                              {/* Remove Stakeholder option - For Session Admins only */}
-                              {viewMode === 'session-admin' && user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && 
-                               user.stakeholderInSessions.some(session => userAdminSessions.includes(session.id)) && (
-                                <button
-                                  onClick={() => openRoleModal(user, 'remove-stakeholder')}
-                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-red-50 text-red-700 border-t border-gray-200"
-                                >
-                                  <UserX className="h-5 w-5 mr-3 flex-shrink-0" />
-                                  <div>
-                                    <div className="font-medium text-base">Remove Stakeholder</div>
-                                    <div className="text-xs text-gray-500">Remove from a session you manage</div>
-                                  </div>
-                                </button>
-                              )}
-
-                              {/* Remove all roles option */}
-                              {(user.roles.isSystemAdmin || user.roles.sessionAdminCount > 0 || user.roles.stakeholderSessionCount > 0) && (
-                                <button
-                                  onClick={() => handleRemoveAllRoles(user.id, user.name)}
-                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-gray-50 text-gray-700 border-t border-gray-200"
-                                >
-                                  <UserX className="h-5 w-5 mr-3 flex-shrink-0" />
-                                  <div>
-                                    <div className="font-medium text-base">Remove All Roles</div>
-                                    <div className="text-xs text-gray-500">Remove from all sessions</div>
-                                  </div>
-                                </button>
-                              )}
-
-                              {/* User Functions header */}
-                              {((viewMode === 'system-admin') || 
-                                ((viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
-                                  user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
-                                 !protectedEmails.has(user.email)) && (
-                                <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
-                                  User Functions
-                            </div>
-                              )}
-
-                              {/* Edit User - only for system admins - moved to bottom */}
-                              {viewMode === 'system-admin' && (
-                                <button
-                                  onClick={() => {
-                                    setUserToEdit(user);
-                                    setEditingUserName(user.name);
-                                    setEditingUserEmail(user.email);
-                                    setShowEditUserModal(true);
-                                    setOpenDropdown(null);
-                                  }}
-                                  className="w-full px-4 py-3 text-left flex items-center hover:bg-[#1E5461]/10 text-[#1E5461] border-t border-gray-200"
-                                >
-                                  <Edit className="h-5 w-5 mr-3 flex-shrink-0" />
-                                  <div>
-                                    <div className="font-medium text-base">Edit User Profile</div>
-                                    <div className="text-xs text-gray-500">Update name and email</div>
-                          </div>
-                                </button>
-                              )}
-
-                              {/* Delete User - moved to bottom */}
-                              {(viewMode === 'system-admin' || 
-                                (viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
-                                 user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
-                                !protectedEmails.has(user.email) && (
-                                <button
-                                  onClick={() => {
-                                    setOpenDropdown(null);
-                                    handleDeleteUser(user.id, user.name);
-                                  }}
-                                  className={`w-full px-4 py-3 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200 ${
-                                    user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))
-                                      ? 'opacity-50 cursor-not-allowed' 
-                                      : ''
-                                  }`}
-                                  disabled={user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))}
-                                >
-                                  <Trash2 className="h-5 w-5 mr-3 flex-shrink-0" />
-                                  <div>
-                                    <div className="font-medium text-base">
-                                      {viewMode === 'session-admin'
-                                        ? 'Remove Stakeholder'
-                                        : 'Delete User'}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      {viewMode === 'session-admin'
-                                        ? 'Remove from all your sessions'
-                                        : user.id === currentUser?.id 
-                                        ? 'Cannot delete your own account'
-                                        : protectedUserIds.has(user.id)
-                                        ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
-                                        : 'Permanently delete this user'}
-                                    </div>
-                                  </div>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    {getRoleBadge(user)}
-                  </div>
-                </div>
-
-                {/* Card Body */}
-                <div className="p-4 space-y-3">
-                  {/* Sessions */}
-                  <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Sessions</div>
-                    <div className="space-y-1">
-                      {user.roles.sessionAdminCount > 0 && (
-                        <div className="space-y-1">
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium" style={{ borderColor: '#576C71', color: '#576C71' }}>
-                            <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#576C71', color: '#576C71' }} />
-                            <span>{user.roles.sessionAdminCount} as Session Admin</span>
-                          </div>
-                          {user.adminInSessions && user.adminInSessions.length > 0 && (
-                            <>
-                              {(() => {
-                                const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
-                                // Always show at least one session - prefer active, otherwise first session
-                                const sessionToShow = mostRecentActive || user.adminInSessions[0];
-                                const hasMoreSessions = user.adminInSessions.length > 1;
-                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
-                                
-                                return (
-                                  <>
-                                    {sessionToShow && (
-                                      <button
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          await setCurrentSession(sessionToShow);
-                                          navigate('/admin');
-                                        }}
-                                        className="ml-6 text-left text-sm text-gray-700 hover:text-gray-900 hover:underline"
-                                      >
-                                        <div>{sessionToShow.title || 'Unnamed Session'}</div>
-                                        <div className="text-xs text-gray-500 mt-0.5">
-                                          {formatSessionDateRange(sessionToShow)}
-                                        </div>
-                                      </button>
-                                    )}
-                                    {hasMoreSessions && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (isExpanded) {
-                                            setExpandedSessions(null);
-                                          } else {
-                                            setExpandedSessions({ userId: user.id, role: 'admin' });
-                                          }
-                                        }}
-                                        className="ml-6 text-xs text-gray-500 hover:text-gray-700 hover:underline mt-1 block flex items-center gap-1.5"
-                                        style={{ minWidth: '70px' }}
-                                      >
-                                        <span className="inline-flex items-center justify-center w-4 h-4 border border-gray-400 rounded text-gray-600">
-                                          {isExpanded ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
-                                        </span>
-                                        {isExpanded ? 'Hide' : 'Show'}
-                                      </button>
-                                    )}
-                                    {isExpanded && (
-                                      <div className="ml-6 mt-1 space-y-1">
-                                        {user.adminInSessions
-                                          .filter(s => s.id !== sessionToShow?.id)
-                                          .map(session => (
-                                            <button
-                                              key={session.id}
-                                              onClick={async (e) => {
-                                                e.stopPropagation();
-                                                await setCurrentSession(session);
-                                                navigate('/admin');
-                                              }}
-                                              className="block text-sm text-left text-gray-700 hover:text-gray-900 hover:underline w-full"
-                                            >
-                                              <div>{session.title || 'Unnamed Session'}</div>
-                                              <div className="text-xs text-gray-500 mt-0.5">
-                                                {formatSessionDateRange(session)}
-                                              </div>
-                                            </button>
-                                          ))}
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </>
-                          )}
-                        </div>
-                      )}
-                      {user.roles.stakeholderSessionCount > 0 && (
-                        <div className="space-y-1">
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium" style={{ borderColor: '#8B5A4A', color: '#8B5A4A' }}>
-                            <UserIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#8B5A4A', color: '#8B5A4A' }} />
-                            <span>{user.roles.stakeholderSessionCount} as Stakeholder</span>
-                          </div>
-                          {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
-                            <>
-                              {(() => {
-                                const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
-                                // Always show at least one session - prefer active, otherwise first session
-                                const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
-                                const hasMoreSessions = user.stakeholderInSessions.length > 1;
-                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
-                                
-                                return (
-                                  <>
-                                    {sessionToShow && (
-                                      <button
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          await setCurrentSession(sessionToShow);
-                                          navigate('/admin');
-                                        }}
-                                        className="ml-6 text-left text-sm text-gray-700 hover:text-gray-900 hover:underline"
-                                      >
-                                        <div>{sessionToShow.title || 'Unnamed Session'}</div>
-                                        <div className="text-xs text-gray-500 mt-0.5">
-                                          {formatSessionDateRange(sessionToShow)}
-                                        </div>
-                                      </button>
-                                    )}
-                                    {hasMoreSessions && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (isExpanded) {
-                                            setExpandedSessions(null);
-                                          } else {
-                                            setExpandedSessions({ userId: user.id, role: 'stakeholder' });
-                                          }
-                                        }}
-                                        className="ml-6 text-xs text-gray-500 hover:text-gray-700 hover:underline mt-1 block flex items-center gap-1.5"
-                                        style={{ minWidth: '70px' }}
-                                      >
-                                        <span className="inline-flex items-center justify-center w-4 h-4 border border-gray-400 rounded text-gray-600">
-                                          {isExpanded ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
-                                        </span>
-                                        {isExpanded ? 'Hide' : 'Show'}
-                                      </button>
-                                    )}
-                                    {isExpanded && (
-                                      <div className="ml-6 mt-1 space-y-1">
-                                        {user.stakeholderInSessions
-                                          .filter(s => s.id !== sessionToShow?.id)
-                                          .map(session => (
-                                            <button
-                                              key={session.id}
-                                              onClick={async (e) => {
-                                                e.stopPropagation();
-                                                await setCurrentSession(session);
-                                                navigate('/admin');
-                                              }}
-                                              className="block text-sm text-left text-gray-700 hover:text-gray-900 hover:underline w-full"
-                                            >
-                                              <div>{session.title || 'Unnamed Session'}</div>
-                                              <div className="text-xs text-gray-500 mt-0.5">
-                                                {formatSessionDateRange(session)}
-                                              </div>
-                                            </button>
-                                          ))}
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </>
-                          )}
-                        </div>
-                      )}
-                      {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
-                        <span className="text-sm text-gray-400">No session roles</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Created/Assigned Date */}
-                  <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Assigned</div>
-                    <div className="space-y-2">
-                      {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
-                    <div className="flex items-center text-sm text-gray-700">
-                      <Calendar className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
-                          <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
-                          <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
-                    </div>
-                      )}
-                      
-                      {user.adminInSessions && user.adminInSessions.length > 0 && (
-                        <div className="space-y-3">
-                          {(() => {
-                            const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
-                            const sessionToShow = mostRecentActive || user.adminInSessions[0];
-                            const hasMoreSessions = user.adminInSessions.length > 1;
-                            const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
-                            
-                            return (
-                              <>
-                                {sessionToShow && (
-                                  <div className="ml-5 space-y-1">
-                                    <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
-                                      <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                      <span>{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                  </div>
-                                    <div className="text-xs text-gray-500 ml-5">
-                                      by {sessionToShow.assignedByName || 'System'}
-                                    </div>
-                                  </div>
-                                )}
-                                {isExpanded && (
-                                  <div className="ml-5 mt-2 space-y-3">
-                                    {user.adminInSessions
-                                      .filter(s => s.id !== sessionToShow?.id)
-                                      .map(session => (
-                                        <div key={session.id} className="space-y-1">
-                                          <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
-                                            <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                            <span>{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
-                                          </div>
-                                          <div className="text-xs text-gray-500 ml-5">
-                                            by {session.assignedByName || 'System'}
-                                          </div>
-                                        </div>
-                                      ))}
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-                      
-                      {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
-                        <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-4 border-t border-gray-100 mt-4' : ''}>
-                          <div className="space-y-3">
-                            {(() => {
-                              const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
-                              const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
-                              const hasMoreSessions = user.stakeholderInSessions.length > 1;
-                              const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
-                              
-                              return (
-                                <>
-                                  {sessionToShow && (
-                                    <div className="ml-5 space-y-1">
-                                      <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
-                                        <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                        <span>{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                    </div>
-                                      <div className="text-xs text-gray-500 ml-5">
-                                        by {sessionToShow.assignedByName || 'System'}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {isExpanded && (
-                                    <div className="ml-5 mt-2 space-y-3">
-                                      {user.stakeholderInSessions
-                                        .filter(s => s.id !== sessionToShow?.id)
-                                        .map(session => (
-                                          <div key={session.id} className="space-y-1">
-                                            <div className="flex items-center text-xs text-gray-700 whitespace-nowrap">
-                                              <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                              <span>{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
-                                            </div>
-                                            <div className="text-xs text-gray-500 ml-5">
-                                              by {session.assignedByName || 'System'}
-                                            </div>
-                                          </div>
-                                        ))}
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Desktop: Table View */}
-        <div className="hidden md:block relative z-10 bg-white rounded-lg shadow-md overflow-visible">
-            <table className="min-w-full divide-y divide-gray-200 rounded-t-lg">
+          {/* Table */}
+          <div>
+            <table className="min-w-full divide-y divide-gray-200 table-fixed">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    User
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Role
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Sessions
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
-                    Created
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '20%' }}>User</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '20%' }}>Role</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '35%' }}>Sessions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '15%' }}>Created</th>
+                  <th className="px-2 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '10%' }}>Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -3116,781 +1609,363 @@ export default function UsersManagementScreen() {
                     </td>
                   </tr>
                 ) : (
-                  filteredUsers.map((user) => (
-                    <tr 
-                      key={user.id} 
-                      className="hover:bg-gray-50 relative"
-                      onMouseEnter={() => setHoveredRow(user.id)}
-                      onMouseLeave={() => setHoveredRow(null)}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap align-top">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {user.name}
-                            {user.id === currentUser?.id && (
-                              <span className="ml-2 text-xs text-[#c59f2d] font-semibold">
-                                (You)
-                              </span>
-                            )}
-                            {getProtectedAccountLabel(user) && (
-                              <span className="ml-2 text-xs text-[#c59f2d] font-semibold">
-                                ({getProtectedAccountLabel(user)})
-                              </span>
-                            )}
-                            {isDuplicateAccount(user) && (
-                              <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded">
-                                Duplicate ({getDuplicateCount(user)})
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-500">{user.email}</div>
-                          {(() => {
-                            const userProducts = getUserProducts(user);
-                            if (userProducts.length > 0) {
-                              return (
-                                <div className="text-sm text-gray-600 mt-1">
-                                  <span className="font-medium">
-                                    {userProducts.length === 1 ? 'Product:' : 'Products:'}
-                                  </span>
-                                  <ul className="list-none mt-1 space-y-0.5">
-                                    {userProducts.map(p => {
-                                      const productColors = getProductColor(p.name, p.color_hex ?? null);
-                                      return (
-                                        <li key={p.id} className="text-gray-600 flex items-center gap-2">
-                                          <span
-                                            className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
-                                            style={{ backgroundColor: productColors.background }}
-                                          />
-                                          {p.name}
-                                        </li>
-                                      );
-                                    })}
-                                  </ul>
-                                </div>
-                              );
+                  filteredUsers.flatMap((user) => {
+                    const roles = getRolesForUser(user);
+                    
+                    return roles.map((role, roleIndex) => {
+                      const sessionsResult = renderSessionsColumn(user, role);
+                      const { isExpanded, content: sessionsContent } = sessionsResult;
+                      
+                      // Get sessions for date rendering
+                      const sessions = role.sessions || [];
+                      const sessionsByProduct = groupSessionsByProduct(sessions);
+                      const expandedSessionsList = isExpanded 
+                        ? Array.from(sessionsByProduct.values()).flatMap(productSessions => productSessions)
+                        : [];
+                      
+                      return (
+                        <tr 
+                          key={`${user.id}-${role.type}`}
+                          className={`${hoveredUserId === user.id && !openDropdown ? 'bg-gray-50' : ''} cursor-pointer`}
+                          onMouseEnter={() => {
+                            if (!openDropdown) {
+                              setHoveredUserId(user.id);
                             }
-                            return null;
-                          })()}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap align-top">
-                        {getRoleBadge(user)}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500 align-top relative overflow-visible">
-                        <div className="space-y-2">
-                          {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
-                            <span className="text-gray-400">None</span>
-                          )}
-                          
-                          {user.adminInSessions && user.adminInSessions.length > 0 && (
-                            <div>
-                              <div className="mb-2">
-                                {(() => {
-                                  const sessionCount = user.adminInSessions?.length || 0;
-                                  const hasMoreSessions = sessionCount > 1;
-                                  const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
-                                  const BadgeContent = () => (
-                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium group" style={{ borderColor: '#576C71', color: '#576C71' }}>
-                                      <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#576C71', color: '#576C71' }} />
-                                      <span>Session Admin in {sessionCount} session{sessionCount !== 1 ? 's' : ''}</span>
-                                      {hasMoreSessions && (
-                                        <span className="inline-flex items-baseline gap-0.5" style={{ color: '#576C71' }}>
-                                          {isExpanded ? (
-                                            <Minus 
-                                              className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
-                                              style={{ color: '#576C71' }}
-                                            />
-                                          ) : (
-                                            <Plus 
-                                              className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
-                                              style={{ color: '#576C71' }}
-                                            />
-                                          )}
-                                          <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
-                                        </span>
-                                      )}
-                              </div>
-                                  );
-                                  
-                                  return hasMoreSessions ? (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (isExpanded) {
-                                          setExpandedSessions(null);
-                                        } else {
-                                          setExpandedSessions({ userId: user.id, role: 'admin' });
-                                        }
-                                      }}
-                                      className="text-left"
-                                    >
-                                      <BadgeContent />
-                                    </button>
-                                  ) : (
-                                    <BadgeContent />
-                                  );
-                                })()}
-                                        </div>
-                              {(() => {
-                                const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
-                                // Always show at least one session - prefer active, otherwise first session
-                                const sessionToShow = mostRecentActive || user.adminInSessions[0];
-                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
-                                
-                                return (
-                                  <>
-                                    {sessionToShow && (
-                                      <div 
-                                        className="relative cursor-pointer"
-                                        style={{ marginLeft: '1.25rem', marginTop: '0.75rem' }}
-                                        onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
-                                        onMouseLeave={() => setHoveredSessionId(null)}
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          await setCurrentSession(sessionToShow);
-                                          navigate('/admin');
-                                        }}
-                                      >
-                                        {hoveredSessionId === `${user.id}-${sessionToShow.id}` && (
-                                          <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
-                                            style={{ 
-                                              left: '-0.5rem', 
-                                              right: '-13rem',
-                                              top: '-0.375rem',
-                                              bottom: '-0.375rem',
-                                              boxShadow: '0 0 0 1px rgb(191 219 254)',
-                                              outline: 'none'
-                                            }}
-                                          />
-                                        )}
-                                        <div className="text-left text-sm text-gray-700 hover:text-gray-900 block relative z-10"
-                                          style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
-                                        >
-                                          <div style={{ height: '20px', lineHeight: '20px' }}>{sessionToShow.title || 'Unnamed Session'}</div>
-                                          <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
-                                            {formatSessionDateRange(sessionToShow)}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {isExpanded && (
-                                      <div style={{ marginTop: '0.5rem' }}>
-                                        {user.adminInSessions
-                                          .filter(s => s.id !== sessionToShow?.id)
-                                          .map((session, index) => (
-                                            <div
-                                              key={session.id}
-                                              className="relative cursor-pointer"
-                                              style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem' }}
-                                              onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
-                                              onMouseLeave={() => setHoveredSessionId(null)}
-                                              onClick={async (e) => {
-                                                e.stopPropagation();
-                                                await setCurrentSession(session);
-                                                navigate('/admin');
-                                              }}
-                                            >
-                                              {hoveredSessionId === `${user.id}-${session.id}` && (
-                                                <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
-                                                  style={{ 
-                                                    left: '-0.5rem', 
-                                                    right: '-13rem',
-                                                    top: '-0.375rem',
-                                                    bottom: '-0.375rem',
-                                                    boxShadow: '0 0 0 1px rgb(191 219 254)',
-                                                    outline: 'none'
-                                                  }}
-                                                />
-                                              )}
-                                              <div className="block text-sm text-left text-gray-700 hover:text-gray-900 relative z-10"
-                                                style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
-                                              >
-                                                <div style={{ height: '20px', lineHeight: '20px' }}>{session.title || 'Unnamed Session'}</div>
-                                                <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
-                                                  {formatSessionDateRange(session)}
-                                                </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          )}
-                          
-                          {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
-                            <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-4 border-t border-gray-100 mt-4' : ''}>
+                          }}
+                          onMouseLeave={() => setHoveredUserId(null)}
+                          onClick={(e) => {
+                            // Don't toggle if clicking on the actions button or dropdown
+                            if ((e.target as Element).closest('.actions-dropdown-container')) {
+                              return;
+                            }
+                            // Toggle expansion for this role
+                            const key = `${user.id}-${role.type}`;
+                            setExpandedSessions(prev => {
+                              const next = new Set(prev);
+                              if (next.has(key)) {
+                                next.delete(key);
+                              } else {
+                                next.add(key);
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          {/* USER column - only show on first role row */}
+                          {roleIndex === 0 && (
+                            <td className="px-4 py-4 align-top" rowSpan={roles.length}>
                               <div>
-                                <div className="mb-2">
-                                  {(() => {
-                                    const sessionCount = user.stakeholderInSessions?.length || 0;
-                                    const hasMoreSessions = sessionCount > 1;
-                                    const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
-                                    const BadgeContent = () => (
-                                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium group" style={{ borderColor: '#8B5A4A', color: '#8B5A4A' }}>
-                                        <UserIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ fill: '#8B5A4A', color: '#8B5A4A' }} />
-                                        <span>Stakeholder in {sessionCount} session{sessionCount !== 1 ? 's' : ''}</span>
-                                        {hasMoreSessions && (
-                                          <span className="inline-flex items-baseline gap-0.5" style={{ color: '#8B5A4A' }}>
-                                            {isExpanded ? (
-                                              <Minus 
-                                                className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
-                                                style={{ color: '#8B5A4A' }}
-                                              />
-                                            ) : (
-                                              <Plus 
-                                                className="h-2.5 w-2.5 transition-all group-hover:brightness-150 mt-[3px]" 
-                                                style={{ color: '#8B5A4A' }}
-                                              />
-                                            )}
-                                            <span className="text-[10px] transition-all group-hover:brightness-150">{isExpanded ? 'Hide' : 'Show'}</span>
-                                          </span>
-                                        )}
+                                <div className="text-sm font-medium text-gray-900">
+                                  {user.name}
+                                  {user.email.toLowerCase() === sessionUser?.email.toLowerCase() && (
+                                    <span className="ml-2 text-xs text-[#c59f2d] font-semibold">(You)</span>
+                                  )}
+                                </div>
+                                <div className="text-sm text-gray-500">{user.email}</div>
                               </div>
-                                    );
-                                    
-                                    return hasMoreSessions ? (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (isExpanded) {
-                                            setExpandedSessions(null);
-                                          } else {
-                                            setExpandedSessions({ userId: user.id, role: 'stakeholder' });
-                                          }
-                                        }}
-                                        className="text-left"
-                                      >
-                                        <BadgeContent />
-                                      </button>
-                                    ) : (
-                                      <BadgeContent />
-                                    );
-                                  })()}
-                                        </div>
-                                {(() => {
-                                  const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
-                                  // Always show at least one session - prefer active, otherwise first session
-                                  const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
-                                  const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
-                                  
-                                  return (
-                                    <>
-                                      {sessionToShow && (
-                                        <div 
-                                          className="relative cursor-pointer"
-                                          style={{ marginLeft: '1.25rem', marginTop: '0.75rem' }}
-                                          onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
-                                          onMouseLeave={() => setHoveredSessionId(null)}
-                                          onClick={async (e) => {
-                                            e.stopPropagation();
-                                            await setCurrentSession(sessionToShow);
-                                            navigate('/admin');
-                                          }}
-                                        >
-                                          {hoveredSessionId === `${user.id}-${sessionToShow.id}` && (
-                                            <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
-                                              style={{ 
-                                                left: '-0.5rem', 
-                                                right: '-13rem',
-                                                top: '-0.25rem',
-                                                bottom: '-0.25rem',
-                                                boxShadow: '0 0 0 1px rgb(191 219 254)',
-                                                outline: 'none'
-                                              }}
-                                            />
-                                          )}
-                                          <div className="text-left text-sm text-gray-700 hover:text-gray-900 hover:underline block relative z-10"
-                                            style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
-                                          >
-                                            <div style={{ height: '20px', lineHeight: '20px' }}>{sessionToShow.title || 'Unnamed Session'}</div>
-                                            <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
-                                              {formatSessionDateRange(sessionToShow)}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )}
-                                      {isExpanded && (
-                                        <div style={{ marginTop: '0.5rem' }}>
-                                          {user.stakeholderInSessions
-                                            .filter(s => s.id !== sessionToShow?.id)
-                                            .map((session, index) => (
-                                              <div
-                                                key={session.id}
-                                                className="relative cursor-pointer"
-                                                style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem' }}
-                                                onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
-                                                onMouseLeave={() => setHoveredSessionId(null)}
-                                                onClick={async (e) => {
-                                                  e.stopPropagation();
-                                                  await setCurrentSession(session);
-                                                  navigate('/admin');
-                                                }}
-                                              >
-                                                {hoveredSessionId === `${user.id}-${session.id}` && (
-                                                  <div className="absolute bg-blue-50 pointer-events-none z-0 rounded" 
-                                                    style={{ 
-                                                      left: '-0.5rem', 
-                                                      right: '-13rem',
-                                                      top: '-0.25rem',
-                                                      bottom: '-0.25rem',
-                                                      boxShadow: '0 0 0 1px rgb(191 219 254)',
-                                                      outline: 'none'
-                                                    }}
-                                                  />
-                                                )}
-                                                <div className="block text-sm text-left text-gray-700 hover:text-gray-900 hover:underline relative z-10"
-                                                  style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}
-                                                >
-                                                  <div style={{ height: '20px', lineHeight: '20px' }}>{session.title || 'Unnamed Session'}</div>
-                                                  <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
-                                                    {formatSessionDateRange(session)}
-                                                  </div>
-                                    </div>
-                                  </div>
-                                ))}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                            </div>
+                            </td>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500 align-top w-48 relative overflow-visible">
-                        <div className="space-y-2">
-                          {user.roles.sessionAdminCount === 0 && user.roles.stakeholderSessionCount === 0 && (
-                            <div className="flex items-center text-gray-700 whitespace-nowrap">
-                              <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
-                              <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
-                              <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
-                            </div>
-                          )}
-                          
-                          {user.adminInSessions && user.adminInSessions.length > 0 && (
-                        <div>
-                              {/* User creation date - positioned to align with badge */}
-                              <div className="flex items-center text-gray-700 whitespace-nowrap" style={{ marginBottom: '0.5rem', height: '30px' }}>
-                                <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
-                                <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
-                                <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
-                          </div>
-                              {(() => {
-                                const mostRecentActive = getMostRecentActiveSession(user.adminInSessions);
-                                const sessionToShow = mostRecentActive || user.adminInSessions[0];
-                                const hasMoreSessions = user.adminInSessions.length > 1;
-                                const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'admin';
-                                
-                                return (
-                                  <>
-                                    {sessionToShow && (
-                                      <div 
-                                        className="relative cursor-pointer"
-                                        style={{ marginLeft: '1.25rem', marginTop: '0.5rem', marginBottom: '0.25rem' }}
-                                        onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
-                                        onMouseLeave={() => setHoveredSessionId(null)}
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          await setCurrentSession(sessionToShow);
-                                          navigate('/admin');
-                                        }}
-                                      >
-                                        <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
-                                          <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
-                                            <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                            <span className="text-xs text-gray-700 whitespace-nowrap">{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                          </div>
-                                          <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
-                                            by {sessionToShow.assignedByName || 'System'}
-                        </div>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {isExpanded && (
-                                      <div style={{ marginTop: '0.5rem' }}>
-                                        {user.adminInSessions
-                                          .filter(s => s.id !== sessionToShow?.id)
-                                          .map((session, index) => (
-                                            <div 
-                                              key={session.id} 
-                                              className="relative cursor-pointer"
-                                              style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem', marginBottom: '0.25rem' }}
-                                              onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
-                                              onMouseLeave={() => setHoveredSessionId(null)}
-                                              onClick={async (e) => {
-                                                e.stopPropagation();
-                                                await setCurrentSession(session);
-                                                navigate('/admin');
-                                              }}
-                                            >
-                                              <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
-                                                <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
-                                                  <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                                  <span className="text-xs text-gray-700 whitespace-nowrap">{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
-                                                </div>
-                                                <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
-                                                  by {session.assignedByName || 'System'}
-                                                </div>
-                                              </div>
-                                            </div>
-                                          ))}
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          )}
-                          
-                          {user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && (
-                            <div className={user.adminInSessions && user.adminInSessions.length > 0 ? 'pt-4 border-t border-gray-100 mt-4' : ''}>
-                              <div>
-                                {/* User creation date - only show if no admin sessions (to avoid duplication) */}
-                                {(!user.adminInSessions || user.adminInSessions.length === 0) && (
-                                  <div className="flex items-center text-gray-700 whitespace-nowrap" style={{ marginBottom: '0.5rem', height: '30px' }}>
-                                    <Calendar className="h-4 w-4 mr-1.5 text-gray-400 flex-shrink-0" />
-                                    <span>{user.created_at ? formatDate(user.created_at) : 'N/A'}</span>
-                                    <span className="text-gray-500 text-xs ml-2">by {((user as any).created_by_name) || 'System'}</span>
-                                  </div>
-                                )}
-                                {/* Invisible spacer to match Stakeholder badge height + mb-2 when admin sessions exist */}
-                                {user.adminInSessions && user.adminInSessions.length > 0 && (
-                                  <div style={{ height: '26px', marginBottom: '0.5rem', visibility: 'hidden' }}>
-                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium">
-                                      <UserIcon className="h-3.5 w-3.5" />
-                                      <span>Stakeholder</span>
-                                    </div>
-                                  </div>
-                                )}
-                                {(() => {
-                                  const mostRecentActive = getMostRecentActiveSession(user.stakeholderInSessions);
-                                  const sessionToShow = mostRecentActive || user.stakeholderInSessions[0];
-                                  const hasMoreSessions = user.stakeholderInSessions.length > 1;
-                                  const isExpanded = expandedSessions?.userId === user.id && expandedSessions?.role === 'stakeholder';
-                                  
-                                  return (
-                                    <>
-                                      {sessionToShow && (
-                                        <div 
-                                          className="relative cursor-pointer"
-                                          style={{ marginLeft: '1.25rem', marginTop: '0.5rem', marginBottom: '0.25rem' }}
-                                          onMouseEnter={() => setHoveredSessionId(`${user.id}-${sessionToShow.id}`)}
-                                          onMouseLeave={() => setHoveredSessionId(null)}
-                                          onClick={async (e) => {
-                                            e.stopPropagation();
-                                            await setCurrentSession(sessionToShow);
-                                            navigate('/admin');
-                                          }}
-                                        >
-                                        <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
-                                          <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
-                                            <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                            <span className="text-xs text-gray-700 whitespace-nowrap">{sessionToShow.assignedAt ? formatDate(sessionToShow.assignedAt) : 'N/A'}</span>
-                                          </div>
-                                          <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px', marginLeft: '18px' }}>
-                                            by {sessionToShow.assignedByName || 'System'}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {isExpanded && (
-                                      <div style={{ marginTop: '0.5rem' }}>
-                                        {user.stakeholderInSessions
-                                          .filter(s => s.id !== sessionToShow?.id)
-                                          .map((session, index) => (
-                                              <div 
-                                                key={session.id} 
-                                                className="relative cursor-pointer"
-                                                style={{ marginTop: index === 0 ? '0.75rem' : '0.75rem', marginLeft: '1.25rem', marginBottom: '0.25rem' }}
-                                                onMouseEnter={() => setHoveredSessionId(`${user.id}-${session.id}`)}
-                                                onMouseLeave={() => setHoveredSessionId(null)}
-                                                onClick={async (e) => {
-                                                  e.stopPropagation();
-                                                  await setCurrentSession(session);
-                                                  navigate('/admin');
-                                                }}
-                                              >
-                                                <div className="relative z-10" style={{ padding: 0, margin: 0, lineHeight: '1.25rem' }}>
-                                                  <div className="flex items-center" style={{ height: '20px', lineHeight: '20px' }}>
-                                                    <Calendar className="h-3 w-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                                                    <span className="text-xs text-gray-700 whitespace-nowrap">{session.assignedAt ? formatDate(session.assignedAt) : 'N/A'}</span>
-                                                  </div>
-                                                  <div className="text-xs text-gray-500" style={{ height: '16px', lineHeight: '16px', marginTop: '2px' }}>
-                                                    by {session.assignedByName || 'System'}
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            ))}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
-                        <div className="flex items-center justify-end gap-2">
-                          <div 
-                            className={`relative inline-block transition-all md:transition-opacity ${
-                              hoveredRow === user.id 
-                                ? user.id === currentUser?.id ? 'opacity-50 visible' : 'opacity-100 visible'
-                                  : 'md:opacity-0 md:invisible opacity-100 visible'
-                            }`}
-                            ref={(el) => { dropdownRefs.current[user.id] = el; }}
-                          >
-                            <button
-                              onClick={() => setOpenDropdown(openDropdown === user.id ? null : user.id)}
-                              className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-                              disabled={user.id === currentUser?.id}
-                              title={user.id === currentUser?.id ? 'Cannot modify your own permissions' : 'Change user role'}
-                            >
-                              <MoreVertical className="h-5 w-5 text-gray-600" />
-                            </button>
-                            
-                            {openDropdown === user.id && user.id !== currentUser?.id && (
-                              <div className="fixed mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]" 
-                                style={{
-                                  top: dropdownRefs.current[user.id]?.getBoundingClientRect().bottom ?? 0,
-                                  right: window.innerWidth - (dropdownRefs.current[user.id]?.getBoundingClientRect().right ?? 0)
-                                }}
-                              >
-                                <div className="py-1">
-                                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-200">
-                                    Change User Role
-                                  </div>
-                                  
-                                  {viewMode === 'system-admin' && (
-                                    <>
-                                      {user.roles.isSystemAdmin ? (
-                                        <button
-                                          onClick={() => handleToggleSystemAdmin(user.id, true)}
-                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-red-50 text-red-700"
-                                        >
-                                          <Crown className="h-4 w-4 mr-3" />
-                                          <div>
-                                            <div className="font-medium">Remove System Admin</div>
-                                            <div className="text-xs text-gray-500">Revoke global admin access</div>
-                                          </div>
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={() => handleToggleSystemAdmin(user.id, false)}
-                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-[#C89212]/10 text-[#C89212]"
-                                        >
-                                          <Crown className="h-4 w-4 mr-3" />
-                                          <div>
-                                            <div className="font-medium">Make System Admin</div>
-                                            <div className="text-xs text-gray-500">Grant global admin access</div>
-                                          </div>
-                                        </button>
-                                      )}
 
-                                      {canAddToMoreSessions(user, 'session-admin') && (
+                          {/* ROLE column */}
+                          <td className="px-4 py-4 align-top">
+                            {role.type === 'system-admin' ? (
+                              role.badge
+                            ) : (
+                              <div>
+                                {/* Role badge */}
+                                <div className="mb-2">
+                                  {role.badge}
+                                </div>
+                                {/* Product list aligned with sessions */}
+                                {isExpanded && sessions.length > 0 ? (
+                                  <div>
+                                    {/* Spacing to match first session marginTop */}
+                                    <div style={{ height: '8px' }} />
+                                    {/* Product names - one per product group */}
+                                    <div>
+                                      {Array.from(sessionsByProduct.entries()).flatMap(([productId, productSessions], productIndex) => {
+                                        const product = allProducts.find(p => p.id === productId);
+                                        const productColor = product ? getProductColor(product.name, product.color_hex ?? null) : { background: '#666666', text: '#FFFFFF' };
+                                        const elements = [];
+                                        
+                                        // Add divider before each product group except the first
+                                        if (productIndex > 0) {
+                                          elements.push(
+                                            <div key={`divider-${productId}`} className="border-t border-gray-200" style={{ marginTop: '8px', marginBottom: '8px', position: 'relative', zIndex: 2 }} />
+                                          );
+                                        }
+                                        
+                                        // Add product name - height matches full session (title + date)
+                                        elements.push(
+                                          <div
+                                            key={productId}
+                                            className="flex items-start gap-1.5"
+                                            style={{ 
+                                              marginTop: '0',
+                                              height: '38px',
+                                              lineHeight: '20px',
+                                              marginBottom: '18px',
+                                              position: 'relative',
+                                              zIndex: 2
+                                            }}>
+                                            <div 
+                                              className="w-3 h-3 rounded-sm flex-shrink-0"
+                                              style={{ backgroundColor: productColor.background }}
+                                            />
+                                            <span className="text-xs font-medium text-gray-700">
+                                              {product?.name || 'Unknown Product'}
+                                            </span>
+                                          </div>
+                                        );
+                                        
+                                        // Add empty spacers for remaining sessions in this product group
+                                        // Each spacer must match full session height: 20px (title) + 2px + 16px (date) = 38px content + 18px marginBottom
+                                        for (let i = 1; i < productSessions.length; i++) {
+                                          elements.push(
+                                            <div
+                                              key={`spacer-${productId}-${i}`}
+                                              style={{
+                                                height: '38px',
+                                                marginTop: '12px',
+                                                marginBottom: '18px'
+                                              }}
+                                            />
+                                          );
+                                        }
+                                        
+                                        return elements;
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* SESSIONS column */}
+                          <td className="px-4 py-4 text-sm text-gray-500 align-top relative overflow-visible min-w-[240px]">
+                            {sessionsContent}
+                          </td>
+
+                          {/* CREATED column - always show role date, plus session dates when expanded */}
+                          <td className="px-4 py-4 text-sm text-gray-500 align-top">
+                            <div>
+                              {/* Role created date - always visible */}
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                                <span className="font-medium">{role.createdDate ? formatDate(role.createdDate) : 'N/A'}</span>
+                              </div>
+                              
+                              {/* Session dates when expanded */}
+                              {isExpanded && expandedSessionsList.length > 0 && (
+                                <div>
+                                  {/* Spacing to match first session marginTop */}
+                                  <div style={{ height: '8px' }} />
+                                  {/* Session dates aligned with session list */}
+                                  <div>
+                                    {Array.from(sessionsByProduct.entries()).flatMap(([productId, productSessions], productIndex) => {
+                                      const elements = [];
+                                      
+                                      // Add divider before each product group except the first
+                                      if (productIndex > 0) {
+                                        elements.push(
+                                          <div key={`divider-${productId}`} className="border-t border-gray-200" style={{ marginTop: '8px', marginBottom: '8px', position: 'relative', zIndex: 2 }} />
+                                        );
+                                      }
+                                      
+                                      // Add session dates - height matches full session content
+                                      productSessions.forEach((session, sessionIndex) => {
+                                        elements.push(
+                                          <div
+                                            key={session.id}
+                                            className="flex items-start gap-1.5"
+                                            style={{ 
+                                              marginTop: sessionIndex === 0 ? '0' : '12px',
+                                              height: '38px',
+                                              lineHeight: '20px',
+                                              marginBottom: '18px',
+                                              position: 'relative',
+                                              zIndex: 2
+                                            }}
+                                          >
+                                            <Calendar className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                                            <span className="text-xs text-gray-500">
+                                              {session.assignedAt ? formatDate(session.assignedAt) : (session.created_at ? formatDate(session.created_at) : 'N/A')}
+                                            </span>
+                                          </div>
+                                        );
+                                      });
+                                      
+                                      return elements;
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ACTIONS column - only show on first role row */}
+                          {roleIndex === 0 && (
+                            <td className="px-2 py-4 text-right text-sm font-medium align-top" rowSpan={roles.length} style={{ position: 'relative', zIndex: 3 }}>
+                              <div className="flex items-center justify-end actions-dropdown-container">
+                                <div className="relative inline-block">
+                                  {((hoveredUserId === user.id && !openDropdown) || openDropdown === user.id) && (
+                                    <button
+                                      onClick={() => setOpenDropdown(openDropdown === user.id ? null : user.id)}
+                                      className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+                                      title="Change user role"
+                                    >
+                                      <MoreVertical className="h-5 w-5 text-gray-600" />
+                                    </button>
+                                  )}
+                                  
+                                  {/* Dropdown menu */}
+                                  {openDropdown === user.id && (
+                                    <div 
+                                      className="absolute right-0 w-64 bg-white border border-gray-200 rounded-lg shadow-lg"
+                                      style={{ 
+                                        zIndex: 1000,
+                                        top: 'auto',
+                                        bottom: 'auto',
+                                        marginTop: '0.25rem',
+                                        maxHeight: 'calc(100vh - 100px)',
+                                        overflowY: 'auto'
+                                      }}
+                                    >
+                                      <div>
+                                        <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-200">
+                                          Manage User Roles
+                                        </div>
+
+                                        {/* Add Role */}
                                         <button
                                           onClick={() => openRoleModal(user, 'session-admin')}
-                                          className="w-full px-4 py-2 text-left flex items-center hover:bg-[#576C71]/10 text-[#576C71] border-t border-gray-200"
+                                          className="w-full px-4 py-3 text-left flex items-center hover:bg-green-50 text-green-700 transition-colors cursor-pointer"
                                         >
-                                          <Shield className="h-4 w-4 mr-3" />
+                                          <Plus className="h-5 w-5 mr-3 flex-shrink-0" />
                                           <div>
-                                            <div className="font-medium">Make Session Admin</div>
-                                            <div className="text-xs text-gray-500">Add to a session as admin</div>
+                                            <div className="font-medium text-base">Add Role</div>
+                                            <div className="text-xs text-gray-500">Add Role Permissions</div>
                                           </div>
                                         </button>
-                                      )}
-                                    </>
-                                  )}
 
-                                  {canAddToMoreSessions(user, 'stakeholder') && (
-                                    <button
-                                      onClick={() => openRoleModal(user, 'stakeholder')}
-                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200"
-                                    >
-                                      <UserIcon className="h-4 w-4 mr-3" />
-                                      <div>
-                                        <div className="font-medium">Make Stakeholder</div>
-                                        <div className="text-xs text-gray-500">Add to a session as stakeholder</div>
+                                        {/* Remove Role - only show if user has any roles */}
+                                        {(user.roles.isSystemAdmin || user.roles.sessionAdminCount > 0 || user.roles.stakeholderSessionCount > 0) && (
+                                          <button
+                                            onClick={() => openRoleModal(user, 'remove-stakeholder')}
+                                            className="w-full px-4 py-3 text-left flex items-center hover:bg-red-50 text-red-700 border-t border-gray-200 transition-colors cursor-pointer"
+                                          >
+                                            <Minus className="h-5 w-5 mr-3 flex-shrink-0" />
+                                            <div>
+                                              <div className="font-medium text-base">Remove Role</div>
+                                              <div className="text-xs text-gray-500">
+                                                Remove Role Permissions
+                                              </div>
+                                            </div>
+                                          </button>
+                                        )}
+
+                                        {/* User Functions header - only show if there are buttons to display */}
+                                        {viewMode === 'system-admin' && (
+                                          <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
+                                            User Functions
+                                          </div>
+                                        )}
+
+                                        {/* Edit User - only for system admins */}
+                                        {viewMode === 'system-admin' && (
+                                          <button
+                                            onClick={() => {
+                                              setUserToEdit(user);
+                                              setEditingUserName(user.name);
+                                              setEditingUserEmail(user.email);
+                                              setShowEditUserModal(true);
+                                              setOpenDropdown(null);
+                                            }}
+                                            className="w-full px-4 py-3 text-left flex items-center hover:bg-[#1E5461]/10 text-[#1E5461] border-t border-gray-200 transition-colors cursor-pointer"
+                                          >
+                                            <Edit className="h-5 w-5 mr-3 flex-shrink-0" />
+                                            <div>
+                                              <div className="font-medium text-base">Edit User Profile</div>
+                                              <div className="text-xs text-gray-500">Update name and email</div>
+                                            </div>
+                                          </button>
+                                        )}
+
+                                        {/* Delete User - Only show for System Admins */}
+                                        {viewMode === 'system-admin' && !protectedEmails.has(user.email) && (
+                                          <button
+                                            onClick={() => {
+                                              setOpenDropdown(null);
+                                              handleDeleteUser(user.id, user.name);
+                                            }}
+                                            className={`w-full px-4 py-3 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200 transition-colors ${
+                                              protectedUserIds.has(user.id)
+                                                ? 'opacity-50 cursor-not-allowed' 
+                                                : 'cursor-pointer'
+                                            }`}
+                                            disabled={protectedUserIds.has(user.id)}
+                                          >
+                                            <Trash2 className="h-5 w-5 mr-3 flex-shrink-0" />
+                                            <div>
+                                              <div className="font-medium text-base">Delete User</div>
+                                              <div className="text-xs text-gray-500">
+                                                {protectedUserIds.has(user.id)
+                                                  ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
+                                                  : 'Permanently delete this user'}
+                                              </div>
+                                            </div>
+                                          </button>
+                                        )}
                                       </div>
-                                    </button>
-                                  )}
-
-                                  {/* Remove Stakeholder option - For Session Admins only */}
-                                  {viewMode === 'session-admin' && user.stakeholderInSessions && user.stakeholderInSessions.length > 0 && 
-                                   user.stakeholderInSessions.some(session => userAdminSessions.includes(session.id)) && (
-                                    <button
-                                      onClick={() => openRoleModal(user, 'remove-stakeholder')}
-                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-red-50 text-red-700 border-t border-gray-200"
-                                    >
-                                      <UserX className="h-4 w-4 mr-3" />
-                                      <div>
-                                        <div className="font-medium">Remove Stakeholder</div>
-                                        <div className="text-xs text-gray-500">Remove from a session you manage</div>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {(user.roles.isSystemAdmin || user.roles.sessionAdminCount > 0 || user.roles.stakeholderSessionCount > 0) && (
-                                    <button
-                                      onClick={() => handleRemoveAllRoles(user.id, user.name)}
-                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-gray-50 text-gray-700 border-t border-gray-200"
-                                    >
-                                      <UserX className="h-4 w-4 mr-3" />
-                                      <div>
-                                        <div className="font-medium">Remove All Roles</div>
-                                        <div className="text-xs text-gray-500">Remove from all sessions</div>
-                                      </div>
-                                    </button>
-                                  )}
-
-                                  {/* User Functions header */}
-                                  {((viewMode === 'system-admin') || 
-                                    ((viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
-                                      user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
-                                     !protectedEmails.has(user.email)) && (
-                                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-t border-gray-200">
-                                      User Functions
-                                </div>
-                                  )}
-
-                                  {/* Edit User - only for system admins - moved to bottom */}
-                                  {viewMode === 'system-admin' && (
-                                    <button
-                                      onClick={() => {
-                                        setUserToEdit(user);
-                                        setEditingUserName(user.name);
-                                        setEditingUserEmail(user.email);
-                                        setShowEditUserModal(true);
-                                        setOpenDropdown(null);
-                                      }}
-                                      className="w-full px-4 py-2 text-left flex items-center hover:bg-[#1E5461]/10 text-[#1E5461] border-t border-gray-200"
-                                    >
-                                      <Edit className="h-4 w-4 mr-3" />
-                                      <div>
-                                        <div className="font-medium">Edit User Profile</div>
-                                        <div className="text-xs text-gray-500">Update name and email</div>
-                              </div>
-                                    </button>
-                                  )}
-
-                                  {/* Delete User - moved to bottom */}
-                                  {(viewMode === 'system-admin' || 
-                                    (viewMode === 'session-admin' && user.roles.stakeholderSessionCount > 0 && 
-                                     user.stakeholderInSessions?.some(session => allSessions.some(s => s.id === session.id)))) && 
-                                    !protectedEmails.has(user.email) && (
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdown(null);
-                                        handleDeleteUser(user.id, user.name);
-                                      }}
-                                      className={`w-full px-4 py-2 text-left flex items-center hover:bg-[#8B5A4A]/10 text-[#8B5A4A] border-t border-gray-200 ${
-                                        user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))
-                                          ? 'opacity-50 cursor-not-allowed' 
-                                          : ''
-                                      }`}
-                                      disabled={user.id === currentUser?.id || (viewMode === 'system-admin' && protectedUserIds.has(user.id))}
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-3" />
-                                      <div>
-                                        <div className="font-medium">
-                                          {viewMode === 'session-admin'
-                                            ? 'Remove Stakeholder'
-                                            : 'Delete User'}
-                                        </div>
-                                        <div className="text-xs text-gray-500">
-                                          {viewMode === 'session-admin'
-                                            ? 'Remove from all your sessions'
-                                            : user.id === currentUser?.id 
-                                            ? 'Cannot delete your own account'
-                                            : protectedUserIds.has(user.id)
-                                            ? `Cannot delete protected account${getProtectedAccountLabel(user) ? ` (${getProtectedAccountLabel(user)})` : ''}`
-                                            : 'Permanently delete this user'}
-                                        </div>
-                                      </div>
-                                    </button>
+                                    </div>
                                   )}
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    });
+                  })
                 )}
               </tbody>
             </table>
+          </div>
 
           {/* Summary Stats */}
           <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
             <div className="flex flex-wrap gap-4 text-sm">
               <div className="flex items-center">
                 <Users className="h-4 w-4 mr-2 text-gray-500" />
-                <span className="text-gray-600">Total Users: <strong>{users.length}</strong></span>
+                <span className="text-gray-600">Total Users: <strong>{filteredUsers.length}</strong></span>
               </div>
-              <div className="flex items-center">
-                <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
-                <span className="text-gray-600">System Admins: <strong>{users.filter(u => u.roles.isSystemAdmin).length}</strong></span>
-              </div>
+              {/* Only show System Admin count in System Admin view */}
+              {viewMode === 'system-admin' && (
+                <div className="flex items-center">
+                  <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
+                  <span className="text-gray-600">System Admins: <strong>{filteredUsers.filter(u => u.roles.isSystemAdmin).length}</strong></span>
+                </div>
+              )}
               <div className="flex items-center">
                 <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
-                <span className="text-gray-600">Session Admins: <strong>{users.filter(u => u.roles.sessionAdminCount > 0).length}</strong></span>
+                <span className="text-gray-600">Product Owners: <strong>{filteredUsers.filter(u => u.roles.sessionAdminCount > 0).length}</strong></span>
               </div>
               <div className="flex items-center">
                 <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
-                <span className="text-gray-600">Stakeholders: <strong>{users.filter(u => u.roles.stakeholderSessionCount > 0).length}</strong></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile Summary Stats */}
-        <div className="md:hidden mt-4 bg-white rounded-lg shadow-md p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex items-center">
-              <Users className="h-5 w-5 mr-2 text-gray-500 flex-shrink-0" />
-              <div>
-                <div className="text-xs text-gray-500">Total</div>
-                <div className="text-lg font-bold text-gray-900">{users.length}</div>
-              </div>
-            </div>
-            <div className="flex items-center">
-              <Crown className="h-5 w-5 mr-2 text-[#C89212] flex-shrink-0" />
-              <div>
-                <div className="text-xs text-gray-500">Sys Admins</div>
-                <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.isSystemAdmin).length}</div>
-              </div>
-            </div>
-            <div className="flex items-center">
-              <Shield className="h-5 w-5 mr-2 text-[#576C71] flex-shrink-0" />
-              <div>
-                <div className="text-xs text-gray-500">Session Admins</div>
-                <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.sessionAdminCount > 0).length}</div>
-              </div>
-            </div>
-            <div className="flex items-center">
-              <UserIcon className="h-5 w-5 mr-2 text-[#8B5A4A] flex-shrink-0" />
-              <div>
-                <div className="text-xs text-gray-500">Stakeholders</div>
-                <div className="text-lg font-bold text-gray-900">{users.filter(u => u.roles.stakeholderSessionCount > 0).length}</div>
+                <span className="text-gray-600">Stakeholders: <strong>{filteredUsers.filter(u => u.roles.stakeholderSessionCount > 0).length}</strong></span>
               </div>
             </div>
           </div>
         </div>
 
         {/* View Toggle - Session Admin vs System Admin */}
-        {/* Only show for System Admins - Session Admins don't need this toggle on admin-only pages */}
         {isSystemAdmin && (
           <div className="mt-8 flex justify-center">
             <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
               <button
                 onClick={() => {
-                  if (isSessionAdmin || isSystemAdmin) {
+                  if (isSystemAdmin) {
                     setViewMode('session-admin');
                   }
                 }}
@@ -3899,10 +1974,10 @@ export default function UsersManagementScreen() {
                     ? 'bg-white text-[#2d4660] shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
-                title="Session Admin View"
+                title="Product Owner View"
               >
                 <Shield className="h-4 w-4 inline mr-2" />
-                Session Admin
+                Product Owner
               </button>
               <button
                 onClick={() => {
@@ -3926,7 +2001,6 @@ export default function UsersManagementScreen() {
         )}
       </div>
 
-      {/* Footer */}
       <footer className="mt-12 bg-gray-50 border-t border-gray-200">
         <div className="container mx-auto px-4 py-6 max-w-6xl">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-gray-600">
@@ -3976,99 +2050,780 @@ export default function UsersManagementScreen() {
       </footer>
 
       {/* Role Assignment Modal */}
-      {showRoleModal && selectedUserForRole && roleModalType && (
+      {showRoleModal && selectedUserForRole && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto"
-          onClick={closeRoleModal}
+          onClick={() => setShowRoleModal(false)}
         >
           <div 
-            className="bg-white rounded-lg shadow-xl max-w-xl w-full my-8"
+            className="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8"
             onClick={(e) => e.stopPropagation()}
+            style={{ maxHeight: 'calc(100vh - 4rem)' }}
           >
-            <div className="p-6 overflow-visible">
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1">
-              <h2 className="text-xl font-bold text-gray-900 mb-2">
-                {roleModalType === 'session-admin' 
-                  ? 'Add Session Admin' 
-                  : roleModalType === 'remove-stakeholder'
-                  ? 'Remove Stakeholder'
-                  : 'Add Stakeholder'}
-              </h2>
+            <div className="p-6">
+              {/* Header */}
+              <div className="flex items-start mb-6">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#8B5A4A]/10 flex items-center justify-center">
+                  {roleModalType === 'session-admin' ? (
+                    <Shield className="h-6 w-6 text-[#576C71]" />
+                  ) : (
+                    <UserIcon className="h-6 w-6 text-[#8B5A4A]" />
+                  )}
+                </div>
+                <div className="ml-4 flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">
+                    {roleModalType === 'remove-stakeholder' ? 'Remove Role' : 'Add Role'}
+                  </h2>
                   <p className="text-sm text-gray-600">
-                {roleModalType === 'remove-stakeholder' ? (
-                      <>Select sessions to remove <strong>{selectedUserForRole.name}</strong> as a stakeholder.</>
-                ) : (
-                      <>Select sessions to add <strong>{selectedUserForRole.name}</strong> as {roleModalType === 'session-admin' ? 'an admin' : 'a stakeholder'}.</>
-                )}
-              </p>
-              </div>
+                    {roleModalType === 'remove-stakeholder' ? 'Remove' : 'Add'} {selectedUserForRole.name} ({selectedUserForRole.email}) {roleModalType === 'remove-stakeholder' ? 'from' : 'to'} sessions
+                  </p>
+                </div>
                 <button
-                  onClick={closeRoleModal}
-                  className="ml-4 p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
+                  onClick={() => setShowRoleModal(false)}
+                  className="flex-shrink-0 ml-4 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                   aria-label="Close modal"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="mb-6">
-                <ProductSessionSelector
-                  products={products}
-                  sessions={getAvailableSessions(roleModalType)}
-                  selectedProductId={roleModalProductId}
-                  onProductChange={(productId) => {
-                    setRoleModalProductId(productId);
-                    setRoleModalSelectedSessionIds([]);
-                    setRoleModalUseAllSessions(true);
-                  }}
-                  useAllSessions={roleModalUseAllSessions}
-                  onToggleAllSessions={(useAll) => {
-                    setRoleModalUseAllSessions(useAll);
-                    if (useAll) {
-                      setRoleModalSelectedSessionIds([]);
-                    }
-                  }}
-                  selectedSessionIds={roleModalSelectedSessionIds}
-                  onSessionToggle={(sessionId) => {
-                    if (roleModalSelectedSessionIds.includes(sessionId)) {
-                      setRoleModalSelectedSessionIds(roleModalSelectedSessionIds.filter(id => id !== sessionId));
-                    } else {
-                      setRoleModalSelectedSessionIds([...roleModalSelectedSessionIds, sessionId]);
-                    }
-                  }}
-                  getSessionStatus={getSessionStatus}
-                  formatSessionDateRange={formatSessionDateRange}
-                  filterSessions={filterSessionsForRoleModal}
-                />
+              {/* Form */}
+              <div className="space-y-4">
+                {/* Role Selection for remove mode */}
+                {roleModalType === 'remove-stakeholder' && (
+                  <div className="space-y-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select Role to Remove <span className="text-red-500">*</span>
+                    </label>
+                    
+                    {/* System Admin Role - Only show if user is System Admin */}
+                    {selectedUserForRole.roles.isSystemAdmin && (
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex items-center gap-3 cursor-pointer flex-shrink-0"
+                          onClick={() => {
+                            const newValue = selectedRoleToRemove === 'system-admin' ? null : 'system-admin';
+                            setSelectedRoleToRemove(newValue);
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                              <Crown
+                                className="h-4 w-4 text-[#D4AF37] transition-transform"
+                                style={{
+                                  transform: selectedRoleToRemove === 'system-admin' ? 'scale(2)' : 'scale(1)',
+                                  transformOrigin: 'center'
+                                }}
+                              />
+                            </span>
+                            <span className="text-sm font-medium text-gray-700">System Admin</span>
+                          </div>
+                          <span
+                            className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                            style={{
+                              borderColor: '#D4AF37',
+                              backgroundColor: selectedRoleToRemove === 'system-admin' ? '#D4AF37' : '#ffffff'
+                            }}
+                          >
+                            {selectedRoleToRemove === 'system-admin' && (
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="w-4 h-4"
+                                stroke="#ffffff"
+                                strokeWidth="3"
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="4 12 10 18 20 6" />
+                              </svg>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Product Owner Role */}
+                    {selectedUserForRole.roles.sessionAdminCount > 0 && (
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex items-start gap-3">
+                          <div 
+                            className="flex items-center gap-3 cursor-pointer flex-shrink-0"
+                            onClick={() => {
+                              const newValue = selectedRoleToRemove === 'product-owner' ? null : 'product-owner';
+                              setSelectedRoleToRemove(newValue);
+                              setRoleModalProductId('');
+                            }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                                <Shield
+                                  className="h-4 w-4 text-[#576C71] transition-transform"
+                                  style={{
+                                    transform: selectedRoleToRemove === 'product-owner' ? 'scale(2)' : 'scale(1)',
+                                    transformOrigin: 'center'
+                                  }}
+                                />
+                              </span>
+                              <span className="text-sm font-medium text-gray-700">Product Owner</span>
+                            </div>
+                            <span
+                              className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                              style={{
+                                borderColor: '#576C71',
+                                backgroundColor: selectedRoleToRemove === 'product-owner' ? '#576C71' : '#ffffff'
+                              }}
+                            >
+                              {selectedRoleToRemove === 'product-owner' && (
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="w-4 h-4"
+                                  stroke="#ffffff"
+                                  strokeWidth="3"
+                                  fill="none"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="4 12 10 18 20 6" />
+                                </svg>
+                              )}
+                            </span>
+                          </div>
+                          
+                          {selectedRoleToRemove === 'product-owner' && (() => {
+                            const availableProducts = getRoleModalProducts();
+                            if (availableProducts.length === 1) {
+                              const product = availableProducts[0];
+                              const productColor = getProductColor(product.name, product.color_hex ?? null);
+                              // Auto-select the only product
+                              if (roleModalProductId !== product.id) {
+                                setRoleModalProductId(product.id);
+                              }
+                              return (
+                                <div className="flex-1 pt-0.5">
+                                  <div className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg bg-gray-50" style={{ marginTop: '-11px' }}>
+                                    <div 
+                                      className="w-6 h-6 rounded-md flex-shrink-0"
+                                      style={{ backgroundColor: productColor.background }}
+                                    />
+                                    <span className="text-sm text-gray-700">{product.name}</span>
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <div className="flex-1 pt-0.5" ref={roleModalProductDropdownRef}>
+                                  <div className="relative" style={{ marginTop: '-11px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowRoleModalProductDropdown(!showRoleModalProductDropdown)}
+                                      className="w-full px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent bg-white text-left"
+                                    >
+                                      {roleModalProductId 
+                                        ? availableProducts.find(p => p.id === roleModalProductId)?.name || 'Select a product...'
+                                        : 'Select a product...'}
+                                    </button>
+                                    
+                                    {/* Product Color Icon */}
+                                    <div 
+                                      className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                                      style={{ 
+                                        backgroundColor: (() => {
+                                          const prod = availableProducts.find(p => p.id === roleModalProductId);
+                                          return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                                        })()
+                                      }}
+                                    />
+                                    
+                                    {/* Dropdown Arrow */}
+                                    <svg 
+                                      className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                                      fill="none" 
+                                      viewBox="0 0 20 20"
+                                    >
+                                      <path 
+                                        stroke="currentColor" 
+                                        strokeLinecap="round" 
+                                        strokeLinejoin="round" 
+                                        strokeWidth="1.5" 
+                                        d="M6 8l4 4 4-4"
+                                      />
+                                    </svg>
+                                    
+                                    {/* Custom Dropdown */}
+                                    {showRoleModalProductDropdown && (
+                                      <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setRoleModalProductId('');
+                                            setShowRoleModalProductDropdown(false);
+                                          }}
+                                          className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+                                        >
+                                          Select a product...
+                                        </button>
+                                        {availableProducts.map(product => {
+                                          const productColor = getProductColor(product.name, product.color_hex ?? null);
+                                          return (
+                                            <button
+                                              key={product.id}
+                                              type="button"
+                                              onClick={() => {
+                                                setRoleModalProductId(product.id);
+                                                setShowRoleModalProductDropdown(false);
+                                              }}
+                                              className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative"
+                                            >
+                                              <div 
+                                                className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                                                style={{ backgroundColor: productColor.background }}
+                                              />
+                                              {product.name}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }
+                          })()}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stakeholder Role */}
+                    {selectedUserForRole.roles.stakeholderSessionCount > 0 && (
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex items-start gap-3">
+                          <div 
+                            className="flex items-center gap-3 cursor-pointer flex-shrink-0"
+                            onClick={() => {
+                              const newValue = selectedRoleToRemove === 'stakeholder' ? null : 'stakeholder';
+                              setSelectedRoleToRemove(newValue);
+                              setRoleModalProductId('');
+                            }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                                <UserIcon
+                                  className="h-4 w-4 text-[#8B5A4A] transition-transform"
+                                  style={{
+                                    transform: selectedRoleToRemove === 'stakeholder' ? 'scale(2)' : 'scale(1)',
+                                    transformOrigin: 'center'
+                                  }}
+                                />
+                              </span>
+                              <span className="text-sm font-medium text-gray-700">Stakeholder</span>
+                            </div>
+                            <span
+                              className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                              style={{
+                                borderColor: '#8B5A4A',
+                                backgroundColor: selectedRoleToRemove === 'stakeholder' ? '#8B5A4A' : '#ffffff'
+                              }}
+                            >
+                              {selectedRoleToRemove === 'stakeholder' && (
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="w-4 h-4"
+                                  stroke="#ffffff"
+                                  strokeWidth="3"
+                                  fill="none"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="4 12 10 18 20 6" />
+                                </svg>
+                              )}
+                            </span>
+                          </div>
+                          
+                          {selectedRoleToRemove === 'stakeholder' && (() => {
+                            const availableProducts = getRoleModalProducts();
+                            if (availableProducts.length === 1) {
+                              const product = availableProducts[0];
+                              const productColor = getProductColor(product.name, product.color_hex ?? null);
+                              // Auto-select the only product
+                              if (roleModalProductId !== product.id) {
+                                setRoleModalProductId(product.id);
+                              }
+                              return (
+                                <div className="flex-1 pt-0.5">
+                                  <div className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg bg-gray-50" style={{ marginTop: '-11px' }}>
+                                    <div 
+                                      className="w-6 h-6 rounded-md flex-shrink-0"
+                                      style={{ backgroundColor: productColor.background }}
+                                    />
+                                    <span className="text-sm text-gray-700">{product.name}</span>
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <div className="flex-1 pt-0.5" ref={roleModalProductDropdownRef}>
+                                  <div className="relative" style={{ marginTop: '-11px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowRoleModalProductDropdown(!showRoleModalProductDropdown)}
+                                      className="w-full px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent bg-white text-left"
+                                    >
+                                      {roleModalProductId 
+                                        ? availableProducts.find(p => p.id === roleModalProductId)?.name || 'Select a product...'
+                                        : 'Select a product...'}
+                                    </button>
+                                    
+                                    {/* Product Color Icon */}
+                                    <div 
+                                      className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                                      style={{ 
+                                        backgroundColor: (() => {
+                                          const prod = availableProducts.find(p => p.id === roleModalProductId);
+                                          return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                                        })()
+                                      }}
+                                    />
+                                    
+                                    {/* Dropdown Arrow */}
+                                    <svg 
+                                      className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                                      fill="none" 
+                                      viewBox="0 0 20 20"
+                                    >
+                                      <path 
+                                        stroke="currentColor" 
+                                        strokeLinecap="round" 
+                                        strokeLinejoin="round" 
+                                        strokeWidth="1.5" 
+                                        d="M6 8l4 4 4-4"
+                                      />
+                                    </svg>
+                                    
+                                    {/* Custom Dropdown */}
+                                    {showRoleModalProductDropdown && (
+                                      <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setRoleModalProductId('');
+                                            setShowRoleModalProductDropdown(false);
+                                          }}
+                                          className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+                                        >
+                                          Select a product...
+                                        </button>
+                                        {availableProducts.map(product => {
+                                          const productColor = getProductColor(product.name, product.color_hex ?? null);
+                                          return (
+                                            <button
+                                              key={product.id}
+                                              type="button"
+                                              onClick={() => {
+                                                setRoleModalProductId(product.id);
+                                                setShowRoleModalProductDropdown(false);
+                                              }}
+                                              className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative"
+                                            >
+                                              <div 
+                                                className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                                                style={{ backgroundColor: productColor.background }}
+                                              />
+                                              {product.name}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Role Selection for Add operations */}
+                {(roleModalType === 'session-admin' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && (
+                  <div className="space-y-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select Role to Add <span className="text-red-500">*</span>
+                    </label>
+                    
+                    {/* System Admin Role - Only visible to System Admins for non-admin users */}
+                    {isSystemAdmin && !selectedUserForRole?.roles.isSystemAdmin && (
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex items-center gap-3 cursor-pointer flex-shrink-0"
+                          onClick={() => {
+                            const newValue = selectedRoleToAdd === 'system-admin' ? null : 'system-admin';
+                            setSelectedRoleToAdd(newValue);
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                              <Crown
+                                className="h-4 w-4 text-[#D4AF37] transition-transform"
+                                style={{
+                                  transform: selectedRoleToAdd === 'system-admin' ? 'scale(2)' : 'scale(1)',
+                                  transformOrigin: 'center'
+                                }}
+                              />
+                            </span>
+                            <span className="text-sm font-medium text-gray-700">System Admin</span>
+                          </div>
+                          <span
+                            className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                            style={{
+                              borderColor: '#D4AF37',
+                              backgroundColor: selectedRoleToAdd === 'system-admin' ? '#D4AF37' : '#ffffff'
+                            }}
+                          >
+                            {selectedRoleToAdd === 'system-admin' && (
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="w-4 h-4"
+                                stroke="#ffffff"
+                                strokeWidth="3"
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="4 12 10 18 20 6" />
+                              </svg>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Product Owner Role - Only visible to System Admins */}
+                    {isSystemAdmin && (
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex items-start gap-3">
+                          <div 
+                            className="flex items-center gap-3 cursor-pointer flex-shrink-0"
+                            onClick={() => {
+                              const newValue = selectedRoleToAdd === 'product-owner' ? null : 'product-owner';
+                              setSelectedRoleToAdd(newValue);
+                              setRoleModalProductId('');
+                            }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                                <Shield
+                                  className="h-4 w-4 text-[#576C71] transition-transform"
+                                  style={{
+                                    transform: selectedRoleToAdd === 'product-owner' ? 'scale(2)' : 'scale(1)',
+                                    transformOrigin: 'center'
+                                  }}
+                                />
+                              </span>
+                              <span className="text-sm font-medium text-gray-700">Product Owner</span>
+                            </div>
+                            <span
+                              className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                              style={{
+                                borderColor: '#576C71',
+                                backgroundColor: selectedRoleToAdd === 'product-owner' ? '#576C71' : '#ffffff'
+                              }}
+                            >
+                              {selectedRoleToAdd === 'product-owner' && (
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="w-4 h-4"
+                                  stroke="#ffffff"
+                                  strokeWidth="3"
+                                  fill="none"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="4 12 10 18 20 6" />
+                                </svg>
+                              )}
+                            </span>
+                          </div>
+                          
+                          {selectedRoleToAdd === 'product-owner' && (() => {
+                          const availableProducts = getRoleModalProducts();
+                          if (availableProducts.length === 1) {
+                            const product = availableProducts[0];
+                            const productColor = getProductColor(product.name, product.color_hex ?? null);
+                            // Auto-select the only product
+                            if (roleModalProductId !== product.id) {
+                              setRoleModalProductId(product.id);
+                            }
+                            return (
+                              <div className="flex-1 pt-0.5">
+                                <div className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg bg-gray-50" style={{ marginTop: '-11px' }}>
+                                  <div 
+                                    className="w-6 h-6 rounded-md flex-shrink-0"
+                                    style={{ backgroundColor: productColor.background }}
+                                  />
+                                  <span className="text-sm text-gray-700">{product.name}</span>
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="flex-1 pt-0.5" ref={roleModalProductDropdownRef}>
+                                <div className="relative" style={{ marginTop: '-11px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowRoleModalProductDropdown(!showRoleModalProductDropdown)}
+                                    className="w-full px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent bg-white text-left"
+                                  >
+                                    {roleModalProductId 
+                                      ? availableProducts.find(p => p.id === roleModalProductId)?.name || 'Select a product...'
+                                      : 'Select a product...'}
+                                  </button>
+                                  
+                                  {/* Product Color Icon */}
+                                  <div 
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                                    style={{ 
+                                      backgroundColor: (() => {
+                                        const prod = availableProducts.find(p => p.id === roleModalProductId);
+                                        return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                                      })()
+                                    }}
+                                  />
+                                  
+                                  {/* Dropdown Arrow */}
+                                  <svg 
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                                    fill="none" 
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path 
+                                      stroke="currentColor" 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round" 
+                                      strokeWidth="1.5" 
+                                      d="M6 8l4 4 4-4"
+                                    />
+                                  </svg>
+                                  
+                                  {/* Custom Dropdown */}
+                                  {showRoleModalProductDropdown && (
+                                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setRoleModalProductId('');
+                                          setShowRoleModalProductDropdown(false);
+                                        }}
+                                        className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+                                      >
+                                        Select a product...
+                                      </button>
+                                      {availableProducts.map(product => {
+                                        const productColor = getProductColor(product.name, product.color_hex ?? null);
+                                        return (
+                                          <button
+                                            key={product.id}
+                                            type="button"
+                                            onClick={() => {
+                                              setRoleModalProductId(product.id);
+                                              setShowRoleModalProductDropdown(false);
+                                            }}
+                                            className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative"
+                                          >
+                                            <div 
+                                              className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                                              style={{ backgroundColor: productColor.background }}
+                                            />
+                                            {product.name}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        })()}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stakeholder Role */}
+                    <div className="border-t border-gray-200 pt-4">
+                      <div className="flex items-start gap-3">
+                        <div 
+                          className="flex items-center gap-3 cursor-pointer flex-shrink-0"
+                          onClick={() => {
+                            const newValue = selectedRoleToAdd === 'stakeholder' ? null : 'stakeholder';
+                            setSelectedRoleToAdd(newValue);
+                            setRoleModalProductId('');
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                              <UserIcon
+                                className="h-4 w-4 text-[#8B5A4A] transition-transform"
+                                style={{
+                                  transform: selectedRoleToAdd === 'stakeholder' ? 'scale(2)' : 'scale(1)',
+                                  transformOrigin: 'center'
+                                }}
+                              />
+                            </span>
+                            <span className="text-sm font-medium text-gray-700">Stakeholder</span>
+                          </div>
+                          <span
+                            className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                            style={{
+                              borderColor: '#8B5A4A',
+                              backgroundColor: selectedRoleToAdd === 'stakeholder' ? '#8B5A4A' : '#ffffff'
+                            }}
+                          >
+                            {selectedRoleToAdd === 'stakeholder' && (
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="w-4 h-4"
+                                stroke="#ffffff"
+                                strokeWidth="3"
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="4 12 10 18 20 6" />
+                              </svg>
+                            )}
+                          </span>
+                        </div>
+                        
+                        {selectedRoleToAdd === 'stakeholder' && (() => {
+                          const availableProducts = getRoleModalProducts();
+                          if (availableProducts.length === 1) {
+                            const product = availableProducts[0];
+                            const productColor = getProductColor(product.name, product.color_hex ?? null);
+                            // Auto-select the only product
+                            if (roleModalProductId !== product.id) {
+                              setRoleModalProductId(product.id);
+                            }
+                            return (
+                              <div className="flex-1 pt-0.5">
+                                <div className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg bg-gray-50" style={{ marginTop: '-11px' }}>
+                                  <div 
+                                    className="w-6 h-6 rounded-md flex-shrink-0"
+                                    style={{ backgroundColor: productColor.background }}
+                                  />
+                                  <span className="text-sm text-gray-700">{product.name}</span>
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="flex-1 pt-0.5" ref={roleModalProductDropdownRef}>
+                                <div className="relative" style={{ marginTop: '-11px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowRoleModalProductDropdown(!showRoleModalProductDropdown)}
+                                    className="w-full px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent bg-white text-left"
+                                  >
+                                    {roleModalProductId 
+                                      ? availableProducts.find(p => p.id === roleModalProductId)?.name || 'Select a product...'
+                                      : 'Select a product...'}
+                                  </button>
+                                  
+                                  {/* Product Color Icon */}
+                                  <div 
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                                    style={{ 
+                                      backgroundColor: (() => {
+                                        const prod = availableProducts.find(p => p.id === roleModalProductId);
+                                        return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                                      })()
+                                    }}
+                                  />
+                                  
+                                  {/* Dropdown Arrow */}
+                                  <svg 
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                                    fill="none" 
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path 
+                                      stroke="currentColor" 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round" 
+                                      strokeWidth="1.5" 
+                                      d="M6 8l4 4 4-4"
+                                    />
+                                  </svg>
+                                  
+                                  {/* Custom Dropdown */}
+                                  {showRoleModalProductDropdown && (
+                                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setRoleModalProductId('');
+                                          setShowRoleModalProductDropdown(false);
+                                        }}
+                                        className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+                                      >
+                                        Select a product...
+                                      </button>
+                                      {availableProducts.map(product => {
+                                        const productColor = getProductColor(product.name, product.color_hex ?? null);
+                                        return (
+                                          <button
+                                            key={product.id}
+                                            type="button"
+                                            onClick={() => {
+                                              setRoleModalProductId(product.id);
+                                              setShowRoleModalProductDropdown(false);
+                                            }}
+                                            className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative"
+                                          >
+                                            <div 
+                                              className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                                              style={{ backgroundColor: productColor.background }}
+                                            />
+                                            {product.name}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="flex justify-end mt-6">
+              {/* Footer */}
+              <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-gray-200">
                 <button
-                  onClick={handleAddToSession}
-                  disabled={!roleModalProductId || (!roleModalUseAllSessions && roleModalSelectedSessionIds.length === 0)}
-                  className={`px-6 py-2.5 rounded-lg transition-colors ${
-                    roleModalProductId && (roleModalUseAllSessions || roleModalSelectedSessionIds.length > 0)
-                      ? roleModalType === 'remove-stakeholder'
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-[#4f6d8e] text-white hover:bg-[#3d5670]'
-                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  onClick={() => setShowRoleModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddRole}
+                  disabled={
+                    (selectedRoleToRemove !== 'system-admin' && selectedRoleToAdd !== 'system-admin' && !roleModalProductId) || 
+                    (roleModalType === 'remove-stakeholder' && !selectedRoleToRemove) ||
+                    ((roleModalType === 'session-admin' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && !selectedRoleToAdd)
+                  }
+                  className={`px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    roleModalType === 'remove-stakeholder' 
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-[#2d4660] hover:bg-[#1E5461]'
                   }`}
                 >
-                  {(() => {
-                    const sessionCount = roleModalUseAllSessions 
-                      ? (filterSessionsForRoleModal(getAvailableSessions(roleModalType), roleModalProductId || '').length)
-                      : roleModalSelectedSessionIds.length;
-                    const isPlural = sessionCount > 1;
-                    
-                    if (roleModalType === 'remove-stakeholder') {
-                      return `Remove from Session${isPlural ? 's' : ''}`;
-                    } else if (roleModalType === 'session-admin') {
-                      return `Add to Session${isPlural ? 's' : ''} as Session Admin`;
-                    } else {
-                      return `Add to Session${isPlural ? 's' : ''} as a Stakeholder`;
-                    }
-                  })()}
+                  {roleModalType === 'remove-stakeholder' ? 'Remove Role' : 'Add Role'}
                 </button>
               </div>
             </div>
@@ -4076,158 +2831,57 @@ export default function UsersManagementScreen() {
         </div>
       )}
 
-      {/* Delete User Confirmation Modal */}
-      {showDeleteModal && userToDelete && (
+      {/* Edit User Modal */}
+      {showEditUserModal && userToEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-start mb-4">
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-                  <UserX className="h-6 w-6 text-red-600" />
-                </div>
-                <div className="ml-4 flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-1">
-                    Delete User Account
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    This action cannot be undone. Please review the details below.
-                  </p>
-                </div>
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Edit User</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={editingUserName}
+                  onChange={(e) => setEditingUserName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
               </div>
-
-              {/* User Info */}
-              <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                <div className="flex items-center mb-3">
-                  <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
-                  <div>
-                    <div className="font-medium text-gray-900">{userToDelete.name}</div>
-                    <div className="text-sm text-gray-500">{userToDelete.email}</div>
-                  </div>
-                </div>
-
-                {/* Current Roles */}
-                <div className="space-y-2 border-t border-gray-200 pt-3">
-                  <div className="text-xs font-semibold text-gray-500 uppercase">Current Roles</div>
-                  {userToDelete.roles.isSystemAdmin && (
-                    <div className="flex items-center text-sm">
-                      <Crown className="h-4 w-4 mr-2 text-[#C89212]" />
-                      <span className="text-gray-700">System Admin</span>
-                    </div>
-                  )}
-                  {userToDelete.roles.sessionAdminCount > 0 && (
-                    <div className="flex items-center text-sm">
-                      <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
-                      <span className="text-gray-700">Session Admin in {userToDelete.roles.sessionAdminCount} session{userToDelete.roles.sessionAdminCount !== 1 ? 's' : ''}</span>
-                    </div>
-                  )}
-                  {userToDelete.roles.stakeholderSessionCount > 0 && (
-                    <div className="flex items-center text-sm">
-                      <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
-                      <span className="text-gray-700">Stakeholder in {userToDelete.roles.stakeholderSessionCount} session{userToDelete.roles.stakeholderSessionCount !== 1 ? 's' : ''}</span>
-                    </div>
-                  )}
-                  {!userToDelete.roles.isSystemAdmin && 
-                   userToDelete.roles.sessionAdminCount === 0 && 
-                   userToDelete.roles.stakeholderSessionCount === 0 && (
-                    <div className="text-sm text-gray-500">No roles assigned</div>
-                  )}
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={editingUserEmail}
+                  onChange={(e) => setEditingUserEmail(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
               </div>
-
-              {/* Sessions to be removed from */}
-              {(userToDelete.adminInSessions && userToDelete.adminInSessions.length > 0) || 
-               (userToDelete.stakeholderInSessions && userToDelete.stakeholderInSessions.length > 0) ? (
-                <div className="mb-4">
-                  <div className="text-sm font-semibold text-gray-700 mb-2">
-                    User will be removed from these sessions:
-                  </div>
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-48 overflow-y-auto">
-                    {userToDelete.adminInSessions && userToDelete.adminInSessions.length > 0 && (
-                      <div className="mb-3">
-                        <div className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center">
-                          <Shield className="h-3.5 w-3.5 mr-1.5 text-[#576C71]" />
-                          Admin Sessions ({userToDelete.adminInSessions.length})
-                        </div>
-                        <div className="space-y-1 ml-5">
-                          {userToDelete.adminInSessions.map(session => (
-                            <div key={session.id} className="text-sm text-gray-700">
-                              • {session.title || 'Unnamed Session'}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {userToDelete.stakeholderInSessions && userToDelete.stakeholderInSessions.length > 0 && (
-                      <div>
-                        <div className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center">
-                          <UserIcon className="h-3.5 w-3.5 mr-1.5 text-[#8B5A4A]" />
-                          Stakeholder Sessions ({userToDelete.stakeholderInSessions.length})
-                        </div>
-                        <div className="space-y-1 ml-5">
-                          {userToDelete.stakeholderInSessions.map(session => (
-                            <div key={session.id} className="text-sm text-gray-700">
-                              • {session.title || 'Unnamed Session'}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Warning */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-yellow-800">
-                      Warning: This action is permanent
-                    </h3>
-                    <div className="mt-1 text-sm text-yellow-700">
-                      <ul className="list-disc pl-5 space-y-1">
-                        <li>User account will be permanently deleted</li>
-                        <li>All authentication access will be revoked</li>
-                        <li>User will be removed from all sessions</li>
-                        <li>This action cannot be undone</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                <button
-                  onClick={cancelDeleteUser}
-                  disabled={isDeleting}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDeleteUser}
-                  disabled={isDeleting}
-                  className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                >
-                  {isDeleting ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Deleting...
-                    </>
-                  ) : (
-                    'Delete User Permanently'
-                  )}
-                </button>
-              </div>
+            </div>
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => setShowEditUserModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!userToEdit) return;
+                  try {
+                    await supabase
+                      .from('users')
+                      .update({ name: editingUserName, email: editingUserEmail })
+                      .eq('id', userToEdit.id);
+                    setShowEditUserModal(false);
+                    await loadData();
+                  } catch (error) {
+                    console.error('Error updating user:', error);
+                    showAlert('Failed to Update User', 'An error occurred while updating the user information. Please try again.', 'error');
+                  }
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-[#2d4660] rounded-md hover:bg-[#1E5461]"
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>
@@ -4240,23 +2894,21 @@ export default function UsersManagementScreen() {
           onClick={closeAddUserModal}
         >
           <div 
-            className="bg-white rounded-lg shadow-xl max-w-3xl w-full my-8 max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6">
               {/* Header */}
               <div className="flex items-start mb-6">
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#8B5A4A]/10 flex items-center justify-center">
-                  <Users className="h-6 w-6 text-[#8B5A4A]" />
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#2D4660]/10 flex items-center justify-center">
+                  <Users className="h-6 w-6 text-[#2D4660]" />
                 </div>
                 <div className="ml-4 flex-1">
                   <h2 className="text-xl font-bold text-gray-900 mb-1">
-                    {viewMode === 'session-admin' ? 'Add New Stakeholder' : 'Add New User'}
+                    Add New User
                   </h2>
                   <p className="text-sm text-gray-600">
-                    {viewMode === 'session-admin' 
-                      ? 'Create a new user account and add as stakeholder to your sessions'
-                      : 'Create a new user account and assign roles'}
+                    Create a new user account and optionally assign roles
                   </p>
                 </div>
                 <button
@@ -4277,111 +2929,70 @@ export default function UsersManagementScreen() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Search Company Users (Optional)
                     </label>
-                    {isAzureSignedIn === false ? (
-                      /* Show sign-in button if not signed in with Azure */
-                      <div className="border border-gray-300 rounded-lg p-4 bg-blue-50">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900 mb-1">
-                              Sign in with Microsoft to search company users
-                            </p>
-                            <p className="text-xs text-gray-600">
-                              You need to sign in with your Microsoft account to use the company user search feature.
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleAzureSignIn}
-                            className="ml-4 flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
-                          >
-                            <img 
-                              src={microsoftLogo}
-                              alt="Microsoft"
-                              style={{ width: '21px', height: '21px', marginRight: '8px' }}
-                            />
-                            <span className="text-sm font-medium text-gray-700">Sign in</span>
-                          </button>
+                    <div className="relative" ref={azureSearchRef}>
+                      <div className="flex gap-2">
+                        <div className="flex-1 relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                          <input
+                            type="text"
+                            value={azureUserSearch.searchTerm}
+                            onChange={(e) => {
+                              const term = e.target.value;
+                              setAzureUserSearch(prev => ({ ...prev, searchTerm: term }));
+                              handleAzureUserSearch(term);
+                            }}
+                            onFocus={() => {
+                              if (azureUserSearch.results.length > 0) {
+                                setAzureUserSearch(prev => ({ ...prev, showResults: true }));
+                              }
+                            }}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+                            placeholder="Search by name or email (min 2 characters)..."
+                            disabled={isAddingUser}
+                          />
+                          {azureUserSearch.isSearching && (
+                            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#2D4660]"></div>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    ) : (
-                      /* Show search input if signed in with Azure */
-                      <>
-                        <div className="relative" ref={azureSearchRef}>
-                          <div className="flex gap-2">
-                            <div className="flex-1 relative">
-                              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                              <input
-                                type="text"
-                                value={azureUserSearch.searchTerm}
-                                onChange={(e) => {
-                                  const term = e.target.value;
-                                  setAzureUserSearch(prev => ({ ...prev, searchTerm: term }));
-                                  handleAzureUserSearch(term);
-                                }}
-                                onFocus={() => {
-                                  if (azureUserSearch.results.length > 0) {
-                                    setAzureUserSearch(prev => ({ ...prev, showResults: true }));
-                                  }
-                                }}
-                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
-                                placeholder="Search by name or email (min 2 characters)..."
-                              />
-                              {azureUserSearch.isSearching && (
-                                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#2D4660]"></div>
-                                </div>
+                    
+                      {/* Search Results Dropdown */}
+                      {azureUserSearch.showResults && azureUserSearch.results.length > 0 && (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                          {azureUserSearch.results.map((user) => (
+                            <button
+                              key={user.id}
+                              type="button"
+                              onClick={() => selectAzureUser(user)}
+                              className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                            >
+                              <div className="font-medium text-gray-900">{user.displayName}</div>
+                              <div className="text-sm text-gray-500">{user.mail || user.userPrincipalName}</div>
+                              {user.jobTitle && (
+                                <div className="text-xs text-gray-400 mt-0.5">{user.jobTitle}</div>
                               )}
-                            </div>
-                          </div>
-                        
-                          {/* Search Results Dropdown */}
-                          {azureUserSearch.showResults && azureUserSearch.results.length > 0 && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                              {azureUserSearch.results.map((user) => (
-                                <button
-                                  key={user.id}
-                                  type="button"
-                                  onClick={() => selectAzureUser(user)}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
-                                >
-                                  <div className="font-medium text-gray-900">{user.displayName}</div>
-                                  <div className="text-sm text-gray-500">{user.mail || user.userPrincipalName}</div>
-                                  {user.jobTitle && (
-                                    <div className="text-xs text-gray-400 mt-0.5">{user.jobTitle}</div>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          
-                          {azureUserSearch.error && (
-                            <div className="absolute z-10 w-full mt-1 bg-red-50 border border-red-200 rounded-lg shadow-lg p-4 text-sm text-red-700">
-                              <div className="font-medium mb-1">Search Error</div>
-                              <div className="mb-2">{azureUserSearch.error}</div>
-                              {azureUserSearch.error.includes('User.ReadBasic.All') && (
-                                <div className="mt-2 p-2 bg-red-100 rounded text-xs text-red-800">
-                                  <div className="font-medium mb-1">To fix this:</div>
-                                  <ol className="list-decimal list-inside space-y-1 ml-2">
-                                    <li>Go to Azure Portal → App registrations → Your app</li>
-                                    <li>API permissions → Add permission → Microsoft Graph → Delegated permissions</li>
-                                    <li>Add "User.ReadBasic.All" or "User.Read.All"</li>
-                                    <li>Click "Grant admin consent" (requires admin)</li>
-                                  </ol>
-                                </div>
-                              )}
-                              <div className="mt-2 text-xs text-red-600">
-                                You can still enter the email manually below.
-                              </div>
-                            </div>
-                          )}
-                          {azureUserSearch.searchTerm.length >= 2 && !azureUserSearch.isSearching && azureUserSearch.results.length === 0 && !azureUserSearch.error && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 text-sm text-gray-500 text-center">
-                              No users found. You can still enter the email manually below.
-                            </div>
-                          )}
+                            </button>
+                          ))}
                         </div>
-                      </>
-                    )}
+                      )}
+                      
+                      {azureUserSearch.error && (
+                        <div className="absolute z-10 w-full mt-1 bg-red-50 border border-red-200 rounded-lg shadow-lg p-4 text-sm text-red-700">
+                          <div className="font-medium mb-1">Search Error</div>
+                          <div>{azureUserSearch.error}</div>
+                          <div className="mt-2 text-xs text-red-600">
+                            You can still enter the email manually below.
+                          </div>
+                        </div>
+                      )}
+                      {azureUserSearch.searchTerm.length >= 2 && !azureUserSearch.isSearching && azureUserSearch.results.length === 0 && !azureUserSearch.error && (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 text-sm text-gray-500 text-center">
+                          No users found. You can still enter the email manually below.
+                        </div>
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
                       Search for users in your organization by name or email, or enter manually below
                     </p>
@@ -4393,43 +3004,53 @@ export default function UsersManagementScreen() {
                       className="text-sm font-semibold text-[#2D4660] hover:underline focus:outline-none"
                       onClick={() => {
                         setShowAzureSearchSection(true);
-                        setAzureUserSearch(getInitialAzureSearchState());
+                        setAzureUserSearch({
+                          searchTerm: '',
+                          results: [],
+                          isSearching: false,
+                          showResults: false,
+                          error: ''
+                        });
                       }}
+                      disabled={isAddingUser}
                     >
                       Search Company Users again
                     </button>
                   </div>
                 )}
 
+                {/* Name and Email */}
                 <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Full Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newUserData.name}
-                    onChange={(e) => setNewUserData({ ...newUserData, name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
-                    placeholder="John Doe"
-                  />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Full Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newUserData.name}
+                      onChange={(e) => setNewUserData({ ...newUserData, name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+                      placeholder="John Doe"
+                      disabled={isAddingUser}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email Address <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={newUserData.email}
+                      onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
+                      placeholder="john.doe@newmill.com"
+                      disabled={isAddingUser}
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={newUserData.email}
-                    onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
-                    placeholder="john.doe@newmill.com"
-                  />
-                </div>
-                </div>
-
-                {/* System Admin checkbox (system-admin mode only) */}
+                {/* System Admin checkbox */}
                 {viewMode === 'system-admin' && (
                   <div className="border-t border-gray-200 pt-4">
                     <label className="flex items-center gap-3 cursor-pointer">
@@ -4445,12 +3066,12 @@ export default function UsersManagementScreen() {
                         </span>
                         <span className="text-sm font-medium text-gray-700">System Administrator</span>
                       </div>
-                          <input
-                        id="systemAdminCheckbox"
-                            type="checkbox"
-                            checked={newUserData.isSystemAdmin}
-                            onChange={(e) => setNewUserData({ ...newUserData, isSystemAdmin: e.target.checked })}
+                      <input
+                        type="checkbox"
+                        checked={newUserData.isSystemAdmin}
+                        onChange={(e) => setNewUserData({ ...newUserData, isSystemAdmin: e.target.checked })}
                         className="sr-only"
+                        disabled={isAddingUser}
                       />
                       <span
                         className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
@@ -4472,470 +3093,305 @@ export default function UsersManagementScreen() {
                             <polyline points="4 12 10 18 20 6" />
                           </svg>
                         )}
-                          </span>
-                        </label>
+                      </span>
+                    </label>
                   </div>
                 )}
 
-                {/* Session Admin Accordion - Only for System Admins */}
+                {/* Product Owner Role */}
                 {viewMode === 'system-admin' && (
                   <div className="border-t border-gray-200 pt-4">
-                    <div className="w-full flex items-center gap-2 py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors">
-                    <button
-                      type="button"
-                        className="flex items-center gap-2 text-sm font-medium text-gray-700 flex-1 text-left"
-                        onClick={() =>
-                          setAccordionOpen(prev => ({
-                            sessionAdmin: !prev.sessionAdmin,
-                            stakeholder: false
-                          }))
-                        }
-                      >
-                        <span
-                          className="flex items-center justify-center"
-                          style={{
-                            transform: sessionAdminActive ? 'scale(1.2)' : 'scale(1)'
-                          }}
-                        >
-                          <Shield className="h-4 w-4 text-[#576C71]" />
+                    <div className="flex items-start gap-3">
+                      <label className="flex items-center gap-3 cursor-pointer flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                          <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                            <Shield
+                              className="h-4 w-4 text-[#576C71] transition-transform"
+                              style={{
+                                transform: newUserData.isProductOwner ? 'scale(2)' : 'scale(1)',
+                                transformOrigin: 'center'
+                              }}
+                            />
                           </span>
-                        <span>Session Admin</span>
-                        {sessionAdminActive && sessionAdminSummary && (
-                          <span className="ml-2 text-xs text-gray-500">{sessionAdminSummary}</span>
-                        )}
-                      </button>
-                      {sessionAdminActive && (
-                        <button
-                          type="button"
-                          onClick={clearSessionAdminSelections}
-                          className="px-3 py-1 rounded-full border text-xs font-semibold transition-colors hover:bg-[#576C71]/10"
+                          <span className="text-sm font-medium text-gray-700">Product Owner</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={newUserData.isProductOwner}
+                          onChange={(e) => setNewUserData({ 
+                            ...newUserData, 
+                            isProductOwner: e.target.checked,
+                            productOwnerProductId: e.target.checked ? newUserData.productOwnerProductId : ''
+                          })}
+                          className="sr-only"
+                          disabled={isAddingUser}
+                        />
+                        <span
+                          className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
                           style={{
                             borderColor: '#576C71',
-                            color: '#576C71',
-                            backgroundColor: '#f6fbfb'
+                            backgroundColor: newUserData.isProductOwner ? '#576C71' : '#ffffff'
                           }}
                         >
-                          Reset
-                        </button>
-                      )}
-                      <ChevronDown 
-                        className={`h-4 w-4 text-gray-500 transition-transform ${accordionOpen.sessionAdmin ? 'rotate-180' : ''}`}
-                      />
-                    </div>
-                    
-                    {accordionOpen.sessionAdmin && (
-                      <div className="mt-3 ml-6 space-y-3">
-                        {/* Product Selection */}
-                        <div>
-                          <ProductSelect
-                            products={products}
-                            value={selectedProductIdForSessionAdmin}
-                            onChange={(productId) => {
-                              setSelectedProductIdForSessionAdmin(productId);
-                              setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
-                              setUseAllSessionsForSessionAdmin(true);
-                            }}
-                            label="Product *"
-                          />
-                        </div>
-
-                        {/* Session Selection toggle */}
-                        {selectedProductIdForSessionAdmin && (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Session Selection *
-                              </label>
-                              <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
-                                <button
-                                  type="button"
-                                  onClick={() => setUseAllSessionsForSessionAdmin(false)}
-                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                                    !useAllSessionsForSessionAdmin
-                                      ? 'bg-white text-[#2d4660] shadow-sm'
-                                      : 'text-gray-600 hover:text-gray-900'
-                                  }`}
-                                >
-                                  Select Sessions
-                                </button>
+                          {newUserData.isProductOwner && (
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="w-4 h-4"
+                              stroke="#ffffff"
+                              strokeWidth="3"
+                              fill="none"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="4 12 10 18 20 6" />
+                            </svg>
+                          )}
+                        </span>
+                      </label>
+                      
+                      {newUserData.isProductOwner && (
+                        <div className="flex-1 pt-0.5" ref={productOwnerDropdownRef}>
+                          <div className="relative" style={{ marginTop: '-11px' }}>
+                            <button
+                              type="button"
+                              onClick={() => !isAddingUser && setShowProductOwnerDropdown(!showProductOwnerDropdown)}
+                              disabled={isAddingUser}
+                              className="w-full px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent bg-white text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {newUserData.productOwnerProductId 
+                                ? allProducts.find(p => p.id === newUserData.productOwnerProductId)?.name || 'Select a product...'
+                                : 'Select a product...'}
+                            </button>
+                            
+                            {/* Product Color Icon */}
+                            <div 
+                              className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                              style={{ 
+                                backgroundColor: newUserData.productOwnerProductId 
+                                  ? (() => {
+                                      const prod = allProducts.find(p => p.id === newUserData.productOwnerProductId);
+                                      return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                                    })()
+                                  : 'transparent'
+                              }}
+                            />
+                            
+                            {/* Dropdown Arrow */}
+                            <svg 
+                              className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                              fill="none" 
+                              viewBox="0 0 20 20"
+                            >
+                              <path 
+                                stroke="currentColor" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round" 
+                                strokeWidth="1.5" 
+                                d="M6 8l4 4 4-4"
+                              />
+                            </svg>
+                            
+                            {/* Custom Dropdown */}
+                            {showProductOwnerDropdown && (
+                              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setUseAllSessionsForSessionAdmin(true);
-                                    setNewUserData(prev => ({ ...prev, sessionAdminIds: [] }));
+                                    setNewUserData({ ...newUserData, productOwnerProductId: '' });
+                                    setShowProductOwnerDropdown(false);
                                   }}
-                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                                    useAllSessionsForSessionAdmin
-                                      ? 'bg-white text-[#2d4660] shadow-sm'
-                                      : 'text-gray-600 hover:text-gray-900'
-                                  }`}
+                                  className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
                                 >
-                                  All Sessions
+                                  Select a product...
                                 </button>
-                              </div>
-                              {useAllSessionsForSessionAdmin && (
-                                <p className="mt-2 text-xs text-gray-500">
-                                  User will be added to all current and future sessions for this product
-                                </p>
-                              )}
-                            </div>
-
-                            {!useAllSessionsForSessionAdmin && (
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Sessions * (Current and Future)
-                                </label>
-                                {filteredSessionsForSessionAdmin.length === 0 ? (
-                                  <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                        ) : (
-                                  <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                                    {filteredSessionsForSessionAdmin.map(session => (
-                              <label
-                                key={session.id}
-                                        className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={newUserData.sessionAdminIds.includes(session.id)}
-                                  onChange={() => toggleSessionAdmin(session.id)}
-                                          className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                                          style={{ accentColor: '#16a34a' }}
-                                />
-                                        <div className="ml-3 flex-1">
-                                          <div className="flex items-start justify-between gap-2">
-                                            <div className="text-sm font-medium text-gray-900">
-                                              {session.title || 'Unnamed Session'}
-                                            </div>
-                                            <span className={`text-xs font-medium ${getSessionStatus(session).color}`}>
-                                              {getSessionStatus(session).text}
-                                </span>
-                                          </div>
-                                          <div className="text-xs text-gray-500 mt-0.5">
-                                            {formatSessionDateRange(session)}
-                                          </div>
-                                        </div>
-                              </label>
-                            ))}
-                                  </div>
-                                )}
+                                {getAccessibleProducts().map(product => {
+                                  const productColor = getProductColor(product.name, product.color_hex ?? null);
+                                  return (
+                                    <button
+                                      key={product.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setNewUserData({ ...newUserData, productOwnerProductId: product.id });
+                                        setShowProductOwnerDropdown(false);
+                                      }}
+                                      className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative"
+                                    >
+                                      <div 
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                                        style={{ backgroundColor: productColor.background }}
+                                      />
+                                      {product.name}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <p className="mt-1 text-xs text-gray-500">
+                            Add to all current and future sessions for this product
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
-                {/* Stakeholder Section */}
-                {viewMode === 'session-admin' ? (
-                  // For Session Admins: Show directly without accordion
-                  <div className="border-t border-gray-200 pt-4">
-                    <div className="flex items-center mb-3">
-                      <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
-                      <span className="text-sm font-medium text-gray-700">Add as Stakeholder</span>
-                      {newUserData.stakeholderSessionIds.length > 0 && (
-                        <span className="ml-2 px-2 py-0.5 bg-[#8B5A4A]/10 text-[#8B5A4A] text-xs rounded-full">
-                          {newUserData.stakeholderSessionIds.length}
+                {/* Stakeholder Role */}
+                <div className="border-t border-gray-200 pt-4">
+                  <div className="flex items-start gap-3">
+                    <label className="flex items-center gap-3 cursor-pointer flex-shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                          <UserIcon
+                            className="h-4 w-4 text-[#8B5A4A] transition-transform"
+                            style={{
+                              transform: newUserData.isStakeholder ? 'scale(2)' : 'scale(1)',
+                              transformOrigin: 'center'
+                            }}
+                          />
                         </span>
-                      )}
-                    </div>
-                    <div className="space-y-3">
-                      {/* Product Selection */}
-                      <div>
-                        <ProductSelect
-                          products={products}
-                          value={selectedProductId}
-                          onChange={(productId) => {
-                            setSelectedProductId(productId);
-                            // Clear selected sessions when product changes
-                            setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
-                            setUseAllSessionsForStakeholder(true);
-                          }}
-                          label="Product *"
-                        />
+                        <span className="text-sm font-medium text-gray-700">Stakeholder</span>
                       </div>
-
-                      {/* Session Selection Toggle - Only show after product is selected */}
-                      {selectedProductId && (
-                        <div className="space-y-3">
-                          {/* Toggle: All Sessions / Select Sessions */}
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Session Selection *
-                            </label>
-                            <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+                      <input
+                        type="checkbox"
+                        checked={newUserData.isStakeholder}
+                        onChange={(e) => setNewUserData({ 
+                          ...newUserData, 
+                          isStakeholder: e.target.checked,
+                          stakeholderProductId: e.target.checked ? newUserData.stakeholderProductId : ''
+                        })}
+                        className="sr-only"
+                        disabled={isAddingUser}
+                      />
+                      <span
+                        className="flex items-center justify-center w-6 h-6 border rounded-md transition-colors"
+                        style={{
+                          borderColor: '#8B5A4A',
+                          backgroundColor: newUserData.isStakeholder ? '#8B5A4A' : '#ffffff'
+                        }}
+                      >
+                        {newUserData.isStakeholder && (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="w-4 h-4"
+                            stroke="#ffffff"
+                            strokeWidth="3"
+                            fill="none"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="4 12 10 18 20 6" />
+                          </svg>
+                        )}
+                      </span>
+                    </label>
+                    
+                    {newUserData.isStakeholder && (
+                      <div className="flex-1 pt-0.5" ref={stakeholderDropdownRef}>
+                        <div className="relative" style={{ marginTop: '-11px' }}>
+                          <button
+                            type="button"
+                            onClick={() => !isAddingUser && setShowStakeholderDropdown(!showStakeholderDropdown)}
+                            disabled={isAddingUser}
+                            className="w-full px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent bg-white text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {newUserData.stakeholderProductId 
+                              ? allProducts.find(p => p.id === newUserData.stakeholderProductId)?.name || 'Select a product...'
+                              : 'Select a product...'}
+                          </button>
+                          
+                          {/* Product Color Icon */}
+                          <div 
+                            className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md pointer-events-none"
+                            style={{ 
+                              backgroundColor: newUserData.stakeholderProductId 
+                                ? (() => {
+                                    const prod = allProducts.find(p => p.id === newUserData.stakeholderProductId);
+                                    return prod ? getProductColor(prod.name, prod.color_hex ?? null).background : 'transparent';
+                                  })()
+                                : 'transparent'
+                            }}
+                          />
+                          
+                          {/* Dropdown Arrow */}
+                          <svg 
+                            className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+                            fill="none" 
+                            viewBox="0 0 20 20"
+                          >
+                            <path 
+                              stroke="currentColor" 
+                              strokeLinecap="round" 
+                              strokeLinejoin="round" 
+                              strokeWidth="1.5" 
+                              d="M6 8l4 4 4-4"
+                            />
+                          </svg>
+                          
+                          {/* Custom Dropdown */}
+                          {showStakeholderDropdown && (
+                            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setUseAllSessionsForStakeholder(false);
+                                  setNewUserData({ ...newUserData, stakeholderProductId: '' });
+                                  setShowStakeholderDropdown(false);
                                 }}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                                  !useAllSessionsForStakeholder
-                                    ? 'bg-white text-[#2d4660] shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
-                                }`}
+                                className="w-full px-4 py-2 text-left hover:bg-gray-50 text-gray-500 border-b border-gray-100"
                               >
-                                Select Sessions
+                                Select a product...
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setUseAllSessionsForStakeholder(true);
-                                  setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
-                                }}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                                  useAllSessionsForStakeholder
-                                    ? 'bg-white text-[#2d4660] shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
-                                }`}
-                              >
-                                All Sessions
-                              </button>
-                            </div>
-                            {useAllSessionsForStakeholder && (
-                              <p className="mt-2 text-xs text-gray-500">
-                                User will be added to all current and future sessions for this product
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Session Selection List - Only show if "Select Sessions" is chosen */}
-                          {!useAllSessionsForStakeholder && (
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Sessions * (Current and Future)
-                              </label>
-                              {filteredSessionsForProduct.length === 0 ? (
-                                <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                      ) : (
-                                <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                                  {filteredSessionsForProduct.map((session) => (
-                            <label
-                              key={session.id}
-                                      className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                onChange={() => toggleStakeholder(session.id)}
-                                        className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                                        style={{ accentColor: '#16a34a' }}
-                              />
-                                      <div className="ml-3 flex-1">
-                                        <div className="text-sm font-medium text-gray-900">
-                                          {session.title || 'Unnamed Session'}
-                                        </div>
-                                        <div className="text-xs text-gray-500 mt-0.5">
-                                          {formatSessionDateRange(session)}
-                                        </div>
-                                        <div className="text-xs mt-0.5">
-                                          <span className={`font-medium ${getSessionStatus(session).color}`}>
-                                            {getSessionStatus(session).text}
-                              </span>
-                                        </div>
-                                      </div>
-                            </label>
-                          ))}
-                                </div>
-                              )}
+                              {getAccessibleProducts().map(product => {
+                                const productColor = getProductColor(product.name, product.color_hex ?? null);
+                                return (
+                                  <button
+                                    key={product.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setNewUserData({ ...newUserData, stakeholderProductId: product.id });
+                                      setShowStakeholderDropdown(false);
+                                    }}
+                                    className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 relative"
+                                  >
+                                    <div 
+                                      className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md"
+                                      style={{ backgroundColor: productColor.background }}
+                                    />
+                                    {product.name}
+                                  </button>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  // For System Admins: Show in accordion
-                  <div className="border-t border-gray-200 pt-4">
-                    <div className="w-full flex items-center gap-2 py-2 hover:bg-gray-50 rounded-lg px-2 -ml-2 transition-colors">
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 text-sm font-medium text-gray-700 flex-1 text-left"
-                      onClick={() =>
-                        setAccordionOpen(prev => ({
-                          stakeholder: !prev.stakeholder,
-                          sessionAdmin: false
-                        }))
-                      }
-                    >
-                      <span
-                        className="flex items-center justify-center"
-                        style={{
-                          transform: stakeholderActive ? 'scale(1.2)' : 'scale(1)'
-                        }}
-                      >
-                        <UserIcon className="h-4 w-4 text-[#8B5A4A]" />
-                          </span>
-                      <span>Stakeholder</span>
-                      {stakeholderActive && stakeholderSummary && (
-                        <span className="ml-2 text-xs text-gray-500">{stakeholderSummary}</span>
-                        )}
-                    </button>
-                    {stakeholderActive && (
-                      <button
-                        type="button"
-                        onClick={clearStakeholderSelections}
-                        className="px-3 py-1 rounded-full border text-xs font-semibold transition-colors hover:bg-[#8B5A4A]/10"
-                        style={{
-                          borderColor: '#8B5A4A',
-                          color: '#8B5A4A',
-                          backgroundColor: '#fcf8f4'
-                        }}
-                      >
-                        Reset
-                      </button>
-                    )}
-                      <ChevronDown 
-                        className={`h-4 w-4 text-gray-500 transition-transform ${accordionOpen.stakeholder ? 'rotate-180' : ''}`}
-                      />
-                  </div>
-                    
-                    {accordionOpen.stakeholder && (
-                      <div className="mt-3 ml-6 space-y-3">
-                        {/* Product Selection */}
-                        <div>
-                          <ProductSelect
-                            products={products}
-                            value={selectedProductId}
-                            onChange={(productId) => {
-                              setSelectedProductId(productId);
-                              // Clear selected sessions when product changes
-                              setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
-                              setUseAllSessionsForStakeholder(true);
-                            }}
-                            label="Product *"
-                          />
-                        </div>
-
-                        {/* Session Selection Toggle - Only show after product is selected */}
-                        {selectedProductId && (
-                          <div className="space-y-3">
-                            {/* Toggle: All Sessions / Select Sessions */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Session Selection *
-                              </label>
-                              <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setUseAllSessionsForStakeholder(false);
-                                  }}
-                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                                    !useAllSessionsForStakeholder
-                                      ? 'bg-white text-[#2d4660] shadow-sm'
-                                      : 'text-gray-600 hover:text-gray-900'
-                                  }`}
-                                >
-                                  Select Sessions
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setUseAllSessionsForStakeholder(true);
-                                    setNewUserData(prev => ({ ...prev, stakeholderSessionIds: [] }));
-                                  }}
-                                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                                    useAllSessionsForStakeholder
-                                      ? 'bg-white text-[#2d4660] shadow-sm'
-                                      : 'text-gray-600 hover:text-gray-900'
-                                  }`}
-                                >
-                                  All Sessions
-                                </button>
-                              </div>
-                              {useAllSessionsForStakeholder && (
-                                <p className="mt-2 text-xs text-gray-500">
-                                  User will be added to all current and future sessions for this product
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Session Selection List - Only show if "Select Sessions" is chosen */}
-                            {!useAllSessionsForStakeholder && (
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Sessions * (Current and Future)
-                                </label>
-                                {filteredSessionsForProduct.length === 0 ? (
-                                  <p className="text-sm text-gray-500">No current or future sessions found for this product.</p>
-                        ) : (
-                                  <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-md p-2">
-                                    {filteredSessionsForProduct.map((session) => (
-                              <label
-                                key={session.id}
-                                        className="flex items-start px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={newUserData.stakeholderSessionIds.includes(session.id)}
-                                  onChange={() => toggleStakeholder(session.id)}
-                                          className="w-4 h-4 border-gray-300 rounded focus:ring-[#2D4660] accent-green-600 mt-1"
-                                          style={{ accentColor: '#16a34a' }}
-                                />
-                                        <div className="ml-3 flex-1">
-                                          <div className="flex items-start justify-between gap-2">
-                                            <div className="text-sm font-medium text-gray-900">
-                                              {session.title || 'Unnamed Session'}
-                                            </div>
-                                            <span className={`text-xs font-medium ${getSessionStatus(session).color}`}>
-                                              {getSessionStatus(session).text}
-                                </span>
-                                          </div>
-                                          <div className="text-xs text-gray-500 mt-0.5">
-                                            {formatSessionDateRange(session)}
-                                          </div>
-                                        </div>
-                              </label>
-                            ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        <p className="mt-1 text-xs text-gray-500">
+                          Add to all current and future sessions for this product
+                        </p>
                       </div>
                     )}
                   </div>
-                )}
+                </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="mt-6 pt-6 border-t border-gray-200 flex justify-end">
+              {/* Footer */}
+              <div className="flex gap-3 justify-end mt-6 pt-4 border-gray-200">
                 <button
                   onClick={handleAddUser}
-                  disabled={Boolean(
-                    isAddingUser ||
-                      !newUserData.name.trim() ||
-                      !newUserData.email.trim() ||
-                      (viewMode === 'session-admin' &&
-                        (!selectedProductId ||
-                          (!useAllSessionsForStakeholder && newUserData.stakeholderSessionIds.length === 0))) ||
-                      (viewMode === 'system-admin' &&
-                        accordionOpen.sessionAdmin &&
-                        selectedProductIdForSessionAdmin &&
-                        !useAllSessionsForSessionAdmin &&
-                        newUserData.sessionAdminIds.length === 0) ||
-                      (viewMode === 'system-admin' &&
-                        accordionOpen.stakeholder &&
-                        selectedProductId &&
-                        !useAllSessionsForStakeholder &&
-                        newUserData.stakeholderSessionIds.length === 0)
-                  )}
-                  className="px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  disabled={isAddingUser || !newUserData.name.trim() || !newUserData.email.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-[#2d4660] rounded-md hover:bg-[#1E5461] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isAddingUser ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      {getRoleButtonLabel(true)}
-                    </>
-                  ) : (
-                    getRoleButtonLabel(false)
-                  )}
+                  {(() => {
+                    const roles: string[] = [];
+                    if (newUserData.isSystemAdmin) roles.push('System Admin');
+                    if (newUserData.isProductOwner && newUserData.productOwnerProductId) roles.push('Product Owner');
+                    if (newUserData.isStakeholder && newUserData.stakeholderProductId) roles.push('Stakeholder');
+                    
+                    if (roles.length === 0) {
+                      return isAddingUser ? 'Creating User...' : 'Create User';
+                    }
+                    const label = roles.join(' & ');
+                    return isAddingUser ? `Adding ${label}...` : `Add ${label}`;
+                  })()}
                 </button>
               </div>
             </div>
@@ -4943,163 +3399,43 @@ export default function UsersManagementScreen() {
         </div>
       )}
 
-      {/* Edit User Modal */}
-      {showEditUserModal && userToEdit && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+      {/* Alert Modal */}
+      {showAlertModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
             <div className="p-6">
-              {/* Header */}
+              {/* Icon and Title */}
               <div className="flex items-start mb-4">
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-                  <Edit className="h-6 w-6 text-blue-600" />
+                <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center ${
+                  alertModalConfig.type === 'success' ? 'bg-green-100' : 
+                  alertModalConfig.type === 'error' ? 'bg-red-100' : 
+                  'bg-blue-100'
+                }`}>
+                  {alertModalConfig.type === 'success' && <ShieldCheck className="h-6 w-6 text-green-600" />}
+                  {alertModalConfig.type === 'error' && <X className="h-6 w-6 text-red-600" />}
+                  {alertModalConfig.type === 'info' && <Shield className="h-6 w-6 text-blue-600" />}
                 </div>
                 <div className="ml-4 flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-1">
-                    Edit User
-                  </h2>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                    {alertModalConfig.title}
+                  </h3>
                   <p className="text-sm text-gray-600">
-                    Update user name and email address
+                    {alertModalConfig.message}
                   </p>
                 </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end mt-6">
                 <button
-                  onClick={() => {
-                    setShowEditUserModal(false);
-                    setUserToEdit(null);
-                    setEditingUserName('');
-                    setEditingUserEmail('');
-                  }}
-                  className="flex-shrink-0 ml-4 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close modal"
+                  onClick={() => setShowAlertModal(false)}
+                  className={`px-4 py-2 text-sm font-medium text-white rounded-md transition-colors ${
+                    alertModalConfig.type === 'success' ? 'bg-green-600 hover:bg-green-700' : 
+                    alertModalConfig.type === 'error' ? 'bg-red-600 hover:bg-red-700' : 
+                    'bg-blue-600 hover:bg-blue-700'
+                  }`}
                 >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* Form */}
-              <div className="space-y-4">
-                {/* Name */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Full Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={editingUserName}
-                    onChange={(e) => setEditingUserName(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
-                    placeholder="John Doe"
-                    disabled={isUpdatingUser}
-                  />
-                </div>
-
-                {/* Email */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={editingUserEmail}
-                    onChange={(e) => setEditingUserEmail(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#2D4660] focus:border-transparent"
-                    placeholder="john.doe@newmill.com"
-                    disabled={isUpdatingUser}
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  onClick={() => {
-                    setShowEditUserModal(false);
-                    setUserToEdit(null);
-                    setEditingUserName('');
-                    setEditingUserEmail('');
-                  }}
-                  className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  disabled={isUpdatingUser}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleUpdateUser}
-                  disabled={isUpdatingUser || !editingUserName.trim() || !editingUserEmail.trim()}
-                  className="px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isUpdatingUser ? 'Updating...' : 'Update User'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Success Modal */}
-      {showSuccessModal && successModalData && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-start mb-4">
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-                  <CheckCircle className="h-6 w-6 text-green-600" />
-                </div>
-                <div className="ml-4 flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-1">
-                    {successModalData.userType} Created Successfully!
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    The user account has been created and roles have been assigned.
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowSuccessModal(false);
-                    setSuccessModalData(null);
-                  }}
-                  className="flex-shrink-0 ml-4 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label="Close modal"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* User Info */}
-              <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Email Address</div>
-                    <div className="text-sm font-medium text-gray-900">{successModalData.email}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                <div className="flex">
-                  <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                  <div className="ml-2">
-                    <div className="text-sm font-semibold text-blue-800 mb-1">
-                      User Authentication
-                    </div>
-                    <div className="text-xs text-blue-700">
-                      The user will sign in using their company Azure AD credentials. No password is needed.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Button */}
-              <div className="flex justify-end">
-                <button
-                  onClick={() => {
-                    setShowSuccessModal(false);
-                    setSuccessModalData(null);
-                  }}
-                  className="px-4 py-2.5 bg-[#2D4660] text-white rounded-lg hover:bg-[#173B65] transition-colors"
-                >
-                  Done
+                  OK
                 </button>
               </div>
             </div>

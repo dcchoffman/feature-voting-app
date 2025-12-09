@@ -161,7 +161,7 @@ const getRoleBadgeInfo = (
   }
   if (isSessionAdmin) {
     return { 
-      label: 'Session Admin', 
+      label: 'Product Owner', 
       className: 'text-[#576C71]',
       icon: <Shield className="h-3.5 w-3.5" />
     };
@@ -178,7 +178,7 @@ const getRoleBadgeInfo = (
 
 // Helper function to get badge info from currentRole (view mode)
 const getRoleBadgeInfoFromCurrentRole = (
-  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+  currentRole: 'stakeholder' | 'product-owner' | 'system-admin'
 ): RoleBadgeInfo | null => {
   switch (currentRole) {
     case 'system-admin':
@@ -187,9 +187,9 @@ const getRoleBadgeInfoFromCurrentRole = (
         className: 'text-[#C89212]',
         icon: <Crown className="h-3.5 w-3.5" />
       };
-    case 'session-admin':
+    case 'product-owner':
       return { 
-        label: 'Session Admin', 
+        label: 'Product Owner', 
         className: 'text-[#576C71]',
         icon: <Shield className="h-3.5 w-3.5" />
       };
@@ -209,9 +209,9 @@ const getPrimaryRole = (
   isSystemAdmin: boolean,
   isSessionAdmin: boolean,
   isStakeholder: boolean
-): 'stakeholder' | 'session-admin' | 'system-admin' => {
+): 'stakeholder' | 'product-owner' | 'system-admin' => {
   if (isSystemAdmin) return 'system-admin';
-  if (isSessionAdmin) return 'session-admin';
+  if (isSessionAdmin) return 'product-owner';
   return 'stakeholder';
 };
 
@@ -220,7 +220,7 @@ const getRoleBadgeDisplay = (
   isSystemAdmin: boolean,
   isSessionAdmin: boolean,
   isStakeholder: boolean,
-  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+  currentRole: 'stakeholder' | 'product-owner' | 'system-admin'
 ): React.ReactNode => {
   const primaryRole = getPrimaryRole(isSystemAdmin, isSessionAdmin, isStakeholder);
   const primaryBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
@@ -827,6 +827,7 @@ interface FeatureCardProps {
   shuffleStage?: 'idle' | 'fadeOut' | 'rearranging' | 'fadeIn';
   currentUser?: any;
   onRequestInfo?: (featureId: string) => void;
+  onViewAttachment?: (url: string) => void;
 }
 
 const FeatureCard = React.memo(function FeatureCard({
@@ -838,7 +839,8 @@ const FeatureCard = React.memo(function FeatureCard({
   isShuffling = false,
   shuffleStage = 'idle',
   currentUser,
-  onRequestInfo
+  onRequestInfo,
+  onViewAttachment
 }: FeatureCardProps) {
   const [infoRequested, setInfoRequested] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -897,7 +899,45 @@ const FeatureCard = React.memo(function FeatureCard({
         </div>
 
         {feature.description ? (
-          <p className="text-gray-600 mb-4 flex-grow">{feature.description}</p>
+          <>
+            <p className="text-gray-600 mb-4 flex-grow">{feature.description}</p>
+            
+            {/* Attachment Thumbnails */}
+            {feature.attachmentUrls && feature.attachmentUrls.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {feature.attachmentUrls.map((url, index) => {
+                  const isImage = url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                  const isPDF = url.match(/\.pdf$/i);
+                  
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => onViewAttachment?.(url)}
+                      className="relative border border-gray-300 rounded overflow-hidden hover:border-[#C89212] transition-colors cursor-pointer"
+                      style={{ width: '60px', height: '60px' }}
+                      title={`View attachment ${index + 1}`}
+                    >
+                      {isImage ? (
+                        <img
+                          src={url}
+                          alt={`Attachment ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : isPDF ? (
+                        <div className="w-full h-full flex items-center justify-center bg-red-50">
+                          <Paperclip className="h-6 w-6 text-red-600" />
+                        </div>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                          <Paperclip className="h-6 w-6 text-gray-600" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
         ) : (
           <div className="mb-4 flex-grow">
             <p className="text-gray-400 italic mb-3">No description provided</p>
@@ -1063,7 +1103,7 @@ interface ResultsScreenProps {
   isSystemAdmin: boolean;
   isSessionAdmin: boolean;
   isStakeholder: boolean;
-  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
+  currentRole?: 'stakeholder' | 'product-owner' | 'system-admin';
 }
 
 function ResultsScreen({ 
@@ -1080,7 +1120,7 @@ function ResultsScreen({
   isSystemAdmin,
   isSessionAdmin,
   isStakeholder,
-  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder'
+  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'product-owner' : 'stakeholder'
 }: ResultsScreenProps) {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1392,25 +1432,25 @@ function ThankYouScreen({ navigate, votingSession }: ThankYouScreenProps) {
 // ============================================
 
 interface FooterProps {
-  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
+  currentRole?: 'stakeholder' | 'product-owner' | 'system-admin';
   onSelectStakeholder?: () => void;
-  onSelectSessionAdmin?: () => void;
+  onSelectProductOwner?: () => void;
   onSelectSystemAdmin?: () => void;
   showRoleToggle?: boolean;
-  isSessionAdmin?: boolean; // True if user is a session admin (not system admin)
+  isSessionAdmin?: boolean; // True if user is a Product Owner (not system admin)
 }
 
 function Footer({
   currentRole = 'stakeholder',
   onSelectStakeholder,
-  onSelectSessionAdmin,
+  onSelectProductOwner,
   onSelectSystemAdmin,
   showRoleToggle = true,
   isSessionAdmin = false
 }: FooterProps) {
   const currentYear = new Date().getFullYear();
   const roleButtons: Array<{
-    key: 'stakeholder' | 'session-admin' | 'system-admin';
+    key: 'stakeholder' | 'product-owner' | 'system-admin';
     label: string;
     icon: React.ReactNode;
     onClick?: () => void;
@@ -1426,16 +1466,16 @@ function Footer({
     });
   }
 
-  if (onSelectSessionAdmin || currentRole === 'session-admin') {
+  if (onSelectProductOwner || currentRole === 'product-owner') {
     roleButtons.push({
-      key: 'session-admin',
-      label: 'Session Admin',
+      key: 'product-owner',
+      label: 'Product Owner',
       icon: <Shield className="h-4 w-4 inline mr-2" />,
-      onClick: onSelectSessionAdmin
+      onClick: onSelectProductOwner
     });
   }
 
-  // Session admins should never see System Admin option
+  // Product Owners should never see System Admin option
   if (!isSessionAdmin && (onSelectSystemAdmin || currentRole === 'system-admin')) {
     roleButtons.push({
       key: 'system-admin',
@@ -1445,8 +1485,8 @@ function Footer({
     });
   }
 
-  // Ensure buttons are in the correct order: Stakeholder (if present), Session Admin, System Admin (rightmost)
-  const buttonOrder: Array<'stakeholder' | 'session-admin' | 'system-admin'> = ['stakeholder', 'session-admin', 'system-admin'];
+  // Ensure buttons are in the correct order: Stakeholder (if present), Product Owner, System Admin (rightmost)
+  const buttonOrder: Array<'stakeholder' | 'product-owner' | 'system-admin'> = ['stakeholder', 'product-owner', 'system-admin'];
   roleButtons.sort((a, b) => {
     const aIndex = buttonOrder.indexOf(a.key);
     const bIndex = buttonOrder.indexOf(b.key);
@@ -1517,7 +1557,7 @@ function Footer({
           <div>
             <h3 className="font-semibold text-gray-900 mb-2">Need Help?</h3>
             <p className="text-xs">
-              Contact your Product Owner or session administrator for assistance with voting.
+              Contact your Product Owner or Product Owneristrator for assistance with voting.
             </p>
           </div>
         </div>
@@ -1921,7 +1961,7 @@ interface AlreadyVotedScreenProps {
   isSystemAdmin: boolean;
   isSessionAdmin: boolean;
   isStakeholder: boolean;
-  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
+  currentRole?: 'stakeholder' | 'product-owner' | 'system-admin';
 }
 
 function AlreadyVotedScreen({
@@ -1936,7 +1976,7 @@ function AlreadyVotedScreen({
   isSystemAdmin,
   isSessionAdmin,
   isStakeholder,
-  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder'
+  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'product-owner' : 'stakeholder'
 }: AlreadyVotedScreenProps) {
   const [showChangeConfirm, setShowChangeConfirm] = useState(false);
   
@@ -2105,7 +2145,7 @@ interface VotingScreenProps {
   isSystemAdmin: boolean;
   isSessionAdmin: boolean;
   isStakeholder: boolean;
-  currentRole?: 'stakeholder' | 'session-admin' | 'system-admin';
+  currentRole?: 'stakeholder' | 'product-owner' | 'system-admin';
 }
 
 const VotingScreen = React.memo(function VotingScreen({ 
@@ -2126,7 +2166,7 @@ const VotingScreen = React.memo(function VotingScreen({
   isSystemAdmin,
   isSessionAdmin,
   isStakeholder,
-  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'session-admin' : 'stakeholder'
+  currentRole = isSystemAdmin ? 'system-admin' : isSessionAdmin ? 'product-owner' : 'stakeholder'
 }: VotingScreenProps) {
   // ALL HOOKS MUST BE AT THE TOP - BEFORE ANY RETURNS
   const [displayFeatures, setDisplayFeatures] = useState([...features]);
@@ -2147,6 +2187,7 @@ const VotingScreen = React.memo(function VotingScreen({
   const [showThankYouModal, setShowThankYouModal] = useState(false);
   const [suggestionAttachments, setSuggestionAttachments] = useState<File[]>([]);
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<string[]>([]);
+  const [viewingAttachment, setViewingAttachment] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -2274,7 +2315,7 @@ const VotingScreen = React.memo(function VotingScreen({
       const result = await response.json();
       console.log('Info request created successfully:', result);
 
-      // Send emails to session admins from client-side (EmailJS requires browser context)
+      // Send emails to Product Owners from client-side (EmailJS requires browser context)
       if (result.adminEmails && result.adminEmails.length > 0 && result.emailContent) {
         // Construct the admin dashboard URL with session and feature IDs
         const basename = window.location.pathname.startsWith('/feature-voting-app') ? '/feature-voting-app' : '';
@@ -2299,7 +2340,7 @@ const VotingScreen = React.memo(function VotingScreen({
 
         // Wait for all emails to be sent (or fail gracefully)
         await Promise.all(emailPromises);
-        console.log(`Emails sent to ${result.adminEmails.length} session admin(s)`);
+        console.log(`Emails sent to ${result.adminEmails.length} Product Owner(s)`);
       }
     } catch (error: any) {
       console.error('Error submitting info request:', error);
@@ -2474,7 +2515,7 @@ const VotingScreen = React.memo(function VotingScreen({
         attachment_urls: attachmentUrls.length > 0 ? attachmentUrls : null
       });
 
-      // Get session admins and send emails
+      // Get Product Owners and send emails
       try {
         const sessionAdmins = await db.getSessionAdmins(sessionId);
         const adminEmails = sessionAdmins
@@ -2925,6 +2966,7 @@ const VotingScreen = React.memo(function VotingScreen({
               shuffleStage={shuffleStage}
               currentUser={currentUser}
               onRequestInfo={handleRequestInfo}
+              onViewAttachment={setViewingAttachment}
             />
           );
         })}
@@ -3159,10 +3201,55 @@ const VotingScreen = React.memo(function VotingScreen({
             Your feature suggestion has been submitted successfully.
           </p>
           <p className="text-sm text-gray-500">
-            The session admins have been notified and will review your suggestion.
+            The Product Owners have been notified and will review your suggestion.
           </p>
         </div>
       </Modal>
+
+      {/* Attachment Viewer Modal */}
+      {viewingAttachment && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
+          onClick={() => setViewingAttachment(null)}
+        >
+          <button
+            onClick={() => setViewingAttachment(null)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors z-10"
+            title="Close"
+          >
+            <X className="h-8 w-8" />
+          </button>
+          <div className="max-w-7xl max-h-full w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            {viewingAttachment.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+              <img
+                src={viewingAttachment}
+                alt="Attachment"
+                className="max-w-full max-h-full object-contain"
+              />
+            ) : viewingAttachment.match(/\.pdf$/i) ? (
+              <iframe
+                src={viewingAttachment}
+                className="w-full h-full bg-white"
+                title="PDF Viewer"
+              />
+            ) : (
+              <div className="text-white text-center">
+                <Paperclip className="h-16 w-16 mx-auto mb-4" />
+                <p className="mb-4">Unable to preview this file type</p>
+                <a
+                  href={viewingAttachment}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#C89212] hover:text-[#A07810] underline"
+                >
+                  Open in new tab
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 });
@@ -3262,6 +3349,7 @@ function FeatureVotingSystem({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [suggestedFeatures, setSuggestedFeatures] = useState<FeatureSuggestion[]>([]);
   const [futureSessions, setFutureSessions] = useState<Array<{ id: string; title: string; startDate: string }>>([]);
+  const [viewingAttachment, setViewingAttachment] = useState<string | null>(null);
   // Initialize adminPerspective from URL params, sessionStorage, or default to primary role
   const getDefaultAdminPerspective = (): 'session' | 'system' => {
     // Check URL params first
@@ -3441,25 +3529,47 @@ useEffect(() => {
     }
     
     if (azureService.isTokenExpired(config.tokenExpiresAt)) {
-      const tokens = await azureService.refreshAccessToken(config.refreshToken);
-      const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
-      
-      const updatedConfig = {
-        ...config,
-        accessToken: tokens.accessToken,
-        tokenExpiresAt: expiresAt
-      };
-      
-      if (currentSession) {
-        await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
-        setAzureDevOpsConfig(updatedConfig);
+      try {
+        const tokens = await azureService.refreshAccessToken(config.refreshToken);
+        const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString();
+        
+        const updatedConfig = {
+          ...config,
+          accessToken: tokens.accessToken,
+          tokenExpiresAt: expiresAt
+        };
+        
+        if (currentSession) {
+          await db.saveAzureDevOpsConfig(currentSession.id, updatedConfig);
+          setAzureDevOpsConfig(updatedConfig);
+        }
+        
+        return tokens.accessToken;
+      } catch (error) {
+        // Check if it's an expired refresh token error (AADSTS700084)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('AADSTS700084') || errorMessage.includes('refresh token')) {
+          console.log('Refresh token expired, redirecting to login...');
+          // Clear the expired config
+          if (currentSession) {
+            await db.saveAzureDevOpsConfig(currentSession.id, {
+              enabled: false,
+              organization: config.organization,
+              project: config.project,
+              accessToken: null,
+              refreshToken: null,
+              tokenExpiresAt: null
+            });
+          }
+          // Redirect to login
+          navigate('/login');
+        }
+        throw error;
       }
-      
-      return tokens.accessToken;
     }
     
     return config.accessToken;
-  }, [currentSession]);
+  }, [currentSession, navigate]);
 
   const buildFeaturesWithVotes = useCallback(async (): Promise<Feature[]> => {
     if (!currentSession) return [];
@@ -3469,7 +3579,7 @@ useEffect(() => {
       db.getVotes(currentSession.id)
     ]);
 
-    return featuresData.map(feature => {
+    const result = featuresData.map(feature => {
       const featureVotes = votesData.filter(v => v.feature_id === feature.id);
       const voters = featureVotes.map(v => ({
         userId: v.user_id,
@@ -3479,7 +3589,7 @@ useEffect(() => {
       }));
       const totalVotes = voters.reduce((sum, v) => sum + v.voteCount, 0);
 
-      return {
+      const mappedFeature = {
         id: feature.id,
         title: feature.title,
         description: feature.description,
@@ -3491,10 +3601,15 @@ useEffect(() => {
         azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
         azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
         workItemType: feature.workItemType || feature.work_item_type || null,
+        attachmentUrls: feature.attachmentUrls || feature.attachment_urls || null,
         votes: totalVotes,
         voters
       };
+
+      return mappedFeature;
     });
+
+    return result;
   }, [currentSession]);
 
   const loadFeatureSuggestions = useCallback(async () => {
@@ -3625,6 +3740,7 @@ useEffect(() => {
             azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
             azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
             workItemType: feature.workItemType || feature.work_item_type || null,
+            attachmentUrls: feature.attachmentUrls || feature.attachment_urls || null,
             votes: totalVotes,
             voters
           };
@@ -4066,7 +4182,32 @@ useEffect(() => {
       const workItems = await azureService.fetchAzureDevOpsWorkItems(configWithValidToken);
       const newFeatures = azureService.convertWorkItemsToFeatures(workItems);
       
-      const featuresWithTruncatedDescriptions = newFeatures.map(feature => {
+      // Upload Azure images immediately for preview
+      const featuresWithUploadedImages = await Promise.all(
+        newFeatures.map(async (feature) => {
+          if (feature.azureImageUrls && feature.azureImageUrls.length > 0) {
+            try {
+              const uploadedUrls = await azureService.uploadAzureDevOpsImagesToSupabase(
+                feature.azureImageUrls,
+                feature.id,
+                validToken
+              );
+              
+              return {
+                ...feature,
+                attachmentUrls: uploadedUrls.length > 0 ? uploadedUrls : undefined,
+                azureImageUrls: undefined // Clear temp field after upload
+              };
+            } catch (error) {
+              console.error('Error uploading Azure images for preview:', feature.title, error);
+              return feature;
+            }
+          }
+          return feature;
+        })
+      );
+      
+      const featuresWithTruncatedDescriptions = featuresWithUploadedImages.map(feature => {
         console.log(`[Preview] Feature ${feature.id} "${feature.title}": epic="${feature.epic}", epicId="${feature.epicId}"`);
         return {
           ...feature,
@@ -4219,6 +4360,13 @@ useEffect(() => {
             // If replaceAll is true, skip the modal and replace automatically
             if (replaceAll) {
               console.log('handleConfirmSync: Auto-replacing existing feature (replace-all)', existing.id, feature.title);
+              
+              // Merge existing attachments with new Azure attachments
+              const mergedAttachments = [
+                ...(existing.attachmentUrls || []),
+                ...(feature.attachmentUrls || [])
+              ];
+              
               await db.updateFeature(existing.id, {
                 title: feature.title,
                 description: truncatedDescription,
@@ -4229,7 +4377,8 @@ useEffect(() => {
                 tags: feature.tags,
                 azure_devops_id: feature.azureDevOpsId,
                 azure_devops_url: feature.azureDevOpsUrl,
-                workItemType: feature.workItemType || null
+                workItemType: feature.workItemType || null,
+                attachmentUrls: mergedAttachments.length > 0 ? mergedAttachments : null
               });
               processedFeatures.push(feature);
               continue;
@@ -4262,6 +4411,13 @@ useEffect(() => {
             } else if (userAction === 'replace-all') {
               replaceAll = true;
               console.log('handleConfirmSync: Replace-all selected, replacing current and all future conflicts');
+              
+              // Merge existing attachments with new Azure attachments
+              const mergedAttachments = [
+                ...(existing.attachmentUrls || []),
+                ...(feature.attachmentUrls || [])
+              ];
+              
               await db.updateFeature(existing.id, {
                 title: feature.title,
                 description: truncatedDescription,
@@ -4272,11 +4428,19 @@ useEffect(() => {
                 tags: feature.tags,
                 azure_devops_id: feature.azureDevOpsId,
                 azure_devops_url: feature.azureDevOpsUrl,
-                workItemType: feature.workItemType || null
+                workItemType: feature.workItemType || null,
+                attachmentUrls: mergedAttachments.length > 0 ? mergedAttachments : null
               });
               processedFeatures.push(feature);
             } else if (userAction === 'replace') {
               console.log('handleConfirmSync: Replacing existing feature', existing.id, feature.title);
+              
+              // Merge existing attachments with new Azure attachments
+              const mergedAttachments = [
+                ...(existing.attachmentUrls || []),
+                ...(feature.attachmentUrls || [])
+              ];
+              
               await db.updateFeature(existing.id, {
                 title: feature.title,
                 description: truncatedDescription,
@@ -4287,7 +4451,8 @@ useEffect(() => {
                 tags: feature.tags,
                 azure_devops_id: feature.azureDevOpsId,
                 azure_devops_url: feature.azureDevOpsUrl,
-                workItemType: feature.workItemType || null
+                workItemType: feature.workItemType || null,
+                attachmentUrls: mergedAttachments.length > 0 ? mergedAttachments : null
               });
               processedFeatures.push(feature);
             }
@@ -4304,7 +4469,8 @@ useEffect(() => {
               tags: feature.tags,
               azure_devops_id: feature.azureDevOpsId,
               azure_devops_url: feature.azureDevOpsUrl,
-              workItemType: feature.workItemType || null
+              workItemType: feature.workItemType || null,
+              attachmentUrls: feature.attachmentUrls || null
             });
             console.log('handleConfirmSync: Created feature', created);
             processedFeatures.push(feature);
@@ -4350,6 +4516,7 @@ useEffect(() => {
           azureDevOpsId: feature.azure_devops_id || feature.azureDevOpsId || null,
           azureDevOpsUrl: feature.azure_devops_url || feature.azureDevOpsUrl || null,
           workItemType: feature.workItemType || feature.work_item_type || null,
+          attachmentUrls: feature.attachmentUrls || feature.attachment_urls || null,
           votes: totalVotes,
           voters
         };
@@ -4504,19 +4671,20 @@ useEffect(() => {
   }, [currentSession]);
 
   const handleUpdateFeature = useCallback(async (updatedFeature: Feature) => {
-    try {
+    try {      
       await db.updateFeature(updatedFeature.id, {
         title: updatedFeature.title,
         description: updatedFeature.description,
         epic: updatedFeature.epic,
-        epicId: updatedFeature.epicId || null
+        epicId: updatedFeature.epicId || null,
+        attachmentUrls: updatedFeature.attachmentUrls || null
       });
       
       setFeatures(prev => prev.map(f => f.id === updatedFeature.id ? updatedFeature : f));
       setEditingFeature(null);
     } catch (error) {
       console.error('Error updating feature:', error);
-      alert('Failed to update feature');
+      alert('Failed to update feature: ' + (error instanceof Error ? error.message : String(error)));
     }
   }, []);
 
@@ -4982,7 +5150,7 @@ const handleDeleteSession = useCallback(async () => {
             isSystemAdmin={isSystemAdmin}
             isSessionAdmin={sessionAdminRole}
             isStakeholder={isStakeholder}
-            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
+            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'product-owner') : 'stakeholder'}
           />
         );
       case 'results':
@@ -5001,7 +5169,7 @@ const handleDeleteSession = useCallback(async () => {
             isSystemAdmin={isSystemAdmin}
             isSessionAdmin={sessionAdminRole}
             isStakeholder={isStakeholder}
-            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
+            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'product-owner') : 'stakeholder'}
           />
         );
       case 'thankyou':
@@ -5032,7 +5200,7 @@ const handleDeleteSession = useCallback(async () => {
             isSystemAdmin={isSystemAdmin}
             isSessionAdmin={sessionAdminRole}
             isStakeholder={isStakeholder}
-            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
+            currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'product-owner') : 'stakeholder'}
           />
         );
     }
@@ -5221,9 +5389,9 @@ const handleDeleteSession = useCallback(async () => {
         </div>
         
         <Footer 
-        currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'session-admin') : 'stakeholder'}
+        currentRole={isAdmin ? (adminPerspective === 'system' ? 'system-admin' : 'product-owner') : 'stakeholder'}
         onSelectStakeholder={handleShowVoting}
-        onSelectSessionAdmin={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
+        onSelectProductOwner={isAdmin || isSystemAdmin ? handleSelectSessionPerspective : undefined}
         onSelectSystemAdmin={isSystemAdmin ? handleSelectSystemPerspective : undefined}
         showRoleToggle={isSystemAdmin || sessionAdminRole}
         isSessionAdmin={sessionAdminRole && !isSystemAdmin}
@@ -5258,6 +5426,51 @@ const handleDeleteSession = useCallback(async () => {
         confirmText={isDeletingSession ? 'Deleting…' : 'Delete Session'}
         type="delete"
       />
+
+      {/* Attachment Viewer Modal */}
+      {viewingAttachment && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
+          onClick={() => setViewingAttachment(null)}
+        >
+          <button
+            onClick={() => setViewingAttachment(null)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors z-10"
+            title="Close"
+          >
+            <X className="h-8 w-8" />
+          </button>
+          <div className="max-w-7xl max-h-full w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            {viewingAttachment.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+              <img
+                src={viewingAttachment}
+                alt="Attachment"
+                className="max-w-full max-h-full object-contain"
+              />
+            ) : viewingAttachment.match(/\.pdf$/i) ? (
+              <iframe
+                src={viewingAttachment}
+                className="w-full h-full bg-white"
+                title="PDF Viewer"
+              />
+            ) : (
+              <div className="text-white text-center">
+                <Paperclip className="h-16 w-16 mx-auto mb-4" />
+                <p className="mb-4">Unable to preview this file type</p>
+                <a
+                  href={viewingAttachment}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#C89212] hover:text-[#A07810] underline"
+                >
+                  Open in new tab
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       </div>
     </>
   );
@@ -5268,3 +5481,4 @@ export default FeatureVotingSystem;
 // ============================================
 // END OF FILE
 // ============================================
+

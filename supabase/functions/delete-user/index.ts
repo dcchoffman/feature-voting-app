@@ -88,29 +88,18 @@ serve(async (req) => {
       );
     }
 
-    // Get all sessions to remove user from
-    const { data: allSessions } = await supabase
-      .from('voting_sessions')
-      .select('id');
+    // Remove from all products (product-level)
+    // Remove as Product Owner
+    await supabase
+      .from('product_product_owners')
+      .delete()
+      .eq('user_id', userId);
 
-    const sessions = allSessions || [];
-
-    // Remove from all sessions
-    for (const session of sessions) {
-      // Remove as session admin
-      await supabase
-        .from('session_admins')
-        .delete()
-        .eq('session_id', session.id)
-        .eq('user_id', userId);
-
-      // Remove as stakeholder (by email)
-      await supabase
-        .from('session_stakeholders')
-        .delete()
-        .eq('session_id', session.id)
-        .eq('user_email', userToDelete.email.toLowerCase());
-    }
+    // Remove as Stakeholder (by email)
+    await supabase
+      .from('product_stakeholders')
+      .delete()
+      .eq('user_email', userToDelete.email.toLowerCase());
 
     // Remove system admin role if applicable
     await supabase

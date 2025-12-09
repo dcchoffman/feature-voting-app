@@ -50,7 +50,7 @@ export default function LoginScreen() {
         if (session) {
           setCurrentSession(session);
           
-          // Check if user is system admin, session admin, or stakeholder
+          // Check if user is system admin, Product Owner, or stakeholder
           console.log('[LoginScreen] Checking user roles...');
           const [isSysAdmin, isAdmin, isStakeholder] = await Promise.all([
             db.isUserSystemAdmin(user.id),
@@ -177,7 +177,7 @@ export default function LoginScreen() {
           // Extract name from email (fallback)
           const fallbackName = email.split('@')[0].replace(/\./g, ' ');
           const productName = result.productName || 'the product';
-          const roleName = action === 'grant-admin' ? 'Session Admin' : 'Stakeholder';
+          const roleName = action === 'grant-admin' ? 'Product Owner' : 'Stakeholder';
 
           // Get requester name (try to get from user, otherwise use fallback)
           let requesterName = fallbackName;
@@ -635,7 +635,7 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
 
     setIsSubmitting(true);
     try {
-      // Get session admins for the selected product
+      // Get Product Owners for the selected product
       const admins = await db.getSessionAdminsForProduct(selectedProductId);
       
       if (admins.length === 0) {
@@ -710,7 +710,7 @@ const RequestAccessModal = React.memo(function RequestAccessModal({ isOpen, onCl
               <tr>
                 <td width="50%" align="left" valign="top" style="padding-right: 10px;">
                   <a href="${loginUrl}?token=${adminToken}&action=grant-admin&email=${encodeURIComponent(requestEmail)}&product=${encodeURIComponent(selectedProductId)}" style="display: inline-block; padding: 12px 20px; background-color: #C89212; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 13px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); text-align: center; line-height: 1.5; width: 100%; max-width: 240px; min-width: 240px;">
-                    Grant Access as<br /><span style="font-size: 18px; font-weight: 700;">Session Admin</span>
+                    Grant Access as<br /><span style="font-size: 18px; font-weight: 700;">Product Owner</span>
                   </a>
                 </td>
                 <td width="50%" align="right" valign="top" style="padding-left: 10px;">

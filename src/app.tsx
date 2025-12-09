@@ -13,6 +13,7 @@ import FeatureVotingSystem from './screens/FeatureVoting';
 import UnauthorizedScreen from './screens/UnauthorizedScreen';
 import SystemAdminsScreen from './screens/SystemAdminsScreen';
 import UsersManagementScreen from './screens/UsersManagementScreen';
+import UsersManagementScreenMultiRow from './screens/UsersManagementScreen_MultiRow';
 import DecorativeLines from './components/DecorativeLines';
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
             <Route path="/unauthorized" element={<UnauthorizedScreen />} />
             <Route path="/system-admins" element={<SystemAdminsScreen />} />
             <Route path="/users" element={<UsersManagementScreen />} />
+            <Route path="/users-multirow" element={<UsersManagementScreenMultiRow />} />
           </Routes>
         </BrowserRouter>
       </SessionProvider>

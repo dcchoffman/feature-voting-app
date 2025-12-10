@@ -1,8 +1,6 @@
-// This is a new version of UsersManagementScreen with multi-row layout
+// UsersManagementScreen with multi-row layout
 // Each user's roles (System Admin, Product Owner, Stakeholder) are displayed in separate table rows
 // The USER and ACTIONS columns span all rows for that user using rowSpan
-
-// TO TEST: Temporarily rename this file to UsersManagementScreen.tsx (backup the original first)
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -17,10 +15,11 @@ import {
 } from 'lucide-react';
 import { searchAzureAdUsers, type AzureAdUser } from '../services/azureAdUserService';
 import { useSession } from '../contexts/SessionContext';
-import { getAllUsers, getUserRoleInfo, type UserRoleInfo } from '../services/databaseService';
+import { getAllUsers, getUserRoleInfo, getSessionById, type UserRoleInfo } from '../services/databaseService';
 import { formatDate } from '../utils/date';
 import type { VotingSession, Product } from '../types';
 import { getProductColor } from '../utils/productColors';
+import { Footer } from '../screens/FeatureVoting';
 
 // Define SessionWithAssignment type locally
 interface SessionWithAssignment extends VotingSession {
@@ -37,6 +36,27 @@ const formatSessionDateRange = (session: any): string => {
   return `${start} - ${end}`;
 };
 
+// Helper function to format name as "First Last"
+const formatUserName = (name: string | null | undefined): string => {
+  if (!name) return '';
+  
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  
+  // If name contains a comma, assume it's "Last, First" format
+  if (trimmed.includes(',')) {
+    const parts = trimmed.split(',').map(p => p.trim()).filter(p => p);
+    if (parts.length === 2) {
+      return `${parts[1]} ${parts[0]}`;
+    }
+    // If more than 2 parts, just reverse the order
+    return parts.reverse().join(' ');
+  }
+  
+  // Otherwise, assume it's already "First Last" format
+  return trimmed;
+};
+
 type RoleType = 'system-admin' | 'admin' | 'stakeholder';
 
 interface UserWithRoles {
@@ -49,6 +69,8 @@ interface UserWithRoles {
   roles: UserRoleInfo;
   adminInSessions?: SessionWithAssignment[];
   stakeholderInSessions?: SessionWithAssignment[];
+  productOwnerProductIds?: Set<string>; // Product IDs where user is Product Owner (from product_product_owners)
+  stakeholderProductIds?: Set<string>; // Product IDs where user is Stakeholder (from product_stakeholders)
 }
 
 interface RoleRow {
@@ -68,7 +90,7 @@ interface RoleBadgeInfo {
 
 const getRoleBadgeInfo = (
   isSystemAdmin: boolean,
-  isSessionAdmin: boolean,
+  isProductOwner: boolean,
   isStakeholder: boolean
 ): RoleBadgeInfo | null => {
   if (isSystemAdmin) {
@@ -78,7 +100,7 @@ const getRoleBadgeInfo = (
       icon: <Crown className="h-3.5 w-3.5" />
     };
   }
-  if (isSessionAdmin) {
+  if (isProductOwner) {
     return { 
       label: 'Product Owner', 
       className: 'text-[#576C71]',
@@ -96,7 +118,7 @@ const getRoleBadgeInfo = (
 };
 
 const getRoleBadgeInfoFromCurrentRole = (
-  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+  currentRole: 'stakeholder' | 'product-owner' | 'system-admin'
 ): RoleBadgeInfo | null => {
   switch (currentRole) {
     case 'system-admin':
@@ -105,7 +127,7 @@ const getRoleBadgeInfoFromCurrentRole = (
         className: 'text-[#C89212]',
         icon: <Crown className="h-3.5 w-3.5" />
       };
-    case 'session-admin':
+    case 'product-owner':
       return { 
         label: 'Product Owner', 
         className: 'text-[#576C71]',
@@ -124,22 +146,22 @@ const getRoleBadgeInfoFromCurrentRole = (
 
 const getPrimaryRole = (
   isSystemAdmin: boolean,
-  isSessionAdmin: boolean,
+  isProductOwner: boolean,
   isStakeholder: boolean
-): 'stakeholder' | 'session-admin' | 'system-admin' => {
+): 'stakeholder' | 'product-owner' | 'system-admin' => {
   if (isSystemAdmin) return 'system-admin';
-  if (isSessionAdmin) return 'session-admin';
+  if (isProductOwner) return 'product-owner';
   return 'stakeholder';
 };
 
 const getRoleBadgeDisplay = (
   isSystemAdmin: boolean,
-  isSessionAdmin: boolean,
+  isProductOwner: boolean,
   isStakeholder: boolean,
-  currentRole: 'stakeholder' | 'session-admin' | 'system-admin'
+  currentRole: 'stakeholder' | 'product-owner' | 'system-admin'
 ): React.ReactNode => {
-  const primaryRole = getPrimaryRole(isSystemAdmin, isSessionAdmin, isStakeholder);
-  const primaryBadge = getRoleBadgeInfo(isSystemAdmin, isSessionAdmin, isStakeholder);
+  const primaryRole = getPrimaryRole(isSystemAdmin, isProductOwner, isStakeholder);
+  const primaryBadge = getRoleBadgeInfo(isSystemAdmin, isProductOwner, isStakeholder);
   
   if (!primaryBadge) return null;
   
@@ -180,7 +202,7 @@ const getRoleBadgeDisplay = (
   );
 };
 
-export default function UsersManagementScreenMultiRow() {
+export default function UsersManagementScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const { setCurrentSession, currentUser: sessionUser } = useSession();
@@ -195,17 +217,22 @@ export default function UsersManagementScreenMultiRow() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserProductIds, setCurrentUserProductIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterRole, setFilterRole] = useState<'all' | 'system-admin' | 'session-admin' | 'stakeholder'>(
-    urlFilter === 'product-owner' ? 'session-admin' : 
+  const [filterRole, setFilterRole] = useState<'all' | 'system-admin' | 'product-owner' | 'stakeholder'>(
+    urlFilter === 'product-owner' ? 'product-owner' : 
     urlFilter === 'stakeholder' ? 'stakeholder' : 
     urlFilter === 'system-admin' ? 'system-admin' : 'all'
   );
   const [filterProductId, setFilterProductId] = useState<string>(urlProduct || '');
-  const [viewMode, setViewMode] = useState<'system-admin' | 'session-admin'>('system-admin');
+  const [viewMode, setViewMode] = useState<'system-admin' | 'product-owner'>(() => {
+    // Initialize from sessionStorage if available
+    const saved = sessionStorage.getItem('usersViewMode') as 'system-admin' | 'product-owner' | null;
+    return saved || 'system-admin';
+  });
   const [currentUserRoles, setCurrentUserRoles] = useState<UserWithRoles | null>(null);
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
-  const [isSessionAdmin, setIsSessionAdmin] = useState(false);
+  const [isProductOwner, setIsProductOwner] = useState(false);
   const [userAdminSessions, setUserAdminSessions] = useState<string[]>([]);
   
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
@@ -216,7 +243,7 @@ export default function UsersManagementScreenMultiRow() {
   
   // Modal state
   const [showRoleModal, setShowRoleModal] = useState(false);
-  const [roleModalType, setRoleModalType] = useState<'stakeholder' | 'session-admin' | 'remove-stakeholder' | 'system-admin' | null>(null);
+  const [roleModalType, setRoleModalType] = useState<'stakeholder' | 'product-owner' | 'remove-stakeholder' | 'system-admin' | null>(null);
   const [selectedUserForRole, setSelectedUserForRole] = useState<UserWithRoles | null>(null);
   const [userSessionMemberships, setUserSessionMemberships] = useState<{
     adminSessions: string[];
@@ -341,7 +368,7 @@ export default function UsersManagementScreenMultiRow() {
   //     const { data: { user } } = await supabase.auth.getUser();
   //     if (user) {
   //       const admin = await getUserRoleInfo(user.id).then(info => info.isSystemAdmin).catch(() => true);
-  //       console.log('UsersManagementScreenMultiRow: Is system admin:', admin);
+  // ...existing code...
   //       setIsSystemAdmin(admin);
   //       if (!admin) {
   //         setViewMode('session-admin');
@@ -373,18 +400,18 @@ export default function UsersManagementScreenMultiRow() {
     return null;
   };
 
-  const canAddToMoreSessions = (user: UserWithRoles, roleType: 'stakeholder' | 'session-admin' | 'remove-stakeholder' | null) => {
+  const canAddToMoreSessions = (user: UserWithRoles, roleType: 'stakeholder' | 'product-owner' | 'remove-stakeholder' | null) => {
     if (!roleType) return false;
     
-    if (roleType === 'session-admin') {
-      return user.roles.sessionAdminCount < allSessions.length;
+    if (roleType === 'product-owner') {
+      return user.roles.productOwnerCount < allSessions.length;
     } else {
       return user.roles.stakeholderSessionCount < allSessions.length;
     }
   };
 
   // Handler functions
-  const openRoleModal = async (user: UserWithRoles, roleType: 'stakeholder' | 'session-admin' | 'remove-stakeholder' | 'system-admin') => {
+  const openRoleModal = async (user: UserWithRoles, roleType: 'stakeholder' | 'product-owner' | 'remove-stakeholder' | 'system-admin') => {
     setSelectedUserForRole(user);
     setRoleModalType(roleType);
     setRoleModalProductId('');
@@ -416,16 +443,18 @@ export default function UsersManagementScreenMultiRow() {
     }
     
     // For add operations, validate role selection
-    if ((roleModalType === 'session-admin' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && !selectedRoleToAdd) {
+    if ((roleModalType === 'product-owner' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && !selectedRoleToAdd) {
       showAlert('Missing Information', 'Please select a role to add.', 'error');
       return;
     }
 
     try {
       // Get all sessions for the selected product
+
       const sessions = allSessions.filter(s => s.product_id === roleModalProductId);
 
-      if (sessions.length === 0) {
+      // Only show 'No Sessions Found' error for product-owner and stakeholder roles
+      if ((selectedRoleToAdd === 'product-owner' || selectedRoleToAdd === 'stakeholder') && sessions.length === 0) {
         showAlert('No Sessions Found', 'There are no sessions available for this product.', 'error');
         return;
       }
@@ -436,15 +465,15 @@ export default function UsersManagementScreenMultiRow() {
         if (selectedRoleToRemove === 'system-admin') {
           // Remove System Admin role
           const { error } = await supabase
-            .from('users')
-            .update({ is_system_admin: false })
-            .eq('id', selectedUserForRole.id);
+            .from('system_admins')
+            .delete()
+            .eq('user_id', selectedUserForRole.id);
 
           if (error) throw error;
 
           showAlert(
             'Role Removed Successfully',
-            `${selectedUserForRole.name} has been removed as System Admin.`,
+            `${formatUserName(selectedUserForRole.name)} has been removed as System Admin.`,
             'success'
           );
         } else if (selectedRoleToRemove === 'product-owner') {
@@ -459,7 +488,7 @@ export default function UsersManagementScreenMultiRow() {
 
           showAlert(
             'Role Removed Successfully',
-            `${selectedUserForRole.name} has been removed as Product Owner from this product.`,
+            `${formatUserName(selectedUserForRole.name)} has been removed as Product Owner from this product.`,
             'success'
           );
         } else if (selectedRoleToRemove === 'stakeholder') {
@@ -475,7 +504,7 @@ export default function UsersManagementScreenMultiRow() {
 
           showAlert(
             'Role Removed Successfully',
-            `${selectedUserForRole.name} has been removed as Stakeholder from ${sessions.length} session(s).`,
+            `${formatUserName(selectedUserForRole.name)} has been removed as Stakeholder from ${sessions.length} session(s).`,
             'success'
           );
         }
@@ -485,33 +514,49 @@ export default function UsersManagementScreenMultiRow() {
         if (selectedRoleToAdd === 'system-admin') {
           // Add as system admin
           const { error } = await supabase
-            .from('users')
-            .update({ is_system_admin: true })
-            .eq('id', selectedUserForRole.id);
+            .from('system_admins')
+            .insert({ user_id: selectedUserForRole.id });
 
           if (error) throw error;
 
           showAlert(
             'Role Added Successfully',
-            `${selectedUserForRole.name} has been granted System Admin privileges.`,
+            `${formatUserName(selectedUserForRole.name)} has been granted System Admin privileges.`,
             'success'
           );
         } else if (selectedRoleToAdd === 'product-owner') {
-          // Add as product owner - use product_id
-          const { error } = await supabase
+          // Prevent duplicate Product Owner assignment
+          const { data: existingPO, error: fetchError } = await supabase
             .from('product_product_owners')
-            .insert({
-              product_id: roleModalProductId,
-              user_id: selectedUserForRole.id
-            });
+            .select('id')
+            .eq('product_id', roleModalProductId)
+            .eq('user_id', selectedUserForRole.id)
+            .maybeSingle();
 
-          if (error) throw error;
+          if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
-          showAlert(
-            'Role Added Successfully',
-            `${selectedUserForRole.name} has been added as Product Owner to this product.`,
-            'success'
-          );
+          if (existingPO) {
+            showAlert(
+              'Already Assigned',
+              `${formatUserName(selectedUserForRole.name)} is already a Product Owner for this product.`,
+              'info'
+            );
+          } else {
+            const { error: insertError } = await supabase
+              .from('product_product_owners')
+              .insert({
+                product_id: roleModalProductId,
+                user_id: selectedUserForRole.id
+              });
+
+            if (insertError) throw insertError;
+
+            showAlert(
+              'Role Added Successfully',
+              `${formatUserName(selectedUserForRole.name)} has been added as Product Owner to this product.`,
+              'success'
+            );
+          }
         } else if (selectedRoleToAdd === 'stakeholder') {
           // Add as stakeholder to all sessions
           const sessionIds = sessions.map(s => s.id);
@@ -529,7 +574,7 @@ export default function UsersManagementScreenMultiRow() {
 
           showAlert(
             'Role Added Successfully',
-            `${selectedUserForRole.name} has been added as Stakeholder to ${sessions.length} session(s).`,
+            `${formatUserName(selectedUserForRole.name)} has been added as Stakeholder to ${sessions.length} session(s).`,
             'success'
           );
         }
@@ -662,7 +707,11 @@ export default function UsersManagementScreenMultiRow() {
 
       // Add system admin role if selected
       if (newUserData.isSystemAdmin) {
-        await supabase.from('system_admins').insert({ user_id: newUserId });
+        const { error: systemAdminError } = await supabase.from('system_admins').insert({ user_id: newUserId });
+        if (systemAdminError) {
+          console.error('Error adding system admin:', systemAdminError);
+          throw new Error(`Failed to assign System Admin role: ${systemAdminError.message}`);
+        }
       }
 
       // Add product owner role if product selected
@@ -697,7 +746,7 @@ export default function UsersManagementScreenMultiRow() {
       closeAddUserModal();
       await loadData();
       
-      showAlert('User Created Successfully', `${newUserData.name} has been added to the system.`, 'success');
+      showAlert('User Created Successfully', `${formatUserName(newUserData.name)} has been added to the system.`, 'success');
     } catch (error: any) {
       console.error('Error creating user:', error);
       showAlert('Failed to Create User', error.message || 'An unknown error occurred. Please try again.', 'error');
@@ -729,7 +778,7 @@ export default function UsersManagementScreenMultiRow() {
   const handleRemoveAllRoles = async (userId: string, userName: string) => {
     setOpenDropdown(null);
     
-    const confirmMessage = viewMode === 'session-admin'
+    const confirmMessage = viewMode === 'product-owner'
       ? `Are you sure you want to remove ${userName} from all sessions you manage?`
       : `Are you sure you want to remove all roles from ${userName}? This will remove them from all sessions and revoke system admin access.`;
     
@@ -847,6 +896,7 @@ export default function UsersManagementScreenMultiRow() {
         const enrichedUsers = await Promise.all(
           usersData.map(async (user) => {
             const roles = await getUserRoleInfo(user.id);
+            // ...existing code...
             
             const adminInSessions: SessionWithAssignment[] = [];
             const stakeholderInSessions: SessionWithAssignment[] = [];
@@ -880,11 +930,29 @@ export default function UsersManagementScreenMultiRow() {
               });
             });
 
+            // Store product IDs directly from product_product_owners and product_stakeholders
+            // (regardless of whether there are sessions for those products)
+            const productOwnerProductIds = new Set<string>();
+            userAdminRelations.forEach(rel => {
+              if (rel.product_id) {
+                productOwnerProductIds.add(rel.product_id);
+              }
+            });
+
+            const stakeholderProductIds = new Set<string>();
+            userStakeholderRelations.forEach(rel => {
+              if (rel.product_id) {
+                stakeholderProductIds.add(rel.product_id);
+              }
+            });
+
             return {
               ...user,
               roles,
               adminInSessions,
-              stakeholderInSessions
+              stakeholderInSessions,
+              productOwnerProductIds,
+              stakeholderProductIds
             };
           })
         );
@@ -895,18 +963,70 @@ export default function UsersManagementScreenMultiRow() {
         const current = sessionUser ? enrichedUsers.find(u => u.email.toLowerCase() === sessionUser.email.toLowerCase()) : null;
         setCurrentUserRoles(current || null);
         
+        // Store current user's product IDs directly from product_product_owners table
+        if (current && adminRelationsByUser.has(current.id)) {
+          const userProductIds = new Set<string>();
+          const userAdminRelations = adminRelationsByUser.get(current.id) || [];
+          userAdminRelations.forEach(rel => {
+            if (rel.product_id) {
+              userProductIds.add(rel.product_id);
+            }
+          });
+          console.log('[UsersManagementScreen] Current user product IDs:', Array.from(userProductIds));
+          setCurrentUserProductIds(userProductIds);
+        } else {
+          console.log('[UsersManagementScreen] Current user not found or has no product assignments');
+          setCurrentUserProductIds(new Set());
+        }
+        
         // Set admin status based on current user's roles
         if (current) {
           const isUserSystemAdmin = current.roles?.isSystemAdmin || false;
-          const isUserSessionAdmin = (current.roles?.sessionAdminCount || 0) > 0;
+          const isUserProductOwner = (current.roles?.productOwnerCount || 0) > 0;
+          
+          // ...existing code...
+          
+          // TODO: Re-enable authorization check after users table is restored
+          // Authorization check: Only System Admins and Product Owners can access this screen
+          // if (!isUserSystemAdmin && !isUserProductOwner) {
+          // ...existing code...
+          //   navigate('/unauthorized');
+          //   return;
+          // }
           
           setIsSystemAdmin(isUserSystemAdmin);
-          setIsSessionAdmin(isUserSessionAdmin);
+          setIsProductOwner(isUserProductOwner);
           
-          // Set view mode: Product Owners who are NOT System Admins default to session-admin view
-          if (!isUserSystemAdmin && isUserSessionAdmin) {
-            setViewMode('session-admin');
+          // Set view mode: Product Owners who are NOT System Admins default to product-owner view
+          // But only if there's no saved viewMode in sessionStorage
+          const savedViewMode = sessionStorage.getItem('usersViewMode') as 'system-admin' | 'product-owner' | null;
+          if (!savedViewMode) {
+            if (!isUserSystemAdmin && isUserProductOwner) {
+              setViewMode('product-owner');
+              sessionStorage.setItem('usersViewMode', 'product-owner');
+            } else if (isUserSystemAdmin) {
+              setViewMode('system-admin');
+              sessionStorage.setItem('usersViewMode', 'system-admin');
+            }
+          } else {
+            // Respect the saved viewMode, but only if user has permission for that view
+            if (savedViewMode === 'system-admin' && isUserSystemAdmin) {
+              setViewMode('system-admin');
+            } else if (savedViewMode === 'product-owner' && (isUserSystemAdmin || isUserProductOwner)) {
+              setViewMode('product-owner');
+            } else {
+              // Fallback to default based on permissions
+              if (!isUserSystemAdmin && isUserProductOwner) {
+                setViewMode('product-owner');
+                sessionStorage.setItem('usersViewMode', 'product-owner');
+              } else if (isUserSystemAdmin) {
+                setViewMode('system-admin');
+                sessionStorage.setItem('usersViewMode', 'system-admin');
+              }
+            }
           }
+        } else {
+          // ...existing code...
         }
         
         const adminSessionIds = current?.adminInSessions?.map(s => s.id) || [];
@@ -958,9 +1078,16 @@ export default function UsersManagementScreenMultiRow() {
       filtered = filtered.filter(s => s.product_id === filterProductId);
     }
     
-    // In Product Owner view, only show sessions the current user manages
-    if (viewMode === 'session-admin' && !isSystemAdmin && userAdminSessions.length > 0) {
-      filtered = filtered.filter(s => userAdminSessions.includes(s.id));
+    // In Product Owner view mode, only show sessions for products the current user is assigned to as Product Owner
+    // This applies even if the current user is also a System Admin (they're viewing as Product Owner)
+    if (viewMode === 'product-owner') {
+      // Use the current user's product IDs directly from product_product_owners table
+      if (currentUserProductIds.size > 0) {
+        filtered = filtered.filter(s => s.product_id && currentUserProductIds.has(s.product_id));
+      } else {
+        // If no accessible products, return empty array
+        return [];
+      }
     }
     
     return filtered;
@@ -968,32 +1095,22 @@ export default function UsersManagementScreenMultiRow() {
 
   // Get products accessible to current user (for Add User modal dropdowns and filtering)
   const getAccessibleProducts = (): Product[] => {
-    // In Product Owner view mode, even System Admins are restricted to their assigned products
     // In System Admin view mode, System Admins see all products
     if (isSystemAdmin && viewMode === 'system-admin') {
       return allProducts;
     }
     
-    // Product Owners (and System Admins in Product Owner view) only see products they own or are stakeholders for
-    if (!currentUserRoles) return [];
-    
-    const accessibleProductIds = new Set<string>();
-    
-    // Add products where user is Product Owner
-    currentUserRoles.adminInSessions?.forEach(session => {
-      if (session.product_id) {
-        accessibleProductIds.add(session.product_id);
+    // In Product Owner view mode (even for System Admins), only see products they own (as Product Owner)
+    // Use the current user's product IDs directly from product_product_owners table
+    if (viewMode === 'product-owner') {
+      if (currentUserProductIds.size === 0) {
+        return [];
       }
-    });
+      return allProducts.filter(product => currentUserProductIds.has(product.id));
+    }
     
-    // Add products where user is Stakeholder
-    currentUserRoles.stakeholderInSessions?.forEach(session => {
-      if (session.product_id) {
-        accessibleProductIds.add(session.product_id);
-      }
-    });
-    
-    return allProducts.filter(product => accessibleProductIds.has(product.id));
+    // Fallback: if not in product-owner view and not system admin, return empty
+    return [];
   };
 
   // Get products for role modal (filtered based on add/remove and user's current assignments)
@@ -1191,8 +1308,25 @@ export default function UsersManagementScreenMultiRow() {
                   onMouseLeave={() => setHoveredSessionId(null)}
                   onClick={async (e) => {
                     e.stopPropagation();
-                    await setCurrentSession(session);
-                    navigate('/admin');
+                    // Ensure session has product_id before navigating
+                    // Load the full session from database to ensure all fields are present
+                    try {
+                      const fullSession = await getSessionById(session.id);
+                      if (fullSession) {
+                        await setCurrentSession(fullSession);
+                        navigate('/admin');
+                      } else {
+                        console.error('Session not found:', session.id);
+                        // Fallback to using the session object we have
+                        await setCurrentSession(session);
+                        navigate('/admin');
+                      }
+                    } catch (error) {
+                      console.error('Error loading session:', error);
+                      // Fallback to using the session object we have
+                      await setCurrentSession(session);
+                      navigate('/admin');
+                    }
                   }}
                 >
                   {hoveredSessionId === `${user.id}-${role.type}-${session.id}` && (
@@ -1252,33 +1386,59 @@ export default function UsersManagementScreenMultiRow() {
     
     const matchesRole = filterRole === 'all' || 
       (filterRole === 'system-admin' && user.roles.isSystemAdmin) ||
-      (filterRole === 'session-admin' && user.roles.sessionAdminCount > 0) ||
+      (filterRole === 'product-owner' && user.roles.productOwnerCount > 0) ||
       (filterRole === 'stakeholder' && user.roles.stakeholderSessionCount > 0);
     
     const matchesProduct = !filterProductId || 
       (user.adminInSessions?.some((s: any) => s.product_id === filterProductId)) ||
       (user.stakeholderInSessions?.some((s: any) => s.product_id === filterProductId));
     
-    // Product Owner restrictions: filter by accessible products
-    // Apply when: (1) in Product Owner view, OR (2) user is Product Owner but NOT System Admin
-    const shouldFilterByAccessibleProducts = viewMode === 'session-admin' || (!isSystemAdmin && isSessionAdmin);
-    
-    if (shouldFilterByAccessibleProducts) {
-      // Get accessible products for filtering
-      const accessibleProducts = getAccessibleProducts();
-      const accessibleProductIds = new Set(accessibleProducts.map(p => p.id));
-      
-      // In Product Owner view, exclude System Admins entirely
-      if (user.roles.isSystemAdmin) {
+    // In Product Owner view mode, filter to only show users who are Product Owners or Stakeholders
+    // for products the current user is assigned to as a Product Owner
+    // This applies even if the current user is also a System Admin (they're viewing as Product Owner)
+    if (viewMode === 'product-owner') {
+      // Use the current user's product IDs directly from product_product_owners table
+      // If current user has no assigned products, don't show any users
+      if (currentUserProductIds.size === 0) {
         return false;
       }
       
-      // Check if user has any sessions in accessible products
-      const hasAccessibleProduct = 
-        user.adminInSessions?.some((s: any) => accessibleProductIds.has(s.product_id)) ||
-        user.stakeholderInSessions?.some((s: any) => accessibleProductIds.has(s.product_id));
+      // Exclude System Admins (unless it's the current user viewing their own Product Owner assignments)
+      const isCurrentUser = sessionUser && user.email.toLowerCase() === sessionUser.email.toLowerCase();
+      if (user.roles.isSystemAdmin && !isCurrentUser) {
+        return false;
+      }
       
-      return matchesSearch && matchesRole && matchesProduct && hasAccessibleProduct;
+      // Only show users who have Product Owner or Stakeholder roles SPECIFICALLY in the current user's products
+      // We need to check if the user has assignments in any of the current user's products
+      
+      // Get product IDs directly from the user object (from product_product_owners and product_stakeholders tables)
+      // This includes ALL product assignments, not just products with sessions
+      const userProductOwnerProductIds = user.productOwnerProductIds || new Set<string>();
+      const userStakeholderProductIds = user.stakeholderProductIds || new Set<string>();
+      
+      // Check if user has ANY product assignment (Product Owner OR Stakeholder) that overlaps with current user's products
+      const hasProductOwnerOverlap = Array.from(userProductOwnerProductIds).some(productId => 
+        currentUserProductIds.has(productId)
+      );
+      const hasStakeholderOverlap = Array.from(userStakeholderProductIds).some(productId => 
+        currentUserProductIds.has(productId)
+      );
+      
+      const shouldShow = matchesSearch && (hasProductOwnerOverlap || hasStakeholderOverlap);
+      
+      // Debug logging (remove after testing)
+      if (!shouldShow && (user.roles.productOwnerCount > 0 || user.roles.stakeholderSessionCount > 0)) {
+        console.log(`[Filter] Hiding user ${user.name}:`, {
+          userProductOwnerProducts: Array.from(userProductOwnerProductIds),
+          userStakeholderProducts: Array.from(userStakeholderProductIds),
+          currentUserProducts: Array.from(currentUserProductIds),
+          hasProductOwnerOverlap,
+          hasStakeholderOverlap
+        });
+      }
+      
+      return shouldShow;
     }
     
     return matchesSearch && matchesRole && matchesProduct;
@@ -1321,8 +1481,8 @@ export default function UsersManagementScreenMultiRow() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      <div className="container mx-auto p-4 max-w-6xl">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="container mx-auto p-4 max-w-6xl flex-1">
         {/* Desktop: Centered logo at top */}
         <div className="hidden md:flex md:justify-center mb-2">
           <img
@@ -1348,13 +1508,12 @@ export default function UsersManagementScreenMultiRow() {
             <div className="flex-1 min-w-0">
               <h1 className="text-xl md:text-3xl font-bold text-[#2d4660] truncate">User Management</h1>
               <p className="text-sm text-gray-600 mt-1">
-                Welcome, {sessionUser?.name || 'Guest'}
+                Welcome, {formatUserName(sessionUser?.name) || 'Guest'}
                 {sessionUser && (() => {
-                  // Determine current role based on viewMode
-                  const currentRole = viewMode === 'system-admin' ? 'system-admin' : 'session-admin';
-                  // Determine user roles - use state values
+                  // Show user's actual highest role and viewing indicator
                   const userIsStakeholder = (currentUserRoles?.roles?.stakeholderSessionCount || 0) > 0;
-                  return getRoleBadgeDisplay(isSystemAdmin, isSessionAdmin, userIsStakeholder, currentRole);
+                  const currentRole = viewMode === 'system-admin' ? 'system-admin' : 'product-owner';
+                  return getRoleBadgeDisplay(isSystemAdmin, isProductOwner, userIsStakeholder, currentRole);
                 })()}
               </p>
             </div>
@@ -1419,14 +1578,14 @@ export default function UsersManagementScreenMultiRow() {
                   className="px-4 py-2 pl-12 pr-10 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-left min-w-[200px]"
                 >
                   {filterRole === 'system-admin' ? 'System Admin' :
-                   filterRole === 'session-admin' ? 'Product Owner' :
+                   filterRole === 'product-owner' ? 'Product Owner' :
                    filterRole === 'stakeholder' ? 'Stakeholder' : 'All Roles'}
                 </button>
                 
                 {/* Role Icon */}
                 <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
                   {filterRole === 'system-admin' && <Crown className="h-5 w-5 text-[#C89212]" />}
-                  {filterRole === 'session-admin' && <Shield className="h-5 w-5 text-[#576C71]" />}
+                  {filterRole === 'product-owner' && <Shield className="h-5 w-5 text-[#576C71]" />}
                   {filterRole === 'stakeholder' && <UserIcon className="h-5 w-5 text-[#8B5A4A]" />}
                   {filterRole === 'all' && <Users className="h-5 w-5 text-gray-400" />}
                 </div>
@@ -1476,7 +1635,7 @@ export default function UsersManagementScreenMultiRow() {
                     <button
                       type="button"
                       onClick={() => {
-                        setFilterRole('session-admin');
+                        setFilterRole('product-owner');
                         setShowFilterRoleDropdown(false);
                       }}
                       className="w-full px-4 py-2 pl-12 text-left hover:bg-gray-50 border-b border-gray-100 relative whitespace-nowrap"
@@ -1656,7 +1815,7 @@ export default function UsersManagementScreenMultiRow() {
                             <td className="px-4 py-4 align-top" rowSpan={roles.length}>
                               <div>
                                 <div className="text-sm font-medium text-gray-900">
-                                  {user.name}
+                                  {formatUserName(user.name)}
                                   {user.email.toLowerCase() === sessionUser?.email.toLowerCase() && (
                                     <span className="ml-2 text-xs text-[#c59f2d] font-semibold">(You)</span>
                                   )}
@@ -1839,7 +1998,7 @@ export default function UsersManagementScreenMultiRow() {
 
                                         {/* Add Role */}
                                         <button
-                                          onClick={() => openRoleModal(user, 'session-admin')}
+                                          onClick={() => openRoleModal(user, 'product-owner')}
                                           className="w-full px-4 py-3 text-left flex items-center hover:bg-green-50 text-green-700 transition-colors cursor-pointer"
                                         >
                                           <Plus className="h-5 w-5 mr-3 flex-shrink-0" />
@@ -1850,7 +2009,7 @@ export default function UsersManagementScreenMultiRow() {
                                         </button>
 
                                         {/* Remove Role - only show if user has any roles */}
-                                        {(user.roles.isSystemAdmin || user.roles.sessionAdminCount > 0 || user.roles.stakeholderSessionCount > 0) && (
+                                        {(user.roles.isSystemAdmin || user.roles.productOwnerCount > 0 || user.roles.stakeholderSessionCount > 0) && (
                                           <button
                                             onClick={() => openRoleModal(user, 'remove-stakeholder')}
                                             className="w-full px-4 py-3 text-left flex items-center hover:bg-red-50 text-red-700 border-t border-gray-200 transition-colors cursor-pointer"
@@ -1949,7 +2108,7 @@ export default function UsersManagementScreenMultiRow() {
               )}
               <div className="flex items-center">
                 <Shield className="h-4 w-4 mr-2 text-[#576C71]" />
-                <span className="text-gray-600">Product Owners: <strong>{filteredUsers.filter(u => u.roles.sessionAdminCount > 0).length}</strong></span>
+                <span className="text-gray-600">Product Owners: <strong>{filteredUsers.filter(u => u.roles.productOwnerCount > 0).length}</strong></span>
               </div>
               <div className="flex items-center">
                 <UserIcon className="h-4 w-4 mr-2 text-[#8B5A4A]" />
@@ -1959,95 +2118,8 @@ export default function UsersManagementScreenMultiRow() {
           </div>
         </div>
 
-        {/* View Toggle - Session Admin vs System Admin */}
-        {isSystemAdmin && (
-          <div className="mt-8 flex justify-center">
-            <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => {
-                  if (isSystemAdmin) {
-                    setViewMode('session-admin');
-                  }
-                }}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                  viewMode === 'session-admin'
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-                title="Product Owner View"
-              >
-                <Shield className="h-4 w-4 inline mr-2" />
-                Product Owner
-              </button>
-              <button
-                onClick={() => {
-                  if (isSystemAdmin) {
-                    setViewMode('system-admin');
-                  }
-                }}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${
-                  viewMode === 'system-admin'
-                    ? 'bg-white text-[#2d4660] shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-                disabled={!isSystemAdmin}
-                title={!isSystemAdmin ? 'Only available for System Admins' : 'System Admin View'}
-              >
-                <Crown className="h-4 w-4 inline mr-2" />
-                System Admin
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      <footer className="mt-12 bg-gray-50 border-t border-gray-200">
-        <div className="container mx-auto px-4 py-6 max-w-6xl">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-gray-600">
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">New Millennium Building Systems</h3>
-              <p className="text-xs leading-relaxed">
-                A Steel Dynamics Company<br />
-                Innovation in structural steel manufacturing
-              </p>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Quick Links</h3>
-              <ul className="space-y-1 text-xs">
-                <li>
-                  <a 
-                    href="https://www.steeldynamics.com" 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="hover:text-[#2d4660] transition-colors"
-                  >
-                    Steel Dynamics Inc.
-                  </a>
-                </li>
-                <li>
-                  <a 
-                    href="https://www.newmill.com" 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="hover:text-[#2d4660] transition-colors"
-                  >
-                    New Millennium
-                  </a>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Need Help?</h3>
-              <p className="text-xs">
-                Contact your Product Owner or IT administrator for assistance with user management.
-              </p>
-            </div>
-          </div>
-          <div className="mt-6 pt-6 border-t border-gray-200 text-center text-xs text-gray-500">
-            <p>© 2025 New Millennium Building Systems, LLC. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
 
       {/* Role Assignment Modal */}
       {showRoleModal && selectedUserForRole && (
@@ -2064,7 +2136,7 @@ export default function UsersManagementScreenMultiRow() {
               {/* Header */}
               <div className="flex items-start mb-6">
                 <div className="flex-shrink-0 w-12 h-12 rounded-full bg-[#8B5A4A]/10 flex items-center justify-center">
-                  {roleModalType === 'session-admin' ? (
+                  {roleModalType === 'product-owner' ? (
                     <Shield className="h-6 w-6 text-[#576C71]" />
                   ) : (
                     <UserIcon className="h-6 w-6 text-[#8B5A4A]" />
@@ -2075,7 +2147,7 @@ export default function UsersManagementScreenMultiRow() {
                     {roleModalType === 'remove-stakeholder' ? 'Remove Role' : 'Add Role'}
                   </h2>
                   <p className="text-sm text-gray-600">
-                    {roleModalType === 'remove-stakeholder' ? 'Remove' : 'Add'} {selectedUserForRole.name} ({selectedUserForRole.email}) {roleModalType === 'remove-stakeholder' ? 'from' : 'to'} sessions
+                    {roleModalType === 'remove-stakeholder' ? 'Remove' : 'Add'} {formatUserName(selectedUserForRole.name)} ({selectedUserForRole.email}) {roleModalType === 'remove-stakeholder' ? 'from' : 'to'} sessions
                   </p>
                 </div>
                 <button
@@ -2143,7 +2215,7 @@ export default function UsersManagementScreenMultiRow() {
                     )}
 
                     {/* Product Owner Role */}
-                    {selectedUserForRole.roles.sessionAdminCount > 0 && (
+                    {selectedUserForRole.roles.productOwnerCount > 0 && (
                       <div className="border-t border-gray-200 pt-4">
                         <div className="flex items-start gap-3">
                           <div 
@@ -2447,7 +2519,7 @@ export default function UsersManagementScreenMultiRow() {
                 )}
 
                 {/* Role Selection for Add operations */}
-                {(roleModalType === 'session-admin' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && (
+                {(roleModalType === 'product-owner' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && (
                   <div className="space-y-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Select Role to Add <span className="text-red-500">*</span>
@@ -2815,7 +2887,7 @@ export default function UsersManagementScreenMultiRow() {
                   disabled={
                     (selectedRoleToRemove !== 'system-admin' && selectedRoleToAdd !== 'system-admin' && !roleModalProductId) || 
                     (roleModalType === 'remove-stakeholder' && !selectedRoleToRemove) ||
-                    ((roleModalType === 'session-admin' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && !selectedRoleToAdd)
+                    ((roleModalType === 'product-owner' || roleModalType === 'stakeholder' || roleModalType === 'system-admin') && !selectedRoleToAdd)
                   }
                   className={`px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     roleModalType === 'remove-stakeholder' 
@@ -3441,6 +3513,25 @@ export default function UsersManagementScreenMultiRow() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Footer with role toggle - only render once */}
+      {!loading && !error && (
+        <Footer
+          key="users-page-footer"
+          currentRole={viewMode === 'system-admin' ? 'system-admin' : 'product-owner'}
+          onSelectSystemAdmin={isSystemAdmin ? () => {
+            setViewMode('system-admin');
+            sessionStorage.setItem('usersViewMode', 'system-admin');
+          } : undefined}
+          onSelectProductOwner={(isSystemAdmin || isProductOwner) ? () => {
+            setViewMode('product-owner');
+            sessionStorage.setItem('usersViewMode', 'product-owner');
+          } : undefined}
+          showRoleToggle={isSystemAdmin || isProductOwner}
+          isSessionAdmin={isProductOwner && !isSystemAdmin}
+          helpText="Contact your Product Owner or IT administrator for assistance with user management."
+        />
       )}
     </div>
   );
